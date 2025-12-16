@@ -3,6 +3,7 @@ The Referee - Citation Analysis API
 
 A robust API for discovering editions and extracting citations from academic papers.
 """
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,12 @@ from .schemas import (
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
 settings = get_settings()
@@ -194,7 +201,9 @@ async def discover_editions(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """Discover all editions of a paper"""
+    """Discover all editions of a paper using LLM-driven search"""
+    from .services.paper_resolution import PaperResolutionService
+
     result = await db.execute(select(Paper).where(Paper.id == request.paper_id))
     paper = result.scalar_one_or_none()
     if not paper:
@@ -208,20 +217,40 @@ async def discover_editions(
     )
     db.add(job)
     await db.flush()
+    await db.refresh(job)
 
-    # TODO: Queue background task
-    # background_tasks.add_task(discover_editions_task, paper.id, request.language_strategy, request.custom_languages)
+    # Run discovery synchronously for now (can be moved to background task later)
+    service = PaperResolutionService(db)
 
-    # For now, return placeholder
-    return EditionDiscoveryResponse(
-        paper_id=paper.id,
-        total_found=0,
-        high_confidence=0,
-        uncertain=0,
-        rejected=0,
-        editions=[],
-        queries_used=[],
-    )
+    try:
+        discovery_result = await service.discover_editions(
+            paper_id=paper.id,
+            job_id=job.id,
+            language_strategy=request.language_strategy,
+            custom_languages=request.custom_languages,
+        )
+
+        # Get stored editions
+        editions_result = await db.execute(
+            select(Edition).where(Edition.paper_id == request.paper_id).order_by(Edition.citation_count.desc())
+        )
+        editions = editions_result.scalars().all()
+
+        await db.commit()
+
+        return EditionDiscoveryResponse(
+            paper_id=paper.id,
+            total_found=discovery_result.get("editions_found", 0),
+            high_confidence=discovery_result.get("high_confidence", 0),
+            uncertain=discovery_result.get("uncertain", 0),
+            rejected=discovery_result.get("rejected", 0),
+            editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
+            queries_used=discovery_result.get("summary", {}).get("queriesGenerated", []),
+        )
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Edition discovery failed: {str(e)}")
 
 
 @app.get("/api/papers/{paper_id}/editions", response_model=List[EditionResponse])
@@ -441,14 +470,81 @@ async def get_available_languages():
 @app.post("/api/languages/recommend", response_model=LanguageRecommendationResponse)
 async def recommend_languages(request: LanguageRecommendationRequest):
     """Get LLM recommendation for languages to search"""
-    # TODO: Implement with Anthropic API
-    # For now, return default recommendation
+    from .services.edition_discovery import EditionDiscoveryService
+
+    result = await EditionDiscoveryService.recommend_languages({
+        "title": request.title,
+        "author": request.author,
+        "year": request.year,
+    })
+
     return LanguageRecommendationResponse(
-        recommended=["english", "german", "french", "spanish", "russian", "chinese"],
-        reasoning="Default recommendation for classic academic work",
-        author_language="english",
-        primary_markets=["english", "german"],
+        recommended=result.get("recommended", ["english", "german", "french", "spanish"]),
+        reasoning=result.get("reasoning", "Default recommendation"),
+        author_language=result.get("authorLanguage"),
+        primary_markets=result.get("primaryMarkets", ["english"]),
     )
+
+
+# ============== Paper Resolution Endpoints ==============
+
+@app.post("/api/papers/{paper_id}/resolve")
+async def resolve_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Manually trigger paper resolution against Google Scholar"""
+    from .services.paper_resolution import PaperResolutionService
+
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if paper.status == "resolved":
+        return {
+            "success": True,
+            "message": "Paper already resolved",
+            "paper_id": paper_id,
+            "scholar_id": paper.scholar_id,
+            "citation_count": paper.citation_count,
+        }
+
+    # Create resolution job
+    job = Job(
+        paper_id=paper.id,
+        job_type="resolve",
+        status="pending",
+    )
+    db.add(job)
+    await db.flush()
+    await db.refresh(job)
+
+    service = PaperResolutionService(db)
+
+    try:
+        resolution_result = await service.resolve_paper(paper_id=paper.id, job_id=job.id)
+        await db.commit()
+        return resolution_result
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Resolution failed: {str(e)}")
+
+
+@app.post("/api/jobs/process")
+async def process_pending_jobs_endpoint(
+    max_jobs: int = 5,
+    db: AsyncSession = Depends(get_db)
+):
+    """Manually trigger processing of pending jobs"""
+    from .services.paper_resolution import process_pending_jobs
+
+    try:
+        result = await process_pending_jobs(db, max_jobs=max_jobs)
+        await db.commit()
+        return result
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Job processing failed: {str(e)}")
 
 
 # ============== Stats Endpoint ==============

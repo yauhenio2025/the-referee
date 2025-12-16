@@ -91,6 +91,10 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}`, { method: 'DELETE' });
   }
 
+  async resolvePaper(paperId) {
+    return this.request(`/api/papers/${paperId}/resolve`, { method: 'POST' });
+  }
+
   // Editions
   async discoverEditions(paperId, options = {}) {
     return this.request('/api/editions/discover', {
