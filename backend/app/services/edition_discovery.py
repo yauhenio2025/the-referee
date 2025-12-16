@@ -178,9 +178,11 @@ class EditionDiscoveryService:
                         None
                     )
                     if existing_idx is None:
-                        all_results.append({**p, "foundBy": [query_text]})
+                        # Tag with the language of the query that found it
+                        all_results.append({**p, "foundBy": [query_text], "queryLanguage": query_lang})
                     else:
                         all_results[existing_idx]["foundBy"].append(query_text)
+                        # Keep first language found (more specific query usually runs first)
 
             except Exception as e:
                 logger.error(f"  ERROR: {e}")
@@ -409,25 +411,35 @@ ONLY return the JSON object, no other text."""
             json_match = re.search(r"\{[\s\S]*\}", text)
             if json_match:
                 evaluation = json.loads(json_match.group())
-                languages = evaluation.get("languages", {})
+                llm_languages = evaluation.get("languages", {})
+
+                def get_language(idx: int) -> str:
+                    """Get language: prefer queryLanguage (100% accurate), fallback to LLM detection"""
+                    result = results[idx]
+                    # queryLanguage is set from the search query language - most accurate
+                    query_lang = result.get("queryLanguage", "").capitalize()
+                    if query_lang:
+                        return query_lang
+                    # Fallback to LLM detection
+                    return llm_languages.get(str(idx), "Unknown")
 
                 # Map high confidence editions
                 high_confidence = [
-                    {**results[idx], "editionIndex": idx, "confidence": "high", "autoSelected": True, "language": languages.get(str(idx), "Unknown")}
+                    {**results[idx], "editionIndex": idx, "confidence": "high", "autoSelected": True, "language": get_language(idx)}
                     for idx in evaluation.get("highConfidence", [])
                     if idx < len(results)
                 ]
 
                 # Map uncertain editions
                 uncertain = [
-                    {**results[idx], "editionIndex": idx, "confidence": "uncertain", "autoSelected": False, "language": languages.get(str(idx), "Unknown")}
+                    {**results[idx], "editionIndex": idx, "confidence": "uncertain", "autoSelected": False, "language": get_language(idx)}
                     for idx in evaluation.get("uncertain", [])
                     if idx < len(results)
                 ]
 
                 # Map rejected
                 rejected = [
-                    {**results[r["index"]], "rejectionReason": r["reason"], "editionIndex": r["index"], "language": languages.get(str(r["index"]), "Unknown")}
+                    {**results[r["index"]], "rejectionReason": r["reason"], "editionIndex": r["index"], "language": get_language(r["index"])}
                     for r in evaluation.get("rejected", [])
                     if r["index"] < len(results)
                 ]
@@ -446,10 +458,17 @@ ONLY return the JSON object, no other text."""
             logger.error(f"[LLM-Discovery] Evaluation error: {e}")
 
         # Fallback: include all results with basic language classification
+        def fallback_language(r: dict) -> str:
+            """Use queryLanguage if available, else detect from title"""
+            query_lang = r.get("queryLanguage", "").capitalize()
+            if query_lang:
+                return query_lang
+            return self._detect_language(r.get("title", ""))
+
         return {
-            "genuineEditions": [{**r, "editionIndex": i, "confidence": "uncertain", "autoSelected": False, "language": self._detect_language(r.get("title", ""))} for i, r in enumerate(results)],
+            "genuineEditions": [{**r, "editionIndex": i, "confidence": "uncertain", "autoSelected": False, "language": fallback_language(r)} for i, r in enumerate(results)],
             "highConfidence": [],
-            "uncertain": [{**r, "editionIndex": i, "confidence": "uncertain", "autoSelected": False, "language": self._detect_language(r.get("title", ""))} for i, r in enumerate(results)],
+            "uncertain": [{**r, "editionIndex": i, "confidence": "uncertain", "autoSelected": False, "language": fallback_language(r)} for i, r in enumerate(results)],
             "rejected": [],
             "reasoning": "Fallback: included all results due to evaluation error",
         }

@@ -247,15 +247,23 @@ class PaperResolutionService:
 
             # Store discovered editions in database
             editions_stored = 0
+            editions_updated = 0
             for edition_data in result.get("genuineEditions", []):
                 # Check if edition already exists
-                existing = await self.db.execute(
+                existing_result = await self.db.execute(
                     select(Edition).where(
                         Edition.paper_id == paper_id,
                         Edition.scholar_id == edition_data.get("scholarId")
                     )
                 )
-                if existing.scalar_one_or_none():
+                existing_edition = existing_result.scalar_one_or_none()
+
+                if existing_edition:
+                    # Update language if it was Unknown or missing
+                    new_language = edition_data.get("language")
+                    if new_language and new_language != "Unknown" and existing_edition.language in (None, "", "Unknown", "English"):
+                        existing_edition.language = new_language
+                        editions_updated += 1
                     continue
 
                 edition = Edition(
@@ -285,16 +293,17 @@ class PaperResolutionService:
                     job_id,
                     status="completed",
                     progress=1.0,
-                    message=f"Found {editions_stored} editions"
+                    message=f"Found {editions_stored} new, updated {editions_updated} editions"
                 )
 
-            logger.info(f"[EDITION DISCOVERY] ✓ Complete: {editions_stored} editions stored")
+            logger.info(f"[EDITION DISCOVERY] ✓ Complete: {editions_stored} new editions stored, {editions_updated} editions updated")
 
             return {
                 "success": True,
                 "paper_id": paper_id,
                 "editions_found": len(result.get("genuineEditions", [])),
                 "editions_stored": editions_stored,
+                "editions_updated": editions_updated,
                 "high_confidence": len(result.get("highConfidence", [])),
                 "uncertain": len(result.get("uncertain", [])),
                 "rejected": len(result.get("rejected", [])),
