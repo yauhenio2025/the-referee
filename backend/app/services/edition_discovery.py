@@ -197,6 +197,16 @@ class EditionDiscoveryService:
 
         logger.info(f"[LLM-Discovery] Total unique results: {len(all_results)}")
 
+        # Sort by citation count (highest first) so best editions get evaluated regardless of query order
+        all_results.sort(key=lambda r: r.get("citationCount", 0), reverse=True)
+
+        # Log language distribution before evaluation
+        lang_counts = {}
+        for r in all_results:
+            lang = r.get("queryLanguage", "unknown")
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+        logger.info(f"[LLM-Discovery] Language distribution: {lang_counts}")
+
         # Step 3: Evaluate results using LLM
         if progress_callback:
             await progress_callback({
@@ -347,10 +357,11 @@ ONLY return the JSON array, no other text."""
         title = target_paper.get("title", "")
         author = target_paper.get("author") or target_paper.get("authors", "")
 
-        # Format results for the LLM
+        # Format results for the LLM - include queryLanguage hint
+        # Limit to 150 results (sorted by citation count, so best editions first)
         results_text = "\n\n".join([
-            f"[{i}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations\n      {r.get('abstract', 'No abstract')[:200]}"
-            for i, r in enumerate(results[:80])  # Limit to 80 to avoid token limits
+            f"[{i}] [{r.get('queryLanguage', '?').upper()[:3]}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations"
+            for i, r in enumerate(results[:150])
         ])
 
         prompt = f"""You are evaluating Google Scholar search results to identify genuine editions of a specific work.
