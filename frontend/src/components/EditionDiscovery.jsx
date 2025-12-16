@@ -56,6 +56,9 @@ export default function EditionDiscovery({ paper, onBack }) {
         langsToUse = recommendations.recommended
       }
 
+      // Close modal immediately
+      setShowLanguageModal(false)
+
       // Show progress indicator
       setDiscoveryProgress({
         stage: 'searching',
@@ -106,7 +109,6 @@ export default function EditionDiscovery({ paper, onBack }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['editions', paper.id])
-      setShowLanguageModal(false)
     },
   })
 
