@@ -46,6 +46,39 @@ AVAILABLE_LANGUAGES = [
     {"code": "greek", "name": "Greek", "icon": "🇬🇷"},
 ]
 
+# Map language names to Google Scholar hl parameter codes
+LANGUAGE_TO_HL_CODE = {
+    "english": "en",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "portuguese": "pt",
+    "italian": "it",
+    "russian": "ru",
+    "chinese": "zh-CN",
+    "japanese": "ja",
+    "korean": "ko",
+    "arabic": "ar",
+    "dutch": "nl",
+    "polish": "pl",
+    "turkish": "tr",
+    "persian": "fa",
+    "hindi": "hi",
+    "hebrew": "iw",  # Google uses iw for Hebrew
+    "greek": "el",
+    "swedish": "sv",
+    "danish": "da",
+    "norwegian": "no",
+    "finnish": "fi",
+    "czech": "cs",
+    "hungarian": "hu",
+    "romanian": "ro",
+    "ukrainian": "uk",
+    "vietnamese": "vi",
+    "thai": "th",
+    "indonesian": "id",
+}
+
 
 class EditionDiscoveryService:
     """LLM-driven edition discovery service"""
@@ -97,6 +130,9 @@ class EditionDiscoveryService:
         for i, q in enumerate(queries):
             query_text = q.get("query", "")
             rationale = q.get("rationale", "")
+            query_lang = q.get("lang", "english").lower()
+            # Convert language name to Google Scholar hl code
+            hl_code = LANGUAGE_TO_HL_CODE.get(query_lang, "en")
 
             if progress_callback:
                 await progress_callback({
@@ -106,20 +142,20 @@ class EditionDiscoveryService:
                     "current_query": query_text[:60],
                 })
 
-            logger.info(f"[LLM-Discovery] Executing query {i+1}/{len(queries)}: {query_text[:60]}...")
+            logger.info(f"[LLM-Discovery] Executing query {i+1}/{len(queries)} [{query_lang}]: {query_text[:60]}...")
 
             try:
-                results = await self.scholar.search(query_text, max_results=30)
+                results = await self.scholar.search(query_text, language=hl_code, max_results=30)
                 papers = results.get("papers", [])
 
                 logger.info(f"  Found: {len(papers)} results")
 
                 # Retry with reformulated query if low results
                 if len(papers) < 5:
-                    reformulated = await self._reformulate_query(paper, query_text, rationale, len(papers))
+                    reformulated = await self._reformulate_query(paper, query_text, rationale, len(papers), query_lang)
                     if reformulated and reformulated.get("query") != query_text:
-                        logger.info(f"  [RETRY] New query: {reformulated['query'][:60]}...")
-                        retry_results = await self.scholar.search(reformulated["query"], max_results=30)
+                        logger.info(f"  [RETRY] New query [{query_lang}]: {reformulated['query'][:60]}...")
+                        retry_results = await self.scholar.search(reformulated["query"], language=hl_code, max_results=30)
                         retry_papers = retry_results.get("papers", [])
                         if len(retry_papers) > len(papers):
                             papers = retry_papers
@@ -261,13 +297,18 @@ QUERY STRATEGIES TO MIX:
 
 Generate 15-25 queries total, mixing strict and loose for each language!
 
-Return a JSON array of queries:
+Return a JSON array of queries with LANGUAGE CODE for each:
 [
-  {{ "query": "allintitle:\\"eighteenth brumaire\\" author:\\"*marx*\\"", "rationale": "English STRICT" }},
-  {{ "query": "\\"eighteenth brumaire\\" marx", "rationale": "English MEDIUM" }},
-  {{ "query": "雾月十八日 马克思", "rationale": "Chinese LOOSE - keywords" }},
+  {{ "query": "allintitle:\\"eighteenth brumaire\\" author:\\"*marx*\\"", "rationale": "English STRICT", "lang": "english" }},
+  {{ "query": "\\"eighteenth brumaire\\" marx", "rationale": "English MEDIUM", "lang": "english" }},
+  {{ "query": "Der achtzehnte Brumaire marx", "rationale": "German MEDIUM", "lang": "german" }},
+  {{ "query": "Le dix-huit brumaire marx", "rationale": "French MEDIUM", "lang": "french" }},
+  {{ "query": "雾月十八日 马克思", "rationale": "Chinese LOOSE - keywords", "lang": "chinese" }},
+  {{ "query": "восемнадцатое брюмера маркс", "rationale": "Russian LOOSE", "lang": "russian" }},
   ...
 ]
+
+IMPORTANT: Include "lang" field with lowercase language name (english, german, french, spanish, portuguese, italian, russian, chinese, japanese, korean, arabic, dutch, polish, turkish, etc.)
 
 ONLY return the JSON array, no other text."""
 
@@ -419,6 +460,7 @@ ONLY return the JSON object, no other text."""
         failed_query: str,
         original_rationale: str,
         result_count: int,
+        target_language: str = "english",
     ) -> Optional[Dict[str, str]]:
         """Ask LLM to reformulate a query that returned few results"""
         title = paper.get("title", "")
@@ -429,20 +471,22 @@ ONLY return the JSON object, no other text."""
 TARGET WORK:
 - Title: "{title}"
 - Author: "{author or 'Unknown'}"
+- TARGET LANGUAGE: {target_language.upper()}
 
 UNDERPERFORMING QUERY: {failed_query}
 ORIGINAL INTENT: {original_rationale}
 RESULTS FOUND: {result_count}
 
 Likely causes:
-1. Title translated differently than expected
+1. Title translated differently than expected in {target_language}
 2. Author name format different in that language
 3. Search terms too restrictive (allintitle: is very strict!)
 
 REFORMULATION STRATEGIES:
 - REMOVE allintitle: operator - use regular search instead
 - REMOVE author: restriction - editions often have editors/translators listed
-- Keep the query IN THE TARGET LANGUAGE, just simpler
+- KEEP the query IN {target_language.upper()} - do NOT switch to English!
+- Try alternate {target_language} translations of the title
 
 Return a JSON object with ONE reformulated query:
 {{
