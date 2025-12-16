@@ -118,6 +118,12 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}/editions`);
   }
 
+  async clearPaperEditions(paperId) {
+    return this.request(`/api/papers/${paperId}/editions`, {
+      method: 'DELETE',
+    });
+  }
+
   async selectEditions(editionIds, selected = true) {
     return this.request('/api/editions/select', {
       method: 'POST',

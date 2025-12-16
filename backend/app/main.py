@@ -263,6 +263,21 @@ async def get_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
+@app.delete("/api/papers/{paper_id}/editions")
+async def clear_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Clear all editions of a paper to allow fresh discovery"""
+    result = await db.execute(
+        select(Edition).where(Edition.paper_id == paper_id)
+    )
+    editions = result.scalars().all()
+    count = len(editions)
+
+    for edition in editions:
+        await db.delete(edition)
+
+    return {"deleted": count, "paper_id": paper_id}
+
+
 @app.post("/api/editions/select")
 async def select_editions(request: EditionSelectRequest, db: AsyncSession = Depends(get_db)):
     """Select/deselect editions for citation extraction"""

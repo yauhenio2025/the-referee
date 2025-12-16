@@ -101,6 +101,16 @@ export default function EditionDiscovery({ paper, onBack }) {
     onSuccess: () => queryClient.invalidateQueries(['jobs']),
   })
 
+  const clearAndRediscover = useMutation({
+    mutationFn: async () => {
+      // Clear existing editions first
+      await api.clearPaperEditions(paper.id)
+      // Then trigger a new discovery via the modal
+      setShowLanguageModal(true)
+    },
+    onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
+  })
+
   // Computed data
   const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
     if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
@@ -175,6 +185,16 @@ export default function EditionDiscovery({ paper, onBack }) {
         <button onClick={() => setShowLanguageModal(true)} disabled={discoverEditions.isPending} className="btn-primary">
           Discover Editions
         </button>
+        {editions?.length > 0 && (
+          <button
+            onClick={() => clearAndRediscover.mutate()}
+            disabled={clearAndRediscover.isPending || discoverEditions.isPending}
+            className="btn-warning"
+            title="Clear all editions and run fresh discovery"
+          >
+            🔄 Clear & Rediscover
+          </button>
+        )}
         <button
           onClick={() => extractCitations.mutate()}
           disabled={selectedCount === 0 || extractCitations.isPending}
