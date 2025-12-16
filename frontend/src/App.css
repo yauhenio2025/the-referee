@@ -1548,3 +1548,482 @@ button:disabled {
   font-size: 0.85rem;
   border-top: 1px solid var(--border);
 }
+
+/* =====================================================
+   TUFTE-INSPIRED EDITION DISCOVERY
+   - High data-ink ratio
+   - Compact table view
+   - Quick batch actions
+   ===================================================== */
+
+.edition-discovery.tufte {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid var(--border);
+}
+
+.edition-discovery.tufte .ed-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.edition-discovery.tufte .btn-text {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .btn-text:hover {
+  color: var(--accent);
+}
+
+.edition-discovery.tufte .ed-title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.edition-discovery.tufte .ed-title .meta {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .ed-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.edition-discovery.tufte .ed-progress {
+  position: relative;
+  height: 24px;
+  background: var(--bg-dark);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.edition-discovery.tufte .ed-progress .progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  transition: width 0.3s;
+}
+
+.edition-discovery.tufte .ed-progress span {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 0.75rem;
+  font-size: 0.8rem;
+  color: white;
+}
+
+/* Toolbar */
+.edition-discovery.tufte .ed-toolbar {
+  background: var(--bg-dark);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.edition-discovery.tufte .stats-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.edition-discovery.tufte .stats-row .stat {
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.edition-discovery.tufte .stats-row .stat:hover {
+  background: var(--bg-hover);
+}
+
+.edition-discovery.tufte .stats-row .stat strong {
+  color: var(--success);
+}
+
+.edition-discovery.tufte .stats-row .stat.uncertain strong {
+  color: var(--warning);
+}
+
+.edition-discovery.tufte .stats-row .stat.rejected strong {
+  color: var(--danger);
+}
+
+.edition-discovery.tufte .stats-row .stat.selected strong {
+  color: var(--accent);
+}
+
+.edition-discovery.tufte .stat-sep {
+  color: var(--border);
+}
+
+/* Batch Actions */
+.edition-discovery.tufte .batch-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.edition-discovery.tufte .btn-sm {
+  padding: 0.25rem 0.6rem;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.edition-discovery.tufte .btn-sm:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.edition-discovery.tufte .btn-sm.btn-high {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.edition-discovery.tufte .btn-sm.btn-high:hover {
+  background: var(--success);
+  color: white;
+}
+
+/* Language Chips */
+.edition-discovery.tufte .lang-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.edition-discovery.tufte .chip-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-right: 0.25rem;
+}
+
+.edition-discovery.tufte .lang-chip {
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-hover);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.edition-discovery.tufte .lang-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.edition-discovery.tufte .lang-chip.active {
+  background: var(--accent);
+  color: white;
+}
+
+.edition-discovery.tufte .lang-chip .count {
+  opacity: 0.7;
+}
+
+.edition-discovery.tufte .lang-chip.clear {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Edition Groups */
+.edition-discovery.tufte .ed-group {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.edition-discovery.tufte .ed-group .group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-dark);
+  cursor: pointer;
+  user-select: none;
+}
+
+.edition-discovery.tufte .ed-group .group-header:hover {
+  background: var(--bg-hover);
+}
+
+.edition-discovery.tufte .ed-group .toggle {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  width: 1rem;
+}
+
+.edition-discovery.tufte .ed-group .group-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .ed-group .group-stats {
+  flex: 1;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .ed-group .btn-xs {
+  padding: 0.15rem 0.4rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.edition-discovery.tufte .ed-group .btn-xs:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.edition-discovery.tufte .group-high .group-title {
+  color: var(--success);
+}
+
+.edition-discovery.tufte .group-uncertain .group-title {
+  color: var(--warning);
+}
+
+.edition-discovery.tufte .group-rejected .group-title {
+  color: var(--danger);
+}
+
+/* Edition Table */
+.edition-discovery.tufte .edition-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .edition-table th {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.edition-discovery.tufte .edition-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.edition-discovery.tufte .edition-table tr:hover {
+  background: var(--bg-hover);
+}
+
+.edition-discovery.tufte .edition-table tr.selected {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.edition-discovery.tufte .edition-table tr.selected td {
+  border-bottom-color: rgba(99, 102, 241, 0.3);
+}
+
+.edition-discovery.tufte .col-check {
+  width: 30px;
+  text-align: center;
+}
+
+.edition-discovery.tufte .col-title {
+  min-width: 200px;
+}
+
+.edition-discovery.tufte .col-year {
+  width: 50px;
+  text-align: center;
+}
+
+.edition-discovery.tufte .col-lang {
+  width: 50px;
+  text-align: center;
+}
+
+.edition-discovery.tufte .col-cites {
+  width: 100px;
+}
+
+.edition-discovery.tufte .title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.edition-discovery.tufte .title-cell a,
+.edition-discovery.tufte .title-cell span {
+  color: var(--text-primary);
+  text-decoration: none;
+  line-height: 1.3;
+}
+
+.edition-discovery.tufte .title-cell a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.edition-discovery.tufte .authors-line {
+  font-size: 0.75rem;
+  color: #006621;
+  line-height: 1.2;
+}
+
+.edition-discovery.tufte .lang-tag {
+  display: inline-block;
+  padding: 0.1rem 0.3rem;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+/* Citation sparkline bar */
+.edition-discovery.tufte .cite-cell {
+  position: relative;
+}
+
+.edition-discovery.tufte .cite-num {
+  position: relative;
+  z-index: 1;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .cite-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent);
+  opacity: 0.5;
+  border-radius: 1px;
+}
+
+/* Compact Modal */
+.edition-discovery.tufte .modal.compact {
+  max-width: 500px;
+  padding: 1.25rem;
+}
+
+.edition-discovery.tufte .modal.compact h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+}
+
+.edition-discovery.tufte .loading-rec {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .ai-rec {
+  background: var(--bg-dark);
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .ai-rec .rec-reason {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .strategy-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  margin-bottom: 0.25rem;
+  background: var(--bg-dark);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.edition-discovery.tufte .strategy-options label.selected {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid var(--accent);
+}
+
+.edition-discovery.tufte .strategy-options .opt-label {
+  font-weight: 500;
+}
+
+.edition-discovery.tufte .strategy-options .opt-desc {
+  flex: 1;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .custom-langs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.edition-discovery.tufte .custom-langs label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-dark);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.edition-discovery.tufte .custom-langs label.selected {
+  background: var(--accent);
+  color: white;
+}
+
+.edition-discovery.tufte .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}

@@ -1,13 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
+/**
+ * Edition Discovery - Tufte-inspired compact data view
+ *
+ * Design principles:
+ * - High data-ink ratio: maximize information per pixel
+ * - Small multiples: compact table rows, not cards
+ * - Quick batch actions: one-click select by confidence/language
+ * - Minimal chrome: no decorative elements
+ */
 export default function EditionDiscovery({ paper, onBack }) {
   const [languageStrategy, setLanguageStrategy] = useState('recommended')
   const [customLanguages, setCustomLanguages] = useState([])
   const [showLanguageModal, setShowLanguageModal] = useState(false)
   const [isLoadingRecs, setIsLoadingRecs] = useState(false)
   const [recommendations, setRecommendations] = useState(null)
+  const [discoveryProgress, setDiscoveryProgress] = useState(null)
+  const [expandedGroups, setExpandedGroups] = useState({ high: true, uncertain: true, rejected: false })
+  const [languageFilter, setLanguageFilter] = useState(null)
   const queryClient = useQueryClient()
 
   const { data: editions, isLoading } = useQuery({
@@ -30,7 +42,6 @@ export default function EditionDiscovery({ paper, onBack }) {
         year: paper.year,
       }).then(recs => {
         setRecommendations(recs)
-        // Pre-select recommended languages
         if (recs?.recommended) {
           setCustomLanguages(recs.recommended)
         }
@@ -42,11 +53,8 @@ export default function EditionDiscovery({ paper, onBack }) {
     }
   }, [showLanguageModal, recommendations, isLoadingRecs, paper])
 
-  const [discoveryProgress, setDiscoveryProgress] = useState(null)
-
   const discoverEditions = useMutation({
     mutationFn: async () => {
-      // Build language list based on strategy
       let langsToUse = customLanguages
       if (languageStrategy === 'english_only') {
         langsToUse = ['english']
@@ -56,49 +64,22 @@ export default function EditionDiscovery({ paper, onBack }) {
         langsToUse = recommendations.recommended
       }
 
-      // Close modal immediately
       setShowLanguageModal(false)
+      setDiscoveryProgress({ stage: 'searching', message: 'Generating queries...', progress: 10 })
 
-      // Show progress indicator
-      setDiscoveryProgress({
-        stage: 'searching',
-        message: 'Generating search queries...',
-        progress: 10,
-      })
-
-      // Simulate progress updates (since backend doesn't support streaming yet)
       const progressInterval = setInterval(() => {
         setDiscoveryProgress(prev => {
           if (!prev || prev.progress >= 90) return prev
           const newProgress = Math.min(prev.progress + Math.random() * 15, 90)
-          const messages = [
-            'Searching Google Scholar...',
-            'Analyzing search results...',
-            'Identifying editions...',
-            'Evaluating matches...',
-            'Classifying confidence...',
-          ]
-          const msgIndex = Math.floor(newProgress / 20)
-          return {
-            ...prev,
-            progress: newProgress,
-            message: messages[Math.min(msgIndex, messages.length - 1)],
-          }
+          const messages = ['Searching Scholar...', 'Analyzing results...', 'Identifying editions...', 'Classifying...']
+          return { ...prev, progress: newProgress, message: messages[Math.floor(newProgress / 25)] }
         })
       }, 1500)
 
       try {
-        const result = await api.discoverEditions(paper.id, {
-          languageStrategy,
-          customLanguages: langsToUse
-        })
+        const result = await api.discoverEditions(paper.id, { languageStrategy, customLanguages: langsToUse })
         clearInterval(progressInterval)
-        setDiscoveryProgress({
-          stage: 'complete',
-          message: `Found ${result.total_found} editions`,
-          progress: 100,
-        })
-        // Clear after a moment
+        setDiscoveryProgress({ stage: 'complete', message: `Found ${result.total_found} editions`, progress: 100 })
         setTimeout(() => setDiscoveryProgress(null), 2000)
         return result
       } catch (error) {
@@ -107,36 +88,68 @@ export default function EditionDiscovery({ paper, onBack }) {
         throw error
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['editions', paper.id])
-    },
+    onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
   })
 
   const selectEditions = useMutation({
     mutationFn: ({ ids, selected }) => api.selectEditions(ids, selected),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['editions', paper.id])
-    },
+    onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
   })
 
   const extractCitations = useMutation({
     mutationFn: () => api.extractCitations(paper.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['jobs'])
-    },
+    onSuccess: () => queryClient.invalidateQueries(['jobs']),
   })
 
-  const selectedCount = editions?.filter(e => e.selected).length || 0
-  const languageGroups = editions?.reduce((acc, e) => {
-    const lang = e.language || 'Unknown'
-    acc[lang] = (acc[lang] || 0) + 1
-    return acc
-  }, {}) || {}
+  // Computed data
+  const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
+    if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
 
-  // Group editions by confidence
-  const highConfidence = editions?.filter(e => e.confidence === 'high') || []
-  const uncertain = editions?.filter(e => e.confidence === 'uncertain') || []
-  const rejected = editions?.filter(e => e.confidence === 'rejected') || []
+    const filtered = languageFilter ? editions.filter(e => e.language === languageFilter) : editions
+
+    return {
+      highConfidence: filtered.filter(e => e.confidence === 'high'),
+      uncertain: filtered.filter(e => e.confidence === 'uncertain'),
+      rejected: filtered.filter(e => e.confidence === 'rejected'),
+      languageGroups: editions.reduce((acc, e) => {
+        const lang = e.language || 'Unknown'
+        acc[lang] = (acc[lang] || 0) + 1
+        return acc
+      }, {}),
+      selectedCount: editions.filter(e => e.selected).length,
+      totalCitations: editions.filter(e => e.selected).reduce((sum, e) => sum + (e.citation_count || 0), 0),
+    }
+  }, [editions, languageFilter])
+
+  // Batch actions
+  const selectByConfidence = (confidence) => {
+    const ids = editions.filter(e => e.confidence === confidence).map(e => e.id)
+    if (ids.length) selectEditions.mutate({ ids, selected: true })
+  }
+
+  const deselectByConfidence = (confidence) => {
+    const ids = editions.filter(e => e.confidence === confidence).map(e => e.id)
+    if (ids.length) selectEditions.mutate({ ids, selected: false })
+  }
+
+  const selectByLanguage = (lang) => {
+    const ids = editions.filter(e => e.language === lang).map(e => e.id)
+    if (ids.length) selectEditions.mutate({ ids, selected: true })
+  }
+
+  const selectAll = () => {
+    const ids = editions.map(e => e.id)
+    selectEditions.mutate({ ids, selected: true })
+  }
+
+  const deselectAll = () => {
+    const ids = editions.map(e => e.id)
+    selectEditions.mutate({ ids, selected: false })
+  }
+
+  const toggleGroup = (group) => {
+    setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }))
+  }
 
   const toggleLanguage = (code) => {
     if (customLanguages.includes(code)) {
@@ -147,342 +160,284 @@ export default function EditionDiscovery({ paper, onBack }) {
   }
 
   return (
-    <div className="edition-discovery">
-      <div className="edition-header">
-        <button onClick={onBack} className="btn-back">← Back to Papers</button>
-        <h2>Editions of: {paper.title}</h2>
-        {paper.authors && <p className="paper-meta">{paper.authors} {paper.year && `(${paper.year})`}</p>}
-      </div>
+    <div className="edition-discovery tufte">
+      {/* Compact Header */}
+      <header className="ed-header">
+        <button onClick={onBack} className="btn-text">← Papers</button>
+        <div className="ed-title">
+          <h2>{paper.title}</h2>
+          <span className="meta">{paper.authors} {paper.year && `(${paper.year})`}</span>
+        </div>
+      </header>
 
-      <div className="edition-actions">
-        <button
-          onClick={() => setShowLanguageModal(true)}
-          className="btn-primary"
-          disabled={discoverEditions.isPending}
-        >
-          🔍 Discover Editions
+      {/* Action Bar */}
+      <div className="ed-actions">
+        <button onClick={() => setShowLanguageModal(true)} disabled={discoverEditions.isPending} className="btn-primary">
+          Discover Editions
         </button>
         <button
           onClick={() => extractCitations.mutate()}
           disabled={selectedCount === 0 || extractCitations.isPending}
           className="btn-success"
         >
-          📊 Extract Citations ({selectedCount} selected)
+          Extract Citations ({selectedCount} selected, ~{totalCitations.toLocaleString()} citing papers)
         </button>
       </div>
 
-      {/* Discovery Progress Indicator */}
+      {/* Progress */}
       {discoveryProgress && (
-        <div className="discovery-progress">
-          <div className="progress-header">
-            <span className="progress-title">
-              <span className="spinner"></span>
-              {discoveryProgress.stage === 'complete' ? '✓ Discovery Complete' : 'Discovering Editions...'}
-            </span>
-            <span className="progress-percentage">{Math.round(discoveryProgress.progress)}%</span>
-          </div>
-          <div className="progress-bar-container">
-            <div
-              className="progress-bar-fill"
-              style={{ width: `${discoveryProgress.progress}%` }}
-            />
-          </div>
-          <p className="progress-message">{discoveryProgress.message}</p>
-          <div className="progress-stage">
-            <span className={`stage-badge ${discoveryProgress.progress >= 10 ? 'complete' : ''}`}>
-              Query Generation
-            </span>
-            <span className={`stage-badge ${discoveryProgress.progress >= 30 ? 'complete' : discoveryProgress.progress >= 10 ? 'active' : ''}`}>
-              Search
-            </span>
-            <span className={`stage-badge ${discoveryProgress.progress >= 60 ? 'complete' : discoveryProgress.progress >= 30 ? 'active' : ''}`}>
-              Analysis
-            </span>
-            <span className={`stage-badge ${discoveryProgress.progress >= 90 ? 'complete' : discoveryProgress.progress >= 60 ? 'active' : ''}`}>
-              Classification
-            </span>
-          </div>
+        <div className="ed-progress">
+          <div className="progress-bar" style={{ width: `${discoveryProgress.progress}%` }} />
+          <span>{discoveryProgress.message}</span>
         </div>
       )}
 
-      {/* Language selection modal with LLM recommendations */}
-      {showLanguageModal && (
-        <div className="modal-overlay">
-          <div className="modal language-modal">
-            <h3>🌍 Select Languages to Search</h3>
-
-            {/* LLM Recommendations Section */}
-            {isLoadingRecs ? (
-              <div className="llm-recommendations loading">
-                <div className="spinner"></div>
-                <p>🤖 Getting AI language recommendations...</p>
-              </div>
-            ) : recommendations ? (
-              <div className="llm-recommendations">
-                <div className="rec-header">
-                  <span className="rec-icon">🤖</span>
-                  <span className="rec-title">AI Recommendation</span>
-                </div>
-                <p className="rec-reasoning">{recommendations.reasoning}</p>
-                {recommendations.author_language && (
-                  <p className="rec-author-lang">
-                    <strong>Author's likely language:</strong> {recommendations.author_language}
-                  </p>
-                )}
-                {recommendations.primary_markets?.length > 0 && (
-                  <p className="rec-markets">
-                    <strong>Primary markets:</strong> {recommendations.primary_markets.join(', ')}
-                  </p>
-                )}
-                <div className="rec-languages">
-                  <strong>Recommended languages:</strong>
-                  <div className="rec-lang-chips">
-                    {recommendations.recommended?.map(lang => {
-                      const langInfo = languages?.languages?.find(l => l.code === lang)
-                      return (
-                        <span key={lang} className="rec-lang-chip">
-                          {langInfo?.icon || '🌐'} {langInfo?.name || lang}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {/* Language Strategy Selection */}
-            <div className="language-strategies">
-              <h4>Search Strategy</h4>
-              <label className={languageStrategy === 'recommended' ? 'selected' : ''}>
-                <input
-                  type="radio"
-                  value="recommended"
-                  checked={languageStrategy === 'recommended'}
-                  onChange={(e) => setLanguageStrategy(e.target.value)}
-                />
-                <span className="strategy-name">🤖 Use AI Recommendations</span>
-                <span className="strategy-desc">Search in languages recommended by AI based on author and title</span>
-              </label>
-              <label className={languageStrategy === 'major_languages' ? 'selected' : ''}>
-                <input
-                  type="radio"
-                  value="major_languages"
-                  checked={languageStrategy === 'major_languages'}
-                  onChange={(e) => setLanguageStrategy(e.target.value)}
-                />
-                <span className="strategy-name">🌍 Major Languages</span>
-                <span className="strategy-desc">EN, DE, FR, ES, PT, IT, RU, ZH, JA</span>
-              </label>
-              <label className={languageStrategy === 'english_only' ? 'selected' : ''}>
-                <input
-                  type="radio"
-                  value="english_only"
-                  checked={languageStrategy === 'english_only'}
-                  onChange={(e) => setLanguageStrategy(e.target.value)}
-                />
-                <span className="strategy-name">🇬🇧 English Only</span>
-                <span className="strategy-desc">Only search for English editions</span>
-              </label>
-              <label className={languageStrategy === 'custom' ? 'selected' : ''}>
-                <input
-                  type="radio"
-                  value="custom"
-                  checked={languageStrategy === 'custom'}
-                  onChange={(e) => setLanguageStrategy(e.target.value)}
-                />
-                <span className="strategy-name">✏️ Custom Selection</span>
-                <span className="strategy-desc">Choose languages manually below</span>
-              </label>
-            </div>
-
-            {/* Custom Language Selection */}
-            {languageStrategy === 'custom' && (
-              <div className="custom-languages">
-                <h4>Select Languages ({customLanguages.length} selected)</h4>
-                <div className="language-chips">
-                  {languages?.languages?.map(lang => (
-                    <label
-                      key={lang.code}
-                      className={`language-chip ${customLanguages.includes(lang.code) ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={customLanguages.includes(lang.code)}
-                        onChange={() => toggleLanguage(lang.code)}
-                      />
-                      {lang.icon} {lang.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Selected languages preview for recommended strategy */}
-            {languageStrategy === 'recommended' && recommendations?.recommended && (
-              <div className="selected-preview">
-                <h4>Will search in: {recommendations.recommended.length} languages</h4>
-                <div className="language-chips">
-                  {recommendations.recommended.map(lang => {
-                    const langInfo = languages?.languages?.find(l => l.code === lang)
-                    return (
-                      <span key={lang} className="language-chip selected">
-                        {langInfo?.icon || '🌐'} {langInfo?.name || lang}
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="modal-actions">
-              <button onClick={() => setShowLanguageModal(false)} className="btn-secondary">
-                Cancel
-              </button>
-              <button
-                onClick={() => discoverEditions.mutate()}
-                disabled={discoverEditions.isPending || (languageStrategy === 'custom' && customLanguages.length === 0)}
-                className="btn-primary"
-              >
-                {discoverEditions.isPending ? '🔄 Discovering...' : '🚀 Start Discovery'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edition stats summary */}
+      {/* Stats + Batch Actions */}
       {editions?.length > 0 && (
-        <div className="edition-stats">
-          <div className="stat high">
-            <span className="stat-count">{highConfidence.length}</span>
-            <span className="stat-label">High Confidence</span>
-          </div>
-          <div className="stat uncertain">
-            <span className="stat-count">{uncertain.length}</span>
-            <span className="stat-label">Uncertain</span>
-          </div>
-          <div className="stat rejected">
-            <span className="stat-count">{rejected.length}</span>
-            <span className="stat-label">Rejected</span>
-          </div>
-        </div>
-      )}
-
-      {/* Language filter */}
-      {Object.keys(languageGroups).length > 0 && (
-        <div className="language-filter">
-          <span>Filter by language: </span>
-          {Object.entries(languageGroups).map(([lang, count]) => (
-            <span key={lang} className="lang-badge">
-              {lang} ({count})
+        <div className="ed-toolbar">
+          <div className="stats-row">
+            <span className="stat" onClick={() => selectByConfidence('high')} title="Click to select all">
+              <strong>{highConfidence.length}</strong> high
             </span>
-          ))}
+            <span className="stat uncertain" onClick={() => selectByConfidence('uncertain')} title="Click to select all">
+              <strong>{uncertain.length}</strong> uncertain
+            </span>
+            <span className="stat rejected">
+              <strong>{rejected.length}</strong> rejected
+            </span>
+            <span className="stat-sep">|</span>
+            <span className="stat selected">
+              <strong>{selectedCount}</strong>/{editions.length} selected
+            </span>
+          </div>
+
+          <div className="batch-actions">
+            <button onClick={selectAll} className="btn-sm">Select All</button>
+            <button onClick={deselectAll} className="btn-sm">Clear</button>
+            <button onClick={() => selectByConfidence('high')} className="btn-sm btn-high">+ High</button>
+            <button onClick={() => deselectByConfidence('uncertain')} className="btn-sm">− Uncertain</button>
+          </div>
+
+          {/* Language chips - click to filter, double-click to select */}
+          <div className="lang-chips">
+            <span className="chip-label">Languages:</span>
+            {Object.entries(languageGroups).map(([lang, count]) => (
+              <button
+                key={lang}
+                className={`lang-chip ${languageFilter === lang ? 'active' : ''}`}
+                onClick={() => setLanguageFilter(languageFilter === lang ? null : lang)}
+                onDoubleClick={() => selectByLanguage(lang)}
+                title="Click to filter, double-click to select all"
+              >
+                {lang} <span className="count">{count}</span>
+              </button>
+            ))}
+            {languageFilter && (
+              <button className="lang-chip clear" onClick={() => setLanguageFilter(null)}>
+                × Clear filter
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Editions list */}
+      {/* Editions Table */}
       {isLoading ? (
         <div className="loading">Loading editions...</div>
       ) : editions?.length === 0 ? (
-        <div className="empty">No editions discovered yet. Click "Discover Editions" to start.</div>
+        <div className="empty">No editions yet. Click "Discover Editions" to search.</div>
       ) : (
-        <div className="editions-list">
-          <div className="editions-header">
-            <label>
-              <input
-                type="checkbox"
-                checked={selectedCount === editions?.length}
-                onChange={(e) => {
-                  const ids = editions.map(e => e.id)
-                  selectEditions.mutate({ ids, selected: e.target.checked })
-                }}
-              />
-              Select All ({editions?.length})
-            </label>
-          </div>
-
-          {/* High Confidence Editions */}
+        <div className="ed-table">
+          {/* High Confidence */}
           {highConfidence.length > 0 && (
-            <div className="edition-group">
-              <h3 className="group-header high">✓ High Confidence ({highConfidence.length})</h3>
-              {highConfidence.map(edition => (
-                <EditionCard
-                  key={edition.id}
-                  edition={edition}
-                  onSelect={(selected) => selectEditions.mutate({ ids: [edition.id], selected })}
-                />
-              ))}
-            </div>
+            <EditionGroup
+              title="High Confidence"
+              editions={highConfidence}
+              expanded={expandedGroups.high}
+              onToggle={() => toggleGroup('high')}
+              onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
+              onSelectAll={() => selectByConfidence('high')}
+              className="group-high"
+            />
           )}
 
-          {/* Uncertain Editions */}
+          {/* Uncertain */}
           {uncertain.length > 0 && (
-            <div className="edition-group">
-              <h3 className="group-header uncertain">? Uncertain ({uncertain.length})</h3>
-              {uncertain.map(edition => (
-                <EditionCard
-                  key={edition.id}
-                  edition={edition}
-                  onSelect={(selected) => selectEditions.mutate({ ids: [edition.id], selected })}
-                />
-              ))}
-            </div>
+            <EditionGroup
+              title="Uncertain"
+              editions={uncertain}
+              expanded={expandedGroups.uncertain}
+              onToggle={() => toggleGroup('uncertain')}
+              onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
+              onSelectAll={() => selectByConfidence('uncertain')}
+              className="group-uncertain"
+            />
           )}
 
-          {/* Rejected Editions */}
+          {/* Rejected */}
           {rejected.length > 0 && (
-            <div className="edition-group">
-              <h3 className="group-header rejected">✗ Rejected ({rejected.length})</h3>
-              {rejected.map(edition => (
-                <EditionCard
-                  key={edition.id}
-                  edition={edition}
-                  onSelect={(selected) => selectEditions.mutate({ ids: [edition.id], selected })}
-                />
+            <EditionGroup
+              title="Rejected"
+              editions={rejected}
+              expanded={expandedGroups.rejected}
+              onToggle={() => toggleGroup('rejected')}
+              onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
+              onSelectAll={() => selectByConfidence('rejected')}
+              className="group-rejected"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Language Modal */}
+      {showLanguageModal && (
+        <div className="modal-overlay" onClick={() => setShowLanguageModal(false)}>
+          <div className="modal compact" onClick={e => e.stopPropagation()}>
+            <h3>Search Languages</h3>
+
+            {isLoadingRecs ? (
+              <div className="loading-rec">Getting AI recommendations...</div>
+            ) : recommendations && (
+              <div className="ai-rec">
+                <strong>AI suggests:</strong> {recommendations.recommended?.join(', ')}
+                <p className="rec-reason">{recommendations.reasoning}</p>
+              </div>
+            )}
+
+            <div className="strategy-options">
+              {[
+                { value: 'recommended', label: 'AI Recommended', desc: 'Based on author/title' },
+                { value: 'major_languages', label: 'Major Languages', desc: 'EN, DE, FR, ES, PT, IT, RU, ZH, JA' },
+                { value: 'english_only', label: 'English Only', desc: 'Fast, limited coverage' },
+                { value: 'custom', label: 'Custom', desc: 'Choose below' },
+              ].map(opt => (
+                <label key={opt.value} className={languageStrategy === opt.value ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    value={opt.value}
+                    checked={languageStrategy === opt.value}
+                    onChange={e => setLanguageStrategy(e.target.value)}
+                  />
+                  <span className="opt-label">{opt.label}</span>
+                  <span className="opt-desc">{opt.desc}</span>
+                </label>
               ))}
             </div>
-          )}
+
+            {languageStrategy === 'custom' && (
+              <div className="custom-langs">
+                {languages?.languages?.map(lang => (
+                  <label key={lang.code} className={customLanguages.includes(lang.code) ? 'selected' : ''}>
+                    <input
+                      type="checkbox"
+                      checked={customLanguages.includes(lang.code)}
+                      onChange={() => toggleLanguage(lang.code)}
+                    />
+                    {lang.icon} {lang.name}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="modal-footer">
+              <button onClick={() => setShowLanguageModal(false)}>Cancel</button>
+              <button
+                onClick={() => discoverEditions.mutate()}
+                disabled={languageStrategy === 'custom' && customLanguages.length === 0}
+                className="btn-primary"
+              >
+                Start Discovery
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function EditionCard({ edition, onSelect }) {
+/**
+ * Edition Group - collapsible section with table rows
+ */
+function EditionGroup({ title, editions, expanded, onToggle, onSelect, onSelectAll, className }) {
+  const selectedCount = editions.filter(e => e.selected).length
+  const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
+
   return (
-    <div className={`edition-card ${edition.selected ? 'selected' : ''} confidence-${edition.confidence}`}>
-      <input
-        type="checkbox"
-        checked={edition.selected}
-        onChange={(e) => onSelect(e.target.checked)}
-      />
-      <div className="edition-info">
-        <h4>
+    <div className={`ed-group ${className}`}>
+      <div className="group-header" onClick={onToggle}>
+        <span className="toggle">{expanded ? '▼' : '▶'}</span>
+        <span className="group-title">{title}</span>
+        <span className="group-stats">
+          {selectedCount}/{editions.length} selected · {totalCitations.toLocaleString()} citations
+        </span>
+        <button className="btn-xs" onClick={(e) => { e.stopPropagation(); onSelectAll(); }}>
+          Select all
+        </button>
+      </div>
+
+      {expanded && (
+        <table className="edition-table">
+          <thead>
+            <tr>
+              <th className="col-check"></th>
+              <th className="col-title">Title / Authors</th>
+              <th className="col-year">Year</th>
+              <th className="col-lang">Lang</th>
+              <th className="col-cites">Citations</th>
+            </tr>
+          </thead>
+          <tbody>
+            {editions.map(ed => (
+              <EditionRow key={ed.id} edition={ed} onSelect={onSelect} />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Edition Row - single compact row
+ */
+function EditionRow({ edition, onSelect }) {
+  const maxCites = 5000 // for bar scaling
+  const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
+
+  return (
+    <tr className={edition.selected ? 'selected' : ''}>
+      <td className="col-check">
+        <input
+          type="checkbox"
+          checked={edition.selected}
+          onChange={e => onSelect(edition.id, e.target.checked)}
+        />
+      </td>
+      <td className="col-title">
+        <div className="title-cell">
           {edition.link ? (
-            <a href={edition.link} target="_blank" rel="noopener noreferrer">
-              {edition.title}
+            <a href={edition.link} target="_blank" rel="noopener noreferrer" title={edition.title}>
+              {edition.title.length > 80 ? edition.title.substring(0, 77) + '...' : edition.title}
             </a>
           ) : (
-            edition.title
+            <span title={edition.title}>
+              {edition.title.length > 80 ? edition.title.substring(0, 77) + '...' : edition.title}
+            </span>
           )}
-        </h4>
-        <div className="edition-meta">
-          {edition.authors && <span className="authors">{edition.authors}</span>}
-          {edition.year && <span className="year">({edition.year})</span>}
-          {edition.venue && <span className="venue">{edition.venue}</span>}
+          <span className="authors-line">{edition.authors || 'Unknown'}</span>
         </div>
-        <div className="edition-badges">
-          <span className="citations">📚 {edition.citation_count.toLocaleString()} citations</span>
-          <span className={`confidence-badge ${edition.confidence}`}>
-            {edition.confidence === 'high' ? '✓' : edition.confidence === 'uncertain' ? '?' : '✗'} {edition.confidence}
-          </span>
-          {edition.language && <span className="language-badge">{edition.language}</span>}
-          {edition.auto_selected && <span className="auto-badge">Auto</span>}
+      </td>
+      <td className="col-year">{edition.year || '–'}</td>
+      <td className="col-lang">
+        <span className="lang-tag">{edition.language?.substring(0, 3) || '?'}</span>
+      </td>
+      <td className="col-cites">
+        <div className="cite-cell">
+          <span className="cite-num">{edition.citation_count?.toLocaleString() || 0}</span>
+          <div className="cite-bar" style={{ width: `${barWidth}%` }} />
         </div>
-        {edition.abstract && (
-          <p className="edition-abstract">{edition.abstract.substring(0, 200)}...</p>
-        )}
-      </div>
-    </div>
+      </td>
+    </tr>
   )
 }
