@@ -42,7 +42,7 @@ class Paper(Base):
     jobs: Mapped[List["Job"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("ix_papers_title_trgm", "title", postgresql_using="gin"),
+        Index("ix_papers_title", "title"),  # Regular index for title lookups
     )
 
 
