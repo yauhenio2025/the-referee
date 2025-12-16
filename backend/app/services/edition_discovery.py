@@ -350,21 +350,86 @@ ONLY return the JSON array, no other text."""
         target_paper: Dict[str, Any],
         results: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Ask LLM to evaluate results and identify genuine editions"""
+        """Ask LLM to evaluate results and identify genuine editions - processes ALL results in batches"""
         if not results:
             return {"genuineEditions": [], "highConfidence": [], "uncertain": [], "rejected": [], "reasoning": "No results to evaluate"}
 
+        # Process ALL results in batches of 80 (like gs-harvester)
+        BATCH_SIZE = 80
+        if len(results) > BATCH_SIZE:
+            logger.info(f"[LLM-Discovery] Large result set ({len(results)}) - processing in batches of {BATCH_SIZE}")
+            return await self._evaluate_results_in_batches(target_paper, results, BATCH_SIZE)
+
+        # Single batch processing for smaller result sets
+        return await self._evaluate_single_batch(target_paper, results, 0)
+
+    async def _evaluate_results_in_batches(
+        self,
+        target_paper: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        batch_size: int,
+    ) -> Dict[str, Any]:
+        """Process large result sets in batches"""
+        all_high_confidence = []
+        all_uncertain = []
+        all_rejected = []
+        all_reasoning = []
+
+        num_batches = (len(results) + batch_size - 1) // batch_size
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(results))
+            batch = results[start_idx:end_idx]
+
+            logger.info(f"[LLM-Discovery] Processing batch {batch_idx + 1}/{num_batches} (indices {start_idx}-{end_idx - 1})")
+
+            batch_result = await self._evaluate_single_batch(target_paper, batch, start_idx)
+
+            all_high_confidence.extend(batch_result.get("highConfidence", []))
+            all_uncertain.extend(batch_result.get("uncertain", []))
+            all_rejected.extend(batch_result.get("rejected", []))
+            all_reasoning.append(f"Batch {batch_idx + 1}: {batch_result.get('reasoning', '')}")
+
+            # Small delay between batches
+            if batch_idx < num_batches - 1:
+                await asyncio.sleep(1)
+
+        genuine_editions = all_high_confidence + all_uncertain
+
+        # Log language breakdown
+        lang_counts = {}
+        for e in genuine_editions:
+            lang = e.get("language", "Unknown")
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+        logger.info(f"[LLM-Discovery] Batched evaluation complete: {len(all_high_confidence)} high, {len(all_uncertain)} uncertain, {len(all_rejected)} rejected")
+        logger.info(f"[LLM-Discovery] Languages: {lang_counts}")
+
+        return {
+            "genuineEditions": genuine_editions,
+            "highConfidence": all_high_confidence,
+            "uncertain": all_uncertain,
+            "rejected": all_rejected,
+            "reasoning": "; ".join(all_reasoning),
+        }
+
+    async def _evaluate_single_batch(
+        self,
+        target_paper: Dict[str, Any],
+        batch: List[Dict[str, Any]],
+        start_idx: int,
+    ) -> Dict[str, Any]:
+        """Evaluate a single batch of results"""
         title = target_paper.get("title", "")
         author = target_paper.get("author") or target_paper.get("authors", "")
 
-        # Format results for the LLM - include queryLanguage hint
-        # Limit to 150 results (sorted by citation count, so best editions first)
+        # Format results - LLM detects language from title
         results_text = "\n\n".join([
-            f"[{i}] [{r.get('queryLanguage', '?').upper()[:3]}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations"
-            for i, r in enumerate(results[:150])
+            f"[{i}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations"
+            for i, r in enumerate(batch)
         ])
 
-        prompt = f"""You are evaluating Google Scholar search results to identify genuine editions of a specific work.
+        prompt = f"""You are evaluating Google Scholar search results to identify genuine editions of a specific work AND classify their languages.
 
 TARGET WORK:
 - Title: "{title}"
@@ -374,23 +439,34 @@ SEARCH RESULTS TO EVALUATE:
 {results_text}
 
 YOUR TASK:
-Categorize each result into THREE categories:
+1. Categorize each result (use indices 0-{len(batch) - 1}):
 
-HIGH CONFIDENCE GENUINE EDITION - Clearly IS the target work:
-- Author matches (or obvious variants like initials)
-- Title is clearly the same work (original, translation, reprint)
-- TRANSLATIONS COUNT AS GENUINE EDITIONS!
+   HIGH CONFIDENCE GENUINE EDITION - Clearly IS the target work:
+   - Author matches ({author or 'the target author'} or variants in ANY script)
+   - Title is clearly the same work (original, translation, reprint)
+   - TRANSLATIONS COUNT AS GENUINE EDITIONS! Arabic/Chinese/Russian titles ARE editions!
 
-UNCERTAIN - Needs human review:
-- Author unclear or might be editor/translator
-- Title similar but might be different work
+   UNCERTAIN - Needs human review:
+   - Author unclear or might be editor/translator
+   - Title similar but might be different work
 
-REJECTED - Clearly NOT a genuine edition:
-- Different author entirely (e.g., a dissertation BY someone studying the work)
-- Commentaries, analyses, works ABOUT the target work
-- Book reviews
+   REJECTED - Clearly NOT a genuine edition:
+   - Different author entirely (dissertation BY someone studying the work)
+   - Commentaries, analyses, works ABOUT the target work
 
-CLASSIFY THE LANGUAGE of each result based on its title.
+CRITICAL FOR NON-LATIN SCRIPTS - DO NOT REJECT TRANSLATIONS!
+- Arabic titles like "الثامن عشر من برومير" ARE genuine editions - ACCEPT!
+- Chinese titles like "路易·波拿巴的雾月十八日" ARE genuine editions - ACCEPT!
+- Russian titles like "Восемнадцатое брюмера" ARE genuine editions - ACCEPT!
+- Author field might show Latin "Marx" for Arabic/Chinese editions - normal!
+
+2. CLASSIFY THE LANGUAGE of each result based on its TITLE:
+   - "Der achtzehnte Brumaire" → German
+   - "El dieciocho brumario" → Spanish
+   - "Le dix-huit brumaire" → French
+   - Cyrillic script → Russian
+   - Chinese characters → Chinese
+   - Arabic script → Arabic
 
 Return a JSON object:
 {{
@@ -406,7 +482,7 @@ Return a JSON object:
     "2": "Chinese",
     ...
   }},
-  "reasoning": "Brief explanation of evaluation approach"
+  "reasoning": "Brief explanation"
 }}
 
 ONLY return the JSON object, no other text."""
@@ -422,43 +498,28 @@ ONLY return the JSON object, no other text."""
             json_match = re.search(r"\{[\s\S]*\}", text)
             if json_match:
                 evaluation = json.loads(json_match.group())
-                llm_languages = evaluation.get("languages", {})
+                languages = evaluation.get("languages", {})
 
-                def get_language(idx: int) -> str:
-                    """Get language: prefer queryLanguage (100% accurate), fallback to LLM detection"""
-                    result = results[idx]
-                    # queryLanguage is set from the search query language - most accurate
-                    query_lang = result.get("queryLanguage", "").capitalize()
-                    if query_lang:
-                        return query_lang
-                    # Fallback to LLM detection
-                    return llm_languages.get(str(idx), "Unknown")
-
-                # Map high confidence editions
+                # Map indices back to global (adding start_idx)
                 high_confidence = [
-                    {**results[idx], "editionIndex": idx, "confidence": "high", "autoSelected": True, "language": get_language(idx)}
+                    {**batch[idx], "editionIndex": start_idx + idx, "confidence": "high", "autoSelected": True, "language": languages.get(str(idx), self._detect_language(batch[idx].get("title", "")))}
                     for idx in evaluation.get("highConfidence", [])
-                    if idx < len(results)
+                    if idx < len(batch)
                 ]
 
-                # Map uncertain editions
                 uncertain = [
-                    {**results[idx], "editionIndex": idx, "confidence": "uncertain", "autoSelected": False, "language": get_language(idx)}
+                    {**batch[idx], "editionIndex": start_idx + idx, "confidence": "uncertain", "autoSelected": False, "language": languages.get(str(idx), self._detect_language(batch[idx].get("title", "")))}
                     for idx in evaluation.get("uncertain", [])
-                    if idx < len(results)
+                    if idx < len(batch)
                 ]
 
-                # Map rejected
                 rejected = [
-                    {**results[r["index"]], "rejectionReason": r["reason"], "editionIndex": r["index"], "language": get_language(r["index"])}
+                    {**batch[r["index"]], "rejectionReason": r["reason"], "editionIndex": start_idx + r["index"], "language": languages.get(str(r["index"]), "Unknown")}
                     for r in evaluation.get("rejected", [])
-                    if r["index"] < len(results)
+                    if r["index"] < len(batch)
                 ]
-
-                genuine_editions = high_confidence + uncertain
 
                 return {
-                    "genuineEditions": genuine_editions,
                     "highConfidence": high_confidence,
                     "uncertain": uncertain,
                     "rejected": rejected,
@@ -466,7 +527,7 @@ ONLY return the JSON object, no other text."""
                 }
 
         except Exception as e:
-            logger.error(f"[LLM-Discovery] Evaluation error: {e}")
+            logger.error(f"[LLM-Discovery] Batch evaluation error: {e}")
 
         # Fallback: include all results with basic language classification
         def fallback_language(r: dict) -> str:
