@@ -353,7 +353,10 @@ class ScholarSearchService:
                 if not title_el:
                     continue
 
-                title = title_el.get_text(strip=True)
+                # Use separator=' ' to preserve spaces between nested elements
+                # Then normalize multiple spaces to single space
+                title = title_el.get_text(separator=' ', strip=True)
+                title = re.sub(r'\s+', ' ', title).strip()
                 link = title_el.get("href")
 
                 if not title:
@@ -361,7 +364,8 @@ class ScholarSearchService:
 
                 # Authors and publication info
                 authors_el = el.select_one(".gs_a")
-                authors_raw = authors_el.get_text(strip=True) if authors_el else ""
+                authors_raw = authors_el.get_text(separator=' ', strip=True) if authors_el else ""
+                authors_raw = re.sub(r'\s+', ' ', authors_raw).strip()
 
                 # Parse authors: "Author1, Author2 - Publication, Year - Publisher"
                 parts = authors_raw.split(" - ")
@@ -380,7 +384,10 @@ class ScholarSearchService:
 
                 # Abstract
                 abstract_el = el.select_one(".gs_rs")
-                abstract = abstract_el.get_text(strip=True) if abstract_el else None
+                abstract = None
+                if abstract_el:
+                    abstract = abstract_el.get_text(separator=' ', strip=True)
+                    abstract = re.sub(r'\s+', ' ', abstract).strip()
 
                 # Citation count and Scholar ID
                 citation_count = 0
