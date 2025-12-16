@@ -81,7 +81,7 @@ class PaperResolutionService:
             matched_paper = search_result["paper"]
             verification = search_result.get("verification", {})
 
-            # Update paper with Scholar metadata
+            # Update paper with Scholar metadata - use canonical title from Scholar
             paper.scholar_id = matched_paper.get("scholarId")
             paper.cluster_id = matched_paper.get("clusterId")
             paper.citation_count = matched_paper.get("citationCount", 0)
@@ -90,10 +90,24 @@ class PaperResolutionService:
             paper.status = "resolved"
             paper.resolved_at = datetime.utcnow()
 
-            # If we found better metadata, update it
-            if matched_paper.get("year") and not paper.year:
+            # Update title to canonical Scholar title (proper capitalization, full title)
+            if matched_paper.get("title"):
+                paper.title = matched_paper["title"]
+
+            # Update authors from Scholar (properly formatted)
+            if matched_paper.get("authors"):
+                authors = matched_paper["authors"]
+                if isinstance(authors, list):
+                    paper.authors = ", ".join(authors)
+                else:
+                    paper.authors = authors
+            elif matched_paper.get("authorsRaw"):
+                paper.authors = matched_paper["authorsRaw"]
+
+            # Update year and venue from Scholar
+            if matched_paper.get("year"):
                 paper.year = matched_paper["year"]
-            if matched_paper.get("venue") and not paper.venue:
+            if matched_paper.get("venue"):
                 paper.venue = matched_paper["venue"]
 
             await self.db.flush()

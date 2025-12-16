@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 export default function PaperList({ onSelectPaper }) {
   const queryClient = useQueryClient()
   const [resolvingId, setResolvingId] = useState(null)
+  const [expandedAbstracts, setExpandedAbstracts] = useState({})
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -34,6 +35,13 @@ export default function PaperList({ onSelectPaper }) {
     resolvePaper.mutate(paperId)
   }
 
+  const toggleAbstract = (paperId) => {
+    setExpandedAbstracts(prev => ({
+      ...prev,
+      [paperId]: !prev[paperId]
+    }))
+  }
+
   if (isLoading) return <div className="loading">Loading papers...</div>
   if (error) return <div className="error">Error loading papers: {error.message}</div>
   if (!papers?.length) return <div className="empty">No papers yet. Add one above!</div>
@@ -47,6 +55,19 @@ export default function PaperList({ onSelectPaper }) {
     return badges[status] || badges.pending
   }
 
+  // Format authors nicely
+  const formatAuthors = (authors) => {
+    if (!authors) return null
+    if (Array.isArray(authors)) {
+      if (authors.length > 3) {
+        return authors.slice(0, 3).join(', ') + ' et al.'
+      }
+      return authors.join(', ')
+    }
+    // String - might be comma-separated or raw
+    return authors.replace(/([a-z])([A-Z])/g, '$1 $2').trim()
+  }
+
   return (
     <div className="paper-list">
       <h2>Papers ({papers.length})</h2>
@@ -54,27 +75,88 @@ export default function PaperList({ onSelectPaper }) {
         {papers.map((paper) => {
           const badge = getStatusBadge(paper.status)
           const isResolving = resolvingId === paper.id
+          const isExpanded = expandedAbstracts[paper.id]
+
           return (
-            <div key={paper.id} className="paper-card">
+            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''}`}>
+              {/* Header with title and status */}
               <div className="paper-header">
-                <h3 className="paper-title">{paper.title}</h3>
+                {paper.link ? (
+                  <a
+                    href={paper.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="paper-title-link"
+                  >
+                    <h3 className="paper-title">{paper.title}</h3>
+                  </a>
+                ) : (
+                  <h3 className="paper-title">{paper.title}</h3>
+                )}
                 <span className={`badge ${badge.class}`}>
                   {isResolving ? '🔄 Resolving...' : badge.label}
                 </span>
               </div>
+
+              {/* Metadata row: authors, year, venue */}
               <div className="paper-meta">
-                {paper.authors && <span className="paper-authors">{paper.authors}</span>}
-                {paper.year && <span className="paper-year">({paper.year})</span>}
-                {paper.venue && <span className="paper-venue">• {paper.venue}</span>}
-                {paper.citation_count > 0 && (
-                  <span className="paper-citations">📚 {paper.citation_count} citations</span>
+                {formatAuthors(paper.authors) && (
+                  <span className="paper-authors">{formatAuthors(paper.authors)}</span>
+                )}
+                {paper.year && (
+                  <span className="paper-year">
+                    {formatAuthors(paper.authors) ? ' · ' : ''}{paper.year}
+                  </span>
+                )}
+                {paper.venue && (
+                  <span className="paper-venue">
+                    {' · '}{paper.venue.length > 50 ? paper.venue.substring(0, 50) + '...' : paper.venue}
+                  </span>
                 )}
               </div>
-              {paper.scholar_id && (
-                <div className="paper-scholar-id">
-                  Scholar ID: {paper.scholar_id}
+
+              {/* Citation count and Scholar ID for resolved papers */}
+              {paper.status === 'resolved' && (
+                <div className="paper-stats">
+                  {paper.citation_count > 0 && (
+                    <span className="paper-citations">
+                      📚 {paper.citation_count.toLocaleString()} citations
+                    </span>
+                  )}
+                  {paper.scholar_id && (
+                    <span className="paper-scholar-id">
+                      ID: {paper.scholar_id}
+                    </span>
+                  )}
+                  {paper.abstract && (
+                    <span className="paper-has-abstract">
+                      📄 Has abstract
+                    </span>
+                  )}
                 </div>
               )}
+
+              {/* Abstract - expandable */}
+              {paper.abstract && (
+                <div
+                  className={`paper-abstract ${isExpanded ? 'paper-abstract-expanded' : ''}`}
+                  onClick={() => toggleAbstract(paper.id)}
+                  title={isExpanded ? "Click to collapse" : "Click to expand abstract"}
+                >
+                  <span className="abstract-toggle">
+                    {isExpanded ? '▼' : '▶'}
+                  </span>
+                  <span className="abstract-text">
+                    {isExpanded
+                      ? paper.abstract
+                      : (paper.abstract.length > 150
+                          ? paper.abstract.substring(0, 150) + '...'
+                          : paper.abstract)}
+                  </span>
+                </div>
+              )}
+
+              {/* Actions */}
               <div className="paper-actions">
                 {paper.status === 'pending' && (
                   <button

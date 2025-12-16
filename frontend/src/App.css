@@ -407,31 +407,120 @@ body {
   padding: 1.25rem;
   border-radius: 12px;
   border: 1px solid var(--border);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.paper-card:hover {
+  border-color: var(--accent);
+}
+
+.paper-card-resolved {
+  border-left: 3px solid var(--success);
 }
 
 .paper-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  gap: 1rem;
 }
 
 .paper-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.paper-title-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.paper-title-link:hover .paper-title {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.paper-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  align-items: center;
+}
+
+.paper-citations {
+  background: linear-gradient(135deg, #1565c0, #0d47a1);
+  color: white;
+  padding: 0.35rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.paper-has-abstract {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.paper-abstract {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1.5;
+  display: flex;
+  gap: 0.5rem;
+  transition: background 0.2s;
+}
+
+.paper-abstract:hover {
+  background: var(--bg-dark);
+}
+
+.paper-abstract-expanded {
+  background: var(--bg-dark);
+}
+
+.abstract-toggle {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.abstract-text {
+  flex: 1;
 }
 
 .paper-meta {
   display: flex;
-  gap: 1rem;
-  color: var(--text-secondary);
+  flex-wrap: wrap;
+  gap: 0;
+  color: #006621;
   font-size: 0.9rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
 }
 
-.paper-citations {
-  color: var(--accent);
+.paper-authors {
+  color: #006621;
+}
+
+.paper-year {
+  color: var(--text-secondary);
+}
+
+.paper-venue {
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 .paper-actions {

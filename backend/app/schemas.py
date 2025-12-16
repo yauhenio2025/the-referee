@@ -55,6 +55,9 @@ class EditionResponse(BaseModel):
     title: str
     authors: Optional[str] = None
     year: Optional[int] = None
+    venue: Optional[str] = None
+    abstract: Optional[str] = None
+    link: Optional[str] = None
     citation_count: int = 0
     language: Optional[str] = None
     confidence: str
