@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List
+from pydantic import BaseModel
 import json
 
 from .config import get_settings
@@ -593,8 +594,6 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 
 # ============== Bibliography Parsing ==============
-
-from pydantic import BaseModel
 
 class BibliographyParseRequest(BaseModel):
     text: str
