@@ -28,6 +28,27 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Run migrations for new columns
+    await run_migrations()
+
+
+async def run_migrations():
+    """Add any missing columns to existing tables"""
+    from sqlalchemy import text
+
+    migrations = [
+        # Add candidates column to papers table (for reconciliation feature)
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS candidates TEXT",
+    ]
+
+    async with engine.begin() as conn:
+        for migration in migrations:
+            try:
+                await conn.execute(text(migration))
+            except Exception as e:
+                # Column might already exist or other non-fatal error
+                print(f"Migration note: {e}")
+
 
 async def get_db() -> AsyncSession:
     """Dependency for getting database sessions"""
