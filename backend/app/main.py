@@ -471,3 +471,106 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
             "running": running_jobs.scalar() or 0,
         },
     }
+
+
+# ============== Bibliography Parsing ==============
+
+from pydantic import BaseModel
+
+class BibliographyParseRequest(BaseModel):
+    text: str
+
+class BibliographyParseResponse(BaseModel):
+    success: bool
+    parsed: dict = None
+    error: str = None
+
+@app.post("/api/bibliography/parse", response_model=BibliographyParseResponse)
+async def parse_bibliography(request: BibliographyParseRequest):
+    """Parse bibliography text using Claude to extract structured metadata"""
+    if not request.text.strip():
+        return BibliographyParseResponse(success=False, error="text is required")
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=16000,
+            messages=[{
+                "role": "user",
+                "content": f"""You are a bibliographic metadata extraction assistant. Parse the following bibliography text and extract structured metadata.
+
+Extract:
+1. Author name (use shortest form shown, e.g., "Mao Zedong" or "M Zedong")
+2. Work title (clean, no formatting marks)
+3. Year of publication (if present)
+4. Publisher/venue (if present)
+5. Group/Category (if present - e.g., "Group 1: Historical Core", "Group 2", etc.)
+
+IMPORTANT: If the bibliography contains group labels like "Group 1:", "Group 2: Secondary Core", or numbered sections, extract and preserve these as the "group" field for each author.
+
+Group works by author. Return ONLY valid JSON (no markdown, no explanations):
+
+{{
+  "authors": [
+    {{
+      "name": "Author Name",
+      "group": "Group 1: Historical Core",
+      "works": [
+        {{
+          "title": "Work Title",
+          "year": "1967",
+          "publisher": "Publisher Name"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Preserve group/category labels from the original text (e.g., "Group 1", "Group 2: Secondary Core")
+- Ignore subtitles after colons unless critical
+- Extract years from parentheses  (1967) → "1967"
+- For anthologies/collections, use the collection title
+- If author appears in multiple forms, use the most common one
+- Skip notes, introductions, or non-primary texts
+- Clean markdown formatting (_ * ~~ etc.)
+
+Bibliography text:
+{request.text}"""
+            }]
+        )
+
+        # Extract JSON from response
+        json_text = response.content[0].text.strip()
+
+        # Clean JSON (remove markdown code blocks if present)
+        if json_text.startswith("```"):
+            json_text = json_text.split("```")[1]
+            if json_text.startswith("json"):
+                json_text = json_text[4:]
+        json_text = json_text.strip()
+
+        parsed = json.loads(json_text)
+
+        if not parsed.get("authors") or not isinstance(parsed["authors"], list):
+            return BibliographyParseResponse(
+                success=False,
+                error="Invalid response structure - missing authors array"
+            )
+
+        return BibliographyParseResponse(success=True, parsed=parsed)
+
+    except json.JSONDecodeError as e:
+        return BibliographyParseResponse(
+            success=False,
+            error=f"Failed to parse LLM response as JSON: {str(e)}"
+        )
+    except Exception as e:
+        return BibliographyParseResponse(
+            success=False,
+            error=f"Failed to parse bibliography: {str(e)}"
+        )

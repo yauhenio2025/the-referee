@@ -211,6 +211,185 @@ body {
   cursor: not-allowed;
 }
 
+/* Input Mode Toggle */
+.input-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.mode-btn {
+  padding: 0.5rem 1rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* Smart Paste */
+.smart-paste {
+  padding: 1rem 0;
+}
+
+.smart-paste-hint {
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.bibliography-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 1rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 1rem;
+}
+
+.bibliography-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.bibliography-textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.smart-paste-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.btn-parse {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #e65100 0%, #bf360c 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-parse:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-parse:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-clear {
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.btn-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Parsed Results */
+.parsed-results h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: var(--success);
+}
+
+.parsed-authors {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.parsed-author {
+  background: var(--bg-dark);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.author-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.author-header strong {
+  color: var(--text-primary);
+}
+
+.author-group {
+  background: var(--accent);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.work-count {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-left: auto;
+}
+
+.works-list {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.works-list li {
+  margin-bottom: 0.25rem;
+}
+
+.work-year {
+  color: var(--accent);
+}
+
+.work-publisher {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.parsed-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.input-publisher {
+  flex: 1;
+  min-width: 150px;
+}
+
 /* Paper List */
 .paper-list h2 {
   margin: 0 0 1rem 0;

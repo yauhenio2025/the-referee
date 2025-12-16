@@ -167,6 +167,14 @@ class RefereeAPI {
       },
     });
   }
+
+  // Smart Parse - Bibliography parsing with LLM
+  async parseBibliography(text) {
+    return this.request('/api/bibliography/parse', {
+      method: 'POST',
+      body: { text },
+    });
+  }
 }
 
 export const api = new RefereeAPI();
