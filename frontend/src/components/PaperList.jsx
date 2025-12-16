@@ -6,6 +6,7 @@ export default function PaperList({ onSelectPaper }) {
   const queryClient = useQueryClient()
   const [resolvingId, setResolvingId] = useState(null)
   const [expandedAbstracts, setExpandedAbstracts] = useState({})
+  const [reconciliationPaper, setReconciliationPaper] = useState(null)
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -21,7 +22,15 @@ export default function PaperList({ onSelectPaper }) {
 
   const resolvePaper = useMutation({
     mutationFn: (paperId) => api.resolvePaper(paperId),
-    onSuccess: () => {
+    onSuccess: (data, paperId) => {
+      if (data.needs_reconciliation && data.candidates) {
+        // Show reconciliation modal
+        const paper = papers.find(p => p.id === paperId)
+        setReconciliationPaper({
+          ...paper,
+          candidates: data.candidates,
+        })
+      }
       queryClient.invalidateQueries(['papers'])
       setResolvingId(null)
     },
@@ -30,9 +39,26 @@ export default function PaperList({ onSelectPaper }) {
     },
   })
 
+  const confirmCandidate = useMutation({
+    mutationFn: ({ paperId, candidateIndex }) => api.confirmCandidate(paperId, candidateIndex),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['papers'])
+      setReconciliationPaper(null)
+    },
+  })
+
   const handleResolve = (paperId) => {
     setResolvingId(paperId)
     resolvePaper.mutate(paperId)
+  }
+
+  const handleSelectCandidate = (candidateIndex) => {
+    if (reconciliationPaper) {
+      confirmCandidate.mutate({
+        paperId: reconciliationPaper.id,
+        candidateIndex,
+      })
+    }
   }
 
   const toggleAbstract = (paperId) => {
@@ -42,6 +68,9 @@ export default function PaperList({ onSelectPaper }) {
     }))
   }
 
+  // Check for papers needing reconciliation on load
+  const papersNeedingReconciliation = papers?.filter(p => p.status === 'needs_reconciliation') || []
+
   if (isLoading) return <div className="loading">Loading papers...</div>
   if (error) return <div className="error">Error loading papers: {error.message}</div>
   if (!papers?.length) return <div className="empty">No papers yet. Add one above!</div>
@@ -49,6 +78,7 @@ export default function PaperList({ onSelectPaper }) {
   const getStatusBadge = (status) => {
     const badges = {
       pending: { label: 'Pending', class: 'badge-pending' },
+      needs_reconciliation: { label: '⚠️ Choose Match', class: 'badge-warning' },
       resolved: { label: 'Resolved', class: 'badge-success' },
       error: { label: 'Error', class: 'badge-error' },
     }
@@ -71,14 +101,24 @@ export default function PaperList({ onSelectPaper }) {
   return (
     <div className="paper-list">
       <h2>Papers ({papers.length})</h2>
+
+      {/* Alert for papers needing reconciliation */}
+      {papersNeedingReconciliation.length > 0 && (
+        <div className="reconciliation-alert">
+          <span className="alert-icon">⚠️</span>
+          <span>{papersNeedingReconciliation.length} paper(s) need your attention - multiple Scholar matches found</span>
+        </div>
+      )}
+
       <div className="papers">
         {papers.map((paper) => {
           const badge = getStatusBadge(paper.status)
           const isResolving = resolvingId === paper.id
           const isExpanded = expandedAbstracts[paper.id]
+          const needsReconciliation = paper.status === 'needs_reconciliation'
 
           return (
-            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''}`}>
+            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''}`}>
               {/* Header with title and status */}
               <div className="paper-header">
                 {paper.link ? (
@@ -167,6 +207,18 @@ export default function PaperList({ onSelectPaper }) {
                     {isResolving ? '🔄 Resolving...' : '🔍 Resolve on Scholar'}
                   </button>
                 )}
+                {paper.status === 'needs_reconciliation' && (
+                  <button
+                    onClick={() => {
+                      // Parse candidates from paper if available
+                      const candidates = paper.candidates ? JSON.parse(paper.candidates) : []
+                      setReconciliationPaper({ ...paper, candidates })
+                    }}
+                    className="btn-reconcile"
+                  >
+                    ⚠️ Choose Correct Match
+                  </button>
+                )}
                 {paper.status === 'error' && (
                   <button
                     onClick={() => handleResolve(paper.id)}
@@ -196,6 +248,79 @@ export default function PaperList({ onSelectPaper }) {
           )
         })}
       </div>
+
+      {/* Reconciliation Modal */}
+      {reconciliationPaper && (
+        <div className="modal-overlay">
+          <div className="modal reconciliation-modal">
+            <h3>🔍 Select the Correct Paper</h3>
+            <p className="reconciliation-hint">
+              Multiple matches were found for "<strong>{reconciliationPaper.title}</strong>".
+              Please select the correct one:
+            </p>
+
+            <div className="candidates-list">
+              {reconciliationPaper.candidates?.map((candidate, index) => (
+                <div
+                  key={index}
+                  className="candidate-card"
+                  onClick={() => handleSelectCandidate(index)}
+                >
+                  <div className="candidate-index">{index + 1}</div>
+                  <div className="candidate-info">
+                    <h4 className="candidate-title">
+                      {candidate.link ? (
+                        <a href={candidate.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                          {candidate.title}
+                        </a>
+                      ) : (
+                        candidate.title
+                      )}
+                    </h4>
+                    <div className="candidate-meta">
+                      {(candidate.authorsRaw || candidate.authors) && (
+                        <span className="candidate-authors">
+                          {candidate.authorsRaw || (Array.isArray(candidate.authors) ? candidate.authors.join(', ') : candidate.authors)}
+                        </span>
+                      )}
+                      {candidate.year && <span className="candidate-year">({candidate.year})</span>}
+                      {candidate.venue && <span className="candidate-venue">{candidate.venue}</span>}
+                    </div>
+                    <div className="candidate-stats">
+                      <span className="candidate-citations">
+                        📚 {(candidate.citationCount || candidate.citation_count || 0).toLocaleString()} citations
+                      </span>
+                      {candidate.scholarId && (
+                        <span className="candidate-scholar-id">ID: {candidate.scholarId}</span>
+                      )}
+                    </div>
+                    {candidate.abstract && (
+                      <p className="candidate-abstract">
+                        {candidate.abstract.substring(0, 200)}...
+                      </p>
+                    )}
+                  </div>
+                  <button className="btn-select-candidate">
+                    Select
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={() => setReconciliationPaper(null)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={() => deletePaper.mutate(reconciliationPaper.id).then(() => setReconciliationPaper(null))}
+                className="btn-danger"
+              >
+                Delete Paper
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

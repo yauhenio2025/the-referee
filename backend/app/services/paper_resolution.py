@@ -80,6 +80,48 @@ class PaperResolutionService:
 
             matched_paper = search_result["paper"]
             verification = search_result.get("verification", {})
+            all_results = search_result.get("allResults", [])
+
+            # Check if we need user reconciliation
+            # Low confidence or multiple similar results means we should ask user
+            confidence = verification.get("confidence", 0.8)
+            needs_reconciliation = confidence < 0.7 and len(all_results) > 1
+
+            if needs_reconciliation:
+                logger.info(f"[RESOLUTION] Low confidence ({confidence}), needs reconciliation with {len(all_results)} candidates")
+
+                # Store candidates in paper
+                import json
+                candidates_data = []
+                for r in all_results[:5]:  # Max 5 candidates
+                    candidates_data.append({
+                        "scholarId": r.get("scholarId"),
+                        "clusterId": r.get("clusterId"),
+                        "title": r.get("title"),
+                        "authors": r.get("authors"),
+                        "authorsRaw": r.get("authorsRaw"),
+                        "year": r.get("year"),
+                        "venue": r.get("venue"),
+                        "abstract": r.get("abstract"),
+                        "link": r.get("link"),
+                        "citationCount": r.get("citationCount", 0),
+                    })
+
+                paper.candidates = json.dumps(candidates_data)
+                paper.status = "needs_reconciliation"
+                await self.db.flush()
+
+                if job_id:
+                    await self._update_job(job_id, status="completed", progress=1.0,
+                                          message="Multiple candidates found - user selection required")
+
+                return {
+                    "success": True,
+                    "needs_reconciliation": True,
+                    "paper_id": paper_id,
+                    "candidates": candidates_data,
+                    "verification": verification,
+                }
 
             # Update paper with Scholar metadata - use canonical title from Scholar
             paper.scholar_id = matched_paper.get("scholarId")
@@ -270,6 +312,86 @@ class PaperResolutionService:
                 "error": str(e),
                 "paper_id": paper_id,
             }
+
+    async def confirm_candidate(
+        self,
+        paper_id: int,
+        candidate_index: int,
+    ) -> Dict[str, Any]:
+        """
+        Confirm a candidate selection during reconciliation
+
+        Args:
+            paper_id: Database ID of the paper
+            candidate_index: Index of the selected candidate (0-based)
+
+        Returns:
+            Dict with resolution results
+        """
+        import json
+
+        result = await self.db.execute(select(Paper).where(Paper.id == paper_id))
+        paper = result.scalar_one_or_none()
+
+        if not paper:
+            raise ValueError(f"Paper {paper_id} not found")
+
+        if paper.status != "needs_reconciliation":
+            raise ValueError(f"Paper {paper_id} is not awaiting reconciliation (status: {paper.status})")
+
+        if not paper.candidates:
+            raise ValueError(f"Paper {paper_id} has no candidates")
+
+        candidates = json.loads(paper.candidates)
+
+        if candidate_index < 0 or candidate_index >= len(candidates):
+            raise ValueError(f"Invalid candidate index {candidate_index} (0-{len(candidates)-1} available)")
+
+        selected = candidates[candidate_index]
+
+        logger.info(f"[RESOLUTION] User selected candidate {candidate_index}: {selected.get('title', '')[:60]}...")
+
+        # Update paper with selected candidate
+        paper.scholar_id = selected.get("scholarId")
+        paper.cluster_id = selected.get("clusterId")
+        paper.citation_count = selected.get("citationCount", 0)
+        paper.link = selected.get("link")
+        paper.abstract = selected.get("abstract")
+        paper.status = "resolved"
+        paper.resolved_at = datetime.utcnow()
+        paper.candidates = None  # Clear candidates
+
+        # Update title to canonical Scholar title
+        if selected.get("title"):
+            paper.title = selected["title"]
+
+        # Update authors from Scholar
+        if selected.get("authors"):
+            authors = selected["authors"]
+            if isinstance(authors, list):
+                paper.authors = ", ".join(authors)
+            else:
+                paper.authors = authors
+        elif selected.get("authorsRaw"):
+            paper.authors = selected["authorsRaw"]
+
+        # Update year and venue
+        if selected.get("year"):
+            paper.year = selected["year"]
+        if selected.get("venue"):
+            paper.venue = selected["venue"]
+
+        await self.db.flush()
+
+        logger.info(f"[RESOLUTION] ✓ Confirmed: Scholar ID={paper.scholar_id}, Citations={paper.citation_count}")
+
+        return {
+            "success": True,
+            "paper_id": paper_id,
+            "scholar_id": paper.scholar_id,
+            "cluster_id": paper.cluster_id,
+            "citation_count": paper.citation_count,
+        }
 
     async def _update_job(
         self,

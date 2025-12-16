@@ -29,9 +29,12 @@ class Paper(Base):
     citation_count: Mapped[int] = mapped_column(Integer, default=0)
     language: Mapped[Optional[str]] = mapped_column(String(50))
 
-    # Status
-    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, resolved, error
+    # Status: pending, needs_reconciliation, resolved, error
+    status: Mapped[str] = mapped_column(String(50), default="pending")
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Candidate papers for reconciliation (JSON array)
+    candidates: Mapped[Optional[str]] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

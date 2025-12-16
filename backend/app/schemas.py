@@ -28,6 +28,20 @@ class PaperSubmitBatch(BaseModel):
     custom_languages: List[str] = []
 
 
+class ScholarCandidate(BaseModel):
+    """A candidate paper from Google Scholar"""
+    scholar_id: Optional[str] = None
+    cluster_id: Optional[str] = None
+    title: str
+    authors: Optional[str] = None
+    authors_raw: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    abstract: Optional[str] = None
+    link: Optional[str] = None
+    citation_count: int = 0
+
+
 class PaperResponse(PaperBase):
     id: int
     scholar_id: Optional[str] = None
@@ -37,6 +51,7 @@ class PaperResponse(PaperBase):
     abstract: Optional[str] = None
     link: Optional[str] = None
     created_at: datetime
+    candidates: Optional[List[ScholarCandidate]] = None  # For reconciliation
 
     class Config:
         from_attributes = True

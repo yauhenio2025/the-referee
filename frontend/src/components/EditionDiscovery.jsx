@@ -42,19 +42,67 @@ export default function EditionDiscovery({ paper, onBack }) {
     }
   }, [showLanguageModal, recommendations, isLoadingRecs, paper])
 
+  const [discoveryProgress, setDiscoveryProgress] = useState(null)
+
   const discoverEditions = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       // Build language list based on strategy
       let langsToUse = customLanguages
       if (languageStrategy === 'english_only') {
         langsToUse = ['english']
       } else if (languageStrategy === 'major_languages') {
         langsToUse = ['english', 'german', 'french', 'spanish', 'portuguese', 'italian', 'russian', 'chinese', 'japanese']
+      } else if (languageStrategy === 'recommended' && recommendations?.recommended) {
+        langsToUse = recommendations.recommended
       }
-      return api.discoverEditions(paper.id, {
-        languageStrategy,
-        customLanguages: langsToUse
+
+      // Show progress indicator
+      setDiscoveryProgress({
+        stage: 'searching',
+        message: 'Generating search queries...',
+        progress: 10,
       })
+
+      // Simulate progress updates (since backend doesn't support streaming yet)
+      const progressInterval = setInterval(() => {
+        setDiscoveryProgress(prev => {
+          if (!prev || prev.progress >= 90) return prev
+          const newProgress = Math.min(prev.progress + Math.random() * 15, 90)
+          const messages = [
+            'Searching Google Scholar...',
+            'Analyzing search results...',
+            'Identifying editions...',
+            'Evaluating matches...',
+            'Classifying confidence...',
+          ]
+          const msgIndex = Math.floor(newProgress / 20)
+          return {
+            ...prev,
+            progress: newProgress,
+            message: messages[Math.min(msgIndex, messages.length - 1)],
+          }
+        })
+      }, 1500)
+
+      try {
+        const result = await api.discoverEditions(paper.id, {
+          languageStrategy,
+          customLanguages: langsToUse
+        })
+        clearInterval(progressInterval)
+        setDiscoveryProgress({
+          stage: 'complete',
+          message: `Found ${result.total_found} editions`,
+          progress: 100,
+        })
+        // Clear after a moment
+        setTimeout(() => setDiscoveryProgress(null), 2000)
+        return result
+      } catch (error) {
+        clearInterval(progressInterval)
+        setDiscoveryProgress(null)
+        throw error
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['editions', paper.id])
@@ -105,7 +153,11 @@ export default function EditionDiscovery({ paper, onBack }) {
       </div>
 
       <div className="edition-actions">
-        <button onClick={() => setShowLanguageModal(true)} className="btn-primary">
+        <button
+          onClick={() => setShowLanguageModal(true)}
+          className="btn-primary"
+          disabled={discoverEditions.isPending}
+        >
           🔍 Discover Editions
         </button>
         <button
@@ -116,6 +168,40 @@ export default function EditionDiscovery({ paper, onBack }) {
           📊 Extract Citations ({selectedCount} selected)
         </button>
       </div>
+
+      {/* Discovery Progress Indicator */}
+      {discoveryProgress && (
+        <div className="discovery-progress">
+          <div className="progress-header">
+            <span className="progress-title">
+              <span className="spinner"></span>
+              {discoveryProgress.stage === 'complete' ? '✓ Discovery Complete' : 'Discovering Editions...'}
+            </span>
+            <span className="progress-percentage">{Math.round(discoveryProgress.progress)}%</span>
+          </div>
+          <div className="progress-bar-container">
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${discoveryProgress.progress}%` }}
+            />
+          </div>
+          <p className="progress-message">{discoveryProgress.message}</p>
+          <div className="progress-stage">
+            <span className={`stage-badge ${discoveryProgress.progress >= 10 ? 'complete' : ''}`}>
+              Query Generation
+            </span>
+            <span className={`stage-badge ${discoveryProgress.progress >= 30 ? 'complete' : discoveryProgress.progress >= 10 ? 'active' : ''}`}>
+              Search
+            </span>
+            <span className={`stage-badge ${discoveryProgress.progress >= 60 ? 'complete' : discoveryProgress.progress >= 30 ? 'active' : ''}`}>
+              Analysis
+            </span>
+            <span className={`stage-badge ${discoveryProgress.progress >= 90 ? 'complete' : discoveryProgress.progress >= 60 ? 'active' : ''}`}>
+              Classification
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Language selection modal with LLM recommendations */}
       {showLanguageModal && (

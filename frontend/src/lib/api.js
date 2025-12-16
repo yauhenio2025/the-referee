@@ -95,6 +95,13 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}/resolve`, { method: 'POST' });
   }
 
+  async confirmCandidate(paperId, candidateIndex) {
+    return this.request(`/api/papers/${paperId}/confirm-candidate`, {
+      method: 'POST',
+      body: { candidate_index: candidateIndex },
+    });
+  }
+
   // Editions
   async discoverEditions(paperId, options = {}) {
     return this.request('/api/editions/discover', {

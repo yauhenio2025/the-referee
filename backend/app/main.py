@@ -529,6 +529,29 @@ async def resolve_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Resolution failed: {str(e)}")
 
 
+class CandidateConfirmRequest(BaseModel):
+    candidate_index: int
+
+
+@app.post("/api/papers/{paper_id}/confirm-candidate")
+async def confirm_candidate(paper_id: int, request: CandidateConfirmRequest, db: AsyncSession = Depends(get_db)):
+    """Confirm a candidate selection during reconciliation"""
+    from .services.paper_resolution import PaperResolutionService
+
+    service = PaperResolutionService(db)
+
+    try:
+        result = await service.confirm_candidate(paper_id=paper_id, candidate_index=request.candidate_index)
+        await db.commit()
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Confirmation failed: {str(e)}")
+
+
 @app.post("/api/jobs/process")
 async def process_pending_jobs_endpoint(
     max_jobs: int = 5,
