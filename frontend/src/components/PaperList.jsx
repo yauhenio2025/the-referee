@@ -7,10 +7,25 @@ export default function PaperList({ onSelectPaper }) {
   const [resolvingId, setResolvingId] = useState(null)
   const [expandedAbstracts, setExpandedAbstracts] = useState({})
   const [reconciliationPaper, setReconciliationPaper] = useState(null)
+  const [editionCounts, setEditionCounts] = useState({})
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
-    queryFn: () => api.listPapers(),
+    queryFn: async () => {
+      const papersData = await api.listPapers()
+      // Fetch edition counts for resolved papers
+      const counts = {}
+      for (const paper of papersData.filter(p => p.status === 'resolved')) {
+        try {
+          const editions = await api.getPaperEditions(paper.id)
+          counts[paper.id] = editions?.length || 0
+        } catch (e) {
+          counts[paper.id] = 0
+        }
+      }
+      setEditionCounts(counts)
+      return papersData
+    },
   })
 
   const deletePaper = useMutation({
@@ -231,10 +246,12 @@ export default function PaperList({ onSelectPaper }) {
                 <button
                   onClick={() => onSelectPaper(paper)}
                   disabled={paper.status !== 'resolved'}
-                  className="btn-primary"
-                  title={paper.status !== 'resolved' ? 'Resolve paper first' : 'Discover all editions'}
+                  className={editionCounts[paper.id] > 0 ? 'btn-success' : 'btn-primary'}
+                  title={paper.status !== 'resolved' ? 'Resolve paper first' : editionCounts[paper.id] > 0 ? 'View discovered editions' : 'Discover all editions'}
                 >
-                  📖 Discover Editions
+                  {editionCounts[paper.id] > 0
+                    ? `📖 View ${editionCounts[paper.id]} Editions`
+                    : '📖 Discover Editions'}
                 </button>
                 <button
                   onClick={() => deletePaper.mutate(paper.id)}
