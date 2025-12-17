@@ -134,6 +134,16 @@ class RefereeAPI {
     });
   }
 
+  async updateEditionConfidence(editionIds, confidence) {
+    return this.request('/api/editions/confidence', {
+      method: 'POST',
+      body: {
+        edition_ids: editionIds,
+        confidence, // "high", "uncertain", "rejected"
+      },
+    });
+  }
+
   async fetchMoreInLanguage(paperId, language, maxResults = 50) {
     return this.request('/api/editions/fetch-more', {
       method: 'POST',

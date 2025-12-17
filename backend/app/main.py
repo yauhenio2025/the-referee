@@ -19,7 +19,7 @@ from .models import Paper, Edition, Citation, Job, RawSearchResult
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
-    EditionFetchMoreRequest, EditionFetchMoreResponse,
+    EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
@@ -297,6 +297,26 @@ async def select_editions(request: EditionSelectRequest, db: AsyncSession = Depe
         edition.selected = request.selected
 
     return {"updated": len(editions), "selected": request.selected}
+
+
+@app.post("/api/editions/confidence")
+async def update_edition_confidence(request: EditionUpdateConfidenceRequest, db: AsyncSession = Depends(get_db)):
+    """Update confidence level for editions (high/uncertain/rejected)"""
+    if request.confidence not in ["high", "uncertain", "rejected"]:
+        raise HTTPException(status_code=400, detail="Confidence must be 'high', 'uncertain', or 'rejected'")
+
+    result = await db.execute(
+        select(Edition).where(Edition.id.in_(request.edition_ids))
+    )
+    editions = result.scalars().all()
+
+    for edition in editions:
+        edition.confidence = request.confidence
+        # If rejecting, also deselect
+        if request.confidence == "rejected":
+            edition.selected = False
+
+    return {"updated": len(editions), "confidence": request.confidence}
 
 
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)

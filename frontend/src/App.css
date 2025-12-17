@@ -1938,9 +1938,94 @@ button:disabled {
   border-bottom-color: rgba(99, 102, 241, 0.3);
 }
 
-.edition-discovery.tufte .col-check {
-  width: 30px;
+.edition-discovery.tufte .col-batch {
+  width: 28px;
   text-align: center;
+  padding-right: 0 !important;
+}
+
+.edition-discovery.tufte .col-check {
+  width: 28px;
+  text-align: center;
+  padding-left: 0 !important;
+}
+
+.edition-discovery.tufte .col-actions {
+  width: 60px;
+  text-align: right;
+}
+
+.edition-discovery.tufte .edition-table tr.row-selected {
+  background: rgba(245, 158, 11, 0.15);
+}
+
+.edition-discovery.tufte .edition-table tr.row-selected td {
+  border-bottom-color: rgba(245, 158, 11, 0.3);
+}
+
+/* Batch action bar */
+.edition-discovery.tufte .batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+}
+
+.edition-discovery.tufte .batch-bar span {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+/* Icon buttons */
+.edition-discovery.tufte .btn-icon {
+  background: transparent;
+  border: none;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.edition-discovery.tufte .btn-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.edition-discovery.tufte .btn-icon.btn-up:hover {
+  color: var(--success);
+}
+
+.edition-discovery.tufte .btn-icon.btn-down:hover,
+.edition-discovery.tufte .btn-icon:hover {
+  color: var(--danger);
+}
+
+.edition-discovery.tufte .btn-icon.btn-restore:hover {
+  color: var(--accent);
+}
+
+/* Button variants */
+.edition-discovery.tufte .btn-danger {
+  background: var(--danger) !important;
+  color: white !important;
+}
+
+.edition-discovery.tufte .btn-danger:hover {
+  background: #dc2626 !important;
+}
+
+/* Group actions */
+.edition-discovery.tufte .group-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .edition-discovery.tufte .col-title {

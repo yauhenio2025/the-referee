@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
@@ -91,9 +91,57 @@ export default function EditionDiscovery({ paper, onBack }) {
     onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
   })
 
+  // Optimistic update helper for selections
+  const updateEditionsOptimistically = useCallback((ids, updates) => {
+    queryClient.setQueryData(['editions', paper.id], (old) => {
+      if (!old) return old
+      return old.map(ed => ids.includes(ed.id) ? { ...ed, ...updates } : ed)
+    })
+  }, [queryClient, paper.id])
+
   const selectEditions = useMutation({
     mutationFn: ({ ids, selected }) => api.selectEditions(ids, selected),
-    onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
+    onMutate: async ({ ids, selected }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries(['editions', paper.id])
+      // Snapshot previous value
+      const previous = queryClient.getQueryData(['editions', paper.id])
+      // Optimistically update
+      updateEditionsOptimistically(ids, { selected })
+      return { previous }
+    },
+    onError: (err, variables, context) => {
+      // Rollback on error
+      if (context?.previous) {
+        queryClient.setQueryData(['editions', paper.id], context.previous)
+      }
+    },
+    onSettled: () => {
+      // Refetch after mutation settles
+      queryClient.invalidateQueries(['editions', paper.id])
+    },
+  })
+
+  const updateConfidence = useMutation({
+    mutationFn: ({ ids, confidence }) => api.updateEditionConfidence(ids, confidence),
+    onMutate: async ({ ids, confidence }) => {
+      await queryClient.cancelQueries(['editions', paper.id])
+      const previous = queryClient.getQueryData(['editions', paper.id])
+      // Optimistically update - if rejecting, also deselect
+      const updates = confidence === 'rejected'
+        ? { confidence, selected: false }
+        : { confidence }
+      updateEditionsOptimistically(ids, updates)
+      return { previous }
+    },
+    onError: (err, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['editions', paper.id], context.previous)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(['editions', paper.id])
+    },
   })
 
   const extractCitations = useMutation({
@@ -218,13 +266,25 @@ export default function EditionDiscovery({ paper, onBack }) {
   }
 
   const selectAll = () => {
-    const ids = editions.map(e => e.id)
+    const ids = editions.filter(e => e.confidence !== 'rejected').map(e => e.id)
     selectEditions.mutate({ ids, selected: true })
   }
 
   const deselectAll = () => {
     const ids = editions.map(e => e.id)
     selectEditions.mutate({ ids, selected: false })
+  }
+
+  const markAsIrrelevant = (ids) => {
+    if (ids.length) updateConfidence.mutate({ ids, confidence: 'rejected' })
+  }
+
+  const markAsUncertain = (ids) => {
+    if (ids.length) updateConfidence.mutate({ ids, confidence: 'uncertain' })
+  }
+
+  const markAsHigh = (ids) => {
+    if (ids.length) updateConfidence.mutate({ ids, confidence: 'high' })
   }
 
   const toggleGroup = (group) => {
@@ -368,7 +428,11 @@ export default function EditionDiscovery({ paper, onBack }) {
               onToggle={() => toggleGroup('high')}
               onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
               onSelectAll={() => selectByConfidence('high')}
+              onDeselectAll={() => deselectByConfidence('high')}
+              onMarkIrrelevant={(ids) => markAsIrrelevant(ids)}
+              onMarkUncertain={(ids) => markAsUncertain(ids)}
               className="group-high"
+              showMarkAs="uncertain"
             />
           )}
 
@@ -381,7 +445,11 @@ export default function EditionDiscovery({ paper, onBack }) {
               onToggle={() => toggleGroup('uncertain')}
               onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
               onSelectAll={() => selectByConfidence('uncertain')}
+              onDeselectAll={() => deselectByConfidence('uncertain')}
+              onMarkIrrelevant={(ids) => markAsIrrelevant(ids)}
+              onMarkHigh={(ids) => markAsHigh(ids)}
               className="group-uncertain"
+              showMarkAs="both"
             />
           )}
 
@@ -393,8 +461,12 @@ export default function EditionDiscovery({ paper, onBack }) {
               expanded={expandedGroups.rejected}
               onToggle={() => toggleGroup('rejected')}
               onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
-              onSelectAll={() => selectByConfidence('rejected')}
+              onSelectAll={() => {}}
+              onDeselectAll={() => {}}
+              onMarkUncertain={(ids) => markAsUncertain(ids)}
+              onMarkHigh={(ids) => markAsHigh(ids)}
               className="group-rejected"
+              showMarkAs="restore"
             />
           )}
         </div>
@@ -470,9 +542,52 @@ export default function EditionDiscovery({ paper, onBack }) {
 /**
  * Edition Group - collapsible section with table rows
  */
-function EditionGroup({ title, editions, expanded, onToggle, onSelect, onSelectAll, className }) {
+function EditionGroup({
+  title,
+  editions,
+  expanded,
+  onToggle,
+  onSelect,
+  onSelectAll,
+  onDeselectAll,
+  onMarkIrrelevant,
+  onMarkUncertain,
+  onMarkHigh,
+  className,
+  showMarkAs
+}) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+
+  // Toggle row selection for batch operations
+  const toggleRowSelection = (id, e) => {
+    e.stopPropagation()
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const selectAllRows = () => {
+    setSelectedIds(new Set(editions.map(e => e.id)))
+  }
+
+  const clearRowSelection = () => {
+    setSelectedIds(new Set())
+  }
+
+  const handleBatchAction = (action) => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    action(ids)
+    setSelectedIds(new Set())
+  }
 
   return (
     <div className={`ed-group ${className}`}>
@@ -482,28 +597,91 @@ function EditionGroup({ title, editions, expanded, onToggle, onSelect, onSelectA
         <span className="group-stats">
           {selectedCount}/{editions.length} selected · {totalCitations.toLocaleString()} citations
         </span>
-        <button className="btn-xs" onClick={(e) => { e.stopPropagation(); onSelectAll(); }}>
-          Select all
-        </button>
+        <div className="group-actions" onClick={e => e.stopPropagation()}>
+          {title !== 'Rejected' && (
+            <>
+              <button className="btn-xs" onClick={onSelectAll} title="Select all for citation extraction">
+                Select all
+              </button>
+              <button className="btn-xs" onClick={onDeselectAll} title="Deselect all">
+                Deselect
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {expanded && (
-        <table className="edition-table">
-          <thead>
-            <tr>
-              <th className="col-check"></th>
-              <th className="col-title">Title / Authors</th>
-              <th className="col-year">Year</th>
-              <th className="col-lang">Lang</th>
-              <th className="col-cites">Citations</th>
-            </tr>
-          </thead>
-          <tbody>
-            {editions.map(ed => (
-              <EditionRow key={ed.id} edition={ed} onSelect={onSelect} />
-            ))}
-          </tbody>
-        </table>
+        <>
+          {/* Batch action bar when rows are selected */}
+          {selectedIds.size > 0 && (
+            <div className="batch-bar">
+              <span>{selectedIds.size} row(s) selected</span>
+              {showMarkAs === 'uncertain' && (
+                <button className="btn-xs btn-warning" onClick={() => handleBatchAction(onMarkIrrelevant)}>
+                  Mark Irrelevant
+                </button>
+              )}
+              {showMarkAs === 'both' && (
+                <>
+                  <button className="btn-xs btn-success" onClick={() => handleBatchAction(onMarkHigh)}>
+                    → High
+                  </button>
+                  <button className="btn-xs btn-danger" onClick={() => handleBatchAction(onMarkIrrelevant)}>
+                    Mark Irrelevant
+                  </button>
+                </>
+              )}
+              {showMarkAs === 'restore' && (
+                <>
+                  <button className="btn-xs btn-success" onClick={() => handleBatchAction(onMarkHigh)}>
+                    → High
+                  </button>
+                  <button className="btn-xs" onClick={() => handleBatchAction(onMarkUncertain)}>
+                    → Uncertain
+                  </button>
+                </>
+              )}
+              <button className="btn-xs" onClick={clearRowSelection}>Cancel</button>
+            </div>
+          )}
+
+          <table className="edition-table">
+            <thead>
+              <tr>
+                <th className="col-batch">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === editions.length && editions.length > 0}
+                    onChange={(e) => e.target.checked ? selectAllRows() : clearRowSelection()}
+                    title="Select rows for batch action"
+                  />
+                </th>
+                <th className="col-check"></th>
+                <th className="col-title">Title / Authors</th>
+                <th className="col-year">Year</th>
+                <th className="col-lang">Lang</th>
+                <th className="col-cites">Citations</th>
+                <th className="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {editions.map(ed => (
+                <EditionRow
+                  key={ed.id}
+                  edition={ed}
+                  onSelect={onSelect}
+                  isRowSelected={selectedIds.has(ed.id)}
+                  onToggleRowSelect={(e) => toggleRowSelection(ed.id, e)}
+                  onMarkIrrelevant={onMarkIrrelevant}
+                  onMarkHigh={onMarkHigh}
+                  onMarkUncertain={onMarkUncertain}
+                  showMarkAs={showMarkAs}
+                />
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   )
@@ -512,17 +690,41 @@ function EditionGroup({ title, editions, expanded, onToggle, onSelect, onSelectA
 /**
  * Edition Row - single compact row
  */
-function EditionRow({ edition, onSelect }) {
+function EditionRow({
+  edition,
+  onSelect,
+  isRowSelected,
+  onToggleRowSelect,
+  onMarkIrrelevant,
+  onMarkHigh,
+  onMarkUncertain,
+  showMarkAs
+}) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
 
+  // Handle checkbox click without triggering row selection
+  const handleCheckboxChange = (e) => {
+    e.stopPropagation()
+    onSelect(edition.id, e.target.checked)
+  }
+
   return (
-    <tr className={edition.selected ? 'selected' : ''}>
+    <tr className={`${edition.selected ? 'selected' : ''} ${isRowSelected ? 'row-selected' : ''}`}>
+      <td className="col-batch">
+        <input
+          type="checkbox"
+          checked={isRowSelected}
+          onChange={onToggleRowSelect}
+          title="Select for batch action"
+        />
+      </td>
       <td className="col-check">
         <input
           type="checkbox"
           checked={edition.selected}
-          onChange={e => onSelect(edition.id, e.target.checked)}
+          onChange={handleCheckboxChange}
+          title="Include in citation extraction"
         />
       </td>
       <td className="col-title">
@@ -548,6 +750,44 @@ function EditionRow({ edition, onSelect }) {
           <span className="cite-num">{edition.citation_count?.toLocaleString() || 0}</span>
           <div className="cite-bar" style={{ width: `${barWidth}%` }} />
         </div>
+      </td>
+      <td className="col-actions">
+        {showMarkAs === 'uncertain' && (
+          <button
+            className="btn-icon"
+            onClick={() => onMarkIrrelevant([edition.id])}
+            title="Mark as irrelevant"
+          >
+            ✕
+          </button>
+        )}
+        {showMarkAs === 'both' && (
+          <>
+            <button
+              className="btn-icon btn-up"
+              onClick={() => onMarkHigh([edition.id])}
+              title="Move to High Confidence"
+            >
+              ↑
+            </button>
+            <button
+              className="btn-icon btn-down"
+              onClick={() => onMarkIrrelevant([edition.id])}
+              title="Mark as irrelevant"
+            >
+              ✕
+            </button>
+          </>
+        )}
+        {showMarkAs === 'restore' && (
+          <button
+            className="btn-icon btn-restore"
+            onClick={() => onMarkUncertain([edition.id])}
+            title="Restore to Uncertain"
+          >
+            ↩
+          </button>
+        )}
       </td>
     </tr>
   )

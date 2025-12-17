@@ -105,6 +105,12 @@ class EditionSelectRequest(BaseModel):
     selected: bool
 
 
+class EditionUpdateConfidenceRequest(BaseModel):
+    """Mark editions as high/uncertain/rejected"""
+    edition_ids: List[int]
+    confidence: str  # "high", "uncertain", "rejected"
+
+
 class EditionFetchMoreRequest(BaseModel):
     """Request to fetch more editions in a specific language"""
     paper_id: int
