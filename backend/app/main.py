@@ -15,7 +15,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job
+from .models import Paper, Edition, Citation, Job, RawSearchResult
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -601,6 +601,40 @@ async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db)):
 
     job.status = "cancelled"
     return {"cancelled": True, "job_id": job_id}
+
+
+# ============== Debug Endpoints ==============
+
+@app.get("/api/debug/raw-results/{paper_id}")
+async def get_raw_search_results(
+    paper_id: int,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get raw search results for a paper (for debugging LLM classification)"""
+    query = (
+        select(RawSearchResult)
+        .where(RawSearchResult.paper_id == paper_id)
+        .order_by(RawSearchResult.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    records = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "job_id": r.job_id,
+            "search_type": r.search_type,
+            "target_language": r.target_language,
+            "query": r.query,
+            "result_count": r.result_count,
+            "raw_results": json.loads(r.raw_results) if r.raw_results else [],
+            "llm_classification": json.loads(r.llm_classification) if r.llm_classification else {},
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in records
+    ]
 
 
 # ============== Language Endpoints ==============

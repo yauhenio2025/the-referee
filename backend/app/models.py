@@ -153,6 +153,34 @@ class Job(Base):
     )
 
 
+class RawSearchResult(Base):
+    """Raw search results before LLM processing - for debugging/auditing"""
+    __tablename__ = "raw_search_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
+    job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
+
+    # Search context
+    search_type: Mapped[str] = mapped_column(String(50))  # discover_editions, fetch_more
+    target_language: Mapped[Optional[str]] = mapped_column(String(50))
+    query: Mapped[str] = mapped_column(Text)
+
+    # Raw results from Scholar (before LLM)
+    raw_results: Mapped[str] = mapped_column(Text)  # JSON array
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # LLM classification results
+    llm_classification: Mapped[Optional[str]] = mapped_column(Text)  # JSON with high/uncertain/rejected
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_raw_search_paper", "paper_id"),
+        Index("ix_raw_search_job", "job_id"),
+    )
+
+
 class SearchCache(Base):
     """Cache for Google Scholar search results"""
     __tablename__ = "search_cache"

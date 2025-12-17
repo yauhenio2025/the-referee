@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Job, Paper, Edition
+from ..models import Job, Paper, Edition, RawSearchResult
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 
@@ -90,6 +90,25 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
         target_language=language,
         max_results=max_results,
     )
+
+    # Save raw results for debugging/auditing (before LLM processing)
+    raw_results = discovery_result.get("rawResults", [])
+    if raw_results:
+        queries_used = discovery_result.get("queriesUsed", [])
+        query_str = "; ".join([q.get("query", str(q))[:100] for q in queries_used[:3]]) if queries_used else "unknown"
+
+        raw_search_record = RawSearchResult(
+            paper_id=paper_id,
+            job_id=job.id,
+            search_type="fetch_more",
+            target_language=language,
+            query=query_str,
+            raw_results=json.dumps(raw_results, ensure_ascii=False),
+            result_count=len(raw_results),
+            llm_classification=json.dumps(discovery_result.get("llmClassification", {}), ensure_ascii=False),
+        )
+        db.add(raw_search_record)
+        logger.info(f"[Worker] Saved {len(raw_results)} raw results for debugging")
 
     # Store new editions
     new_editions = []

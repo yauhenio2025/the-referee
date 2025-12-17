@@ -806,6 +806,14 @@ ONLY return the JSON object, no other text."""
             "rejected": evaluation.get("rejected", []),
             "queriesUsed": queries_used,
             "totalSearched": len(all_results),
+            # Raw results for debugging - before LLM processing
+            "rawResults": all_results,
+            "llmClassification": {
+                "highCount": len(evaluation.get("highConfidence", [])),
+                "uncertainCount": len(evaluation.get("uncertain", [])),
+                "rejectedCount": len(evaluation.get("rejected", [])),
+                "reasoning": evaluation.get("reasoning", ""),
+            },
         }
 
     async def _generate_targeted_queries(
