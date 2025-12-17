@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api } from './lib/api'
 import './App.css'
 
@@ -13,8 +14,17 @@ import Stats from './components/Stats'
 const queryClient = new QueryClient()
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState('papers')
   const [selectedPaper, setSelectedPaper] = useState(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  // Determine active tab from URL
+  const getActiveTab = () => {
+    if (location.pathname.startsWith('/paper/')) return 'editions'
+    if (location.pathname === '/jobs') return 'jobs'
+    return 'papers'
+  }
+  const activeTab = getActiveTab()
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['stats'],
@@ -22,11 +32,21 @@ function AppContent() {
     refetchInterval: 10000,
   })
 
+  const handleSelectPaper = (paper) => {
+    setSelectedPaper(paper)
+    navigate(`/paper/${paper.id}`)
+  }
+
+  const handleBack = () => {
+    setSelectedPaper(null)
+    navigate('/')
+  }
+
   return (
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <h1 className="logo">
+          <h1 className="logo" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
             <span className="logo-icon">⚖️</span>
             The Referee
           </h1>
@@ -38,48 +58,42 @@ function AppContent() {
       <nav className="tabs">
         <button
           className={`tab ${activeTab === 'papers' ? 'active' : ''}`}
-          onClick={() => setActiveTab('papers')}
+          onClick={() => navigate('/')}
         >
           📚 Papers
         </button>
         <button
           className={`tab ${activeTab === 'editions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('editions')}
-          disabled={!selectedPaper}
+          onClick={() => selectedPaper && navigate(`/paper/${selectedPaper.id}`)}
+          disabled={!selectedPaper && activeTab !== 'editions'}
         >
           📖 Editions {selectedPaper && `(${selectedPaper.title.slice(0, 30)}...)`}
         </button>
         <button
           className={`tab ${activeTab === 'jobs' ? 'active' : ''}`}
-          onClick={() => setActiveTab('jobs')}
+          onClick={() => navigate('/jobs')}
         >
           ⚙️ Jobs {stats?.jobs?.running > 0 && <span className="badge">{stats.jobs.running}</span>}
         </button>
       </nav>
 
       <main className="main">
-        {activeTab === 'papers' && (
-          <div className="papers-view">
-            <PaperInput onPaperAdded={() => refetchStats()} />
-            <PaperList
-              onSelectPaper={(paper) => {
-                setSelectedPaper(paper)
-                setActiveTab('editions')
-              }}
+        <Routes>
+          <Route path="/" element={
+            <div className="papers-view">
+              <PaperInput onPaperAdded={() => refetchStats()} />
+              <PaperList onSelectPaper={handleSelectPaper} />
+            </div>
+          } />
+          <Route path="/paper/:paperId" element={
+            <PaperEditionsRoute
+              selectedPaper={selectedPaper}
+              setSelectedPaper={setSelectedPaper}
+              onBack={handleBack}
             />
-          </div>
-        )}
-
-        {activeTab === 'editions' && selectedPaper && (
-          <EditionDiscovery
-            paper={selectedPaper}
-            onBack={() => setActiveTab('papers')}
-          />
-        )}
-
-        {activeTab === 'jobs' && (
-          <JobQueue />
-        )}
+          } />
+          <Route path="/jobs" element={<JobQueue />} />
+        </Routes>
       </main>
 
       <footer className="footer">
@@ -89,10 +103,48 @@ function AppContent() {
   )
 }
 
+// Route component that loads paper by ID from URL
+function PaperEditionsRoute({ selectedPaper, setSelectedPaper, onBack }) {
+  const { paperId } = useParams()
+  const [loading, setLoading] = useState(!selectedPaper || selectedPaper.id !== parseInt(paperId))
+
+  useEffect(() => {
+    // If we have the paper already selected and it matches, use it
+    if (selectedPaper && selectedPaper.id === parseInt(paperId)) {
+      setLoading(false)
+      return
+    }
+
+    // Otherwise load it from API
+    setLoading(true)
+    api.getPaper(parseInt(paperId))
+      .then(paper => {
+        setSelectedPaper(paper)
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error('Failed to load paper:', err)
+        setLoading(false)
+      })
+  }, [paperId, selectedPaper, setSelectedPaper])
+
+  if (loading) {
+    return <div className="loading">Loading paper...</div>
+  }
+
+  if (!selectedPaper) {
+    return <div className="error">Paper not found</div>
+  }
+
+  return <EditionDiscovery paper={selectedPaper} onBack={onBack} />
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
     </QueryClientProvider>
   )
 }
