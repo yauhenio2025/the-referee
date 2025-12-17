@@ -80,6 +80,9 @@ class Edition(Base):
     # Supplementary flag - True if added via "Fetch more" button
     is_supplementary: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Track which job added this edition (for NEW badge - null means not new)
+    added_by_job_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships

@@ -79,6 +79,7 @@ class EditionResponse(BaseModel):
     auto_selected: bool
     selected: bool
     is_supplementary: bool = False
+    added_by_job_id: Optional[int] = None  # Non-null = NEW (from recent fetch job)
 
     class Config:
         from_attributes = True

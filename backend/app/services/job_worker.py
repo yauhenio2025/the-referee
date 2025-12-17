@@ -53,6 +53,15 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     if not paper:
         raise ValueError(f"Paper {paper_id} not found")
 
+    # Clear NEW status from previous fetch jobs for this paper+language
+    await db.execute(
+        update(Edition)
+        .where(Edition.paper_id == paper_id)
+        .where(Edition.language.ilike(f"%{language}%"))
+        .values(added_by_job_id=None)
+    )
+    await db.commit()
+
     # Get existing editions for duplicate check
     existing_result = await db.execute(
         select(Edition.scholar_id, Edition.title).where(Edition.paper_id == paper_id)
@@ -151,6 +160,7 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
             auto_selected=edition_data.get("autoSelected", False),
             selected=edition_data.get("confidence") == "high",
             is_supplementary=True,
+            added_by_job_id=job.id,  # Mark as NEW from this job
         )
         db.add(edition)
         new_editions.append({

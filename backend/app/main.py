@@ -319,6 +319,22 @@ async def update_edition_confidence(request: EditionUpdateConfidenceRequest, db:
     return {"updated": len(editions), "confidence": request.confidence}
 
 
+@app.post("/api/editions/clear-new")
+async def clear_new_badges(paper_id: int, language: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """Clear NEW badges for editions (set added_by_job_id to null)"""
+    from sqlalchemy import update
+
+    query = update(Edition).where(Edition.paper_id == paper_id)
+    if language:
+        query = query.where(Edition.language.ilike(f"%{language}%"))
+    query = query.values(added_by_job_id=None)
+
+    result = await db.execute(query)
+    await db.commit()
+
+    return {"cleared": result.rowcount, "paper_id": paper_id, "language": language}
+
+
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)
 async def fetch_more_editions(
     request: EditionFetchMoreRequest,
