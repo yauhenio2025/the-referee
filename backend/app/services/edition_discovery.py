@@ -457,12 +457,21 @@ paper that could be a citation to this work - translations, reprints, collected 
 variant titles, etc. When we later extract citations, we need ALL these sources to get complete
 citation coverage.
 
-KEY INSIGHT: Authors rarely write TWO books with similar titles. If the title looks related
-and the author matches (or is a variant), it's almost certainly the same work. For example:
-- "Il 18 brumaio di Napoleone Bonaparte" and "Il 18 brumaio di Luigi Bonaparte" = SAME WORK
-  (Marx wrote only ONE essay about the 18th Brumaire - title variations happen in translations)
-- "Rivoluzione e reazione in Francia: 1848-1850: le lotte di classe, il 18 brumaio..." = VALID
-  (This anthology CONTAINS the 18 Brumaire - scholars cite it, so we need it!)
+CRUCIAL INSIGHT - TRUST GOOGLE SCHOLAR'S RELEVANCE:
+These results were returned by Google Scholar for a search about "{title}".
+Google's algorithm already determined these are relevant matches.
+IF THE AUTHOR IS {author or 'the target author'} (or a variant) → ACCEPT IT.
+Don't second-guess Google's relevance matching based on title appearance!
+
+Examples of results Google returns that you MUST accept:
+- "Rivoluzione e reazione in Francia: 1848-1850" by Marx → Google returned this for "brumaio" search
+  because this anthology CONTAINS the 18 Brumaire. Accept it!
+- "Il 18 brumaio di Napoleone Bonaparte" → Name variant (Napoleone vs Luigi). Same work. Accept it!
+- "Il 18 brumaio di Luigi Napoleone" → Different formulation. Same work. Accept it!
+- "Opere scelte" by Marx containing brumaio → Collected works. Accept it!
+
+KEY RULE: Author matches {author or 'target author'} + Google returned it = HIGH CONFIDENCE
+The only reason to reject is if the author is CLEARLY someone else writing ABOUT the work.
 
 YOUR TASK - BE INCLUSIVE:
 Categorize each result (indices 0-{len(batch) - 1}):
@@ -865,35 +874,29 @@ TARGET WORK:
 - Author: "{author or 'Unknown'}"
 - Target Language: {target_language.upper()}
 
-CRITICAL: Generate queries that will find ACTUAL EDITIONS (translations/reprints), not papers ABOUT the work.
+CRITICAL: Generate queries that find ALL editions - translations, anthologies, collected works.
 
-IMPORTANT - TITLE VARIANTS IN TRANSLATIONS:
-Translations often have DIFFERENT titles than the original! Consider:
-1. People's names may be localized (e.g., "Louis Bonaparte" → "Luigi Bonaparte" OR "Luigi Napoleone" OR "Napoleone Bonaparte")
-2. Anthologies/collected works with different titles that CONTAIN this work
-3. Shortened titles, expanded titles, subtitle variations
-4. Historical name variants (Napoleon/Napoleone, Louis/Luigi/Ludwig)
+KEY STRATEGY: Use the MOST DISTINCTIVE term from the title + author restriction.
+Google Scholar will return anthologies and collected works that CONTAIN the work,
+even if their titles are different. Trust Google's matching!
 
-STRATEGIES FOR {target_language.upper()}:
-1. Include author's name in appropriate script
-2. Use MULTIPLE title translations - not just the literal one!
-3. Search for key unique terms (e.g., "brumaio" is rare, will find all variants)
-4. Search for collected works / anthologies by this author
-5. Try both strict (allintitle:) and loose queries
+For example, for "The Eighteenth Brumaire of Louis Bonaparte" by Marx:
+- The term "Brumaire/brumaio/Brumario" is RARE and distinctive
+- Query: allintitle:brumaio author:*marx* → catches ALL variants
+- This returns anthologies like "Rivoluzione e reazione in Francia" that CONTAIN the work
 
-EXAMPLE FOR "The Eighteenth Brumaire of Louis Bonaparte" IN ITALIAN:
-- "diciotto brumaio Luigi Bonaparte" marx
-- "diciotto brumaio Napoleone" marx (different name!)
-- "brumaio Luigi Napoleone" marx (variant formulation!)
-- allintitle:brumaio author:marx (broad catch-all)
-- "Rivoluzione reazione Francia" marx (anthology title)
-- "opere scelte" marx brumaio (collected works)
+QUERIES TO GENERATE:
+1. allintitle:[distinctive_term] author:*{author.split()[0] if author else 'author'}* (MOST IMPORTANT - catches everything)
+2. "[translated title]" {author or 'author'} (standard query)
+3. [key_term] [author_in_target_script] (for non-Latin scripts)
+4-6. Variations with different title translations
 
-Generate 8-12 queries specifically for {target_language}, covering ALL possible title variants!
+Generate 5-8 queries for {target_language}. The allintitle + author query is CRUCIAL!
 
 Return JSON array:
 [
-  {{ "query": "translated title keywords + author name", "rationale": "explanation" }},
+  {{ "query": "allintitle:brumaio author:*marx*", "rationale": "Broad catch-all for all title variants" }},
+  {{ "query": "\\"diciotto brumaio\\" marx", "rationale": "Standard title search" }},
   ...
 ]
 
