@@ -2082,6 +2082,26 @@ button:disabled {
   line-height: 1.2;
 }
 
+.edition-discovery.tufte .badge-new {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  margin-right: 0.4rem;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #000;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+  animation: pulse-new 2s ease-in-out infinite;
+}
+
+@keyframes pulse-new {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
 .edition-discovery.tufte .lang-tag {
   display: inline-block;
   padding: 0.1rem 0.3rem;

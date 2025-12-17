@@ -681,6 +681,7 @@ function EditionRow({
       </td>
       <td className="col-title">
         <div className="title-cell">
+          {edition.is_supplementary && <span className="badge-new">NEW</span>}
           {edition.link ? (
             <a href={edition.link} target="_blank" rel="noopener noreferrer" title={edition.title}>
               {edition.title.length > 80 ? edition.title.substring(0, 77) + '...' : edition.title}
