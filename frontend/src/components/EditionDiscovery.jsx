@@ -558,36 +558,9 @@ function EditionGroup({
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
-  const [selectedIds, setSelectedIds] = useState(new Set())
 
-  // Toggle row selection for batch operations
-  const toggleRowSelection = (id, e) => {
-    e.stopPropagation()
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }
-
-  const selectAllRows = () => {
-    setSelectedIds(new Set(editions.map(e => e.id)))
-  }
-
-  const clearRowSelection = () => {
-    setSelectedIds(new Set())
-  }
-
-  const handleBatchAction = (action) => {
-    const ids = Array.from(selectedIds)
-    if (ids.length === 0) return
-    action(ids)
-    setSelectedIds(new Set())
-  }
+  // Get IDs of selected editions for batch actions
+  const selectedIds = editions.filter(e => e.selected).map(e => e.id)
 
   return (
     <div className={`ed-group ${className}`}>
@@ -613,51 +586,49 @@ function EditionGroup({
 
       {expanded && (
         <>
-          {/* Batch action bar when rows are selected */}
-          {selectedIds.size > 0 && (
+          {/* Batch action bar when items are selected */}
+          {selectedCount > 0 && (
             <div className="batch-bar">
-              <span>{selectedIds.size} row(s) selected</span>
+              <span>{selectedCount} selected</span>
               {showMarkAs === 'uncertain' && (
-                <button className="btn-xs btn-warning" onClick={() => handleBatchAction(onMarkIrrelevant)}>
+                <button className="btn-xs btn-danger" onClick={() => onMarkIrrelevant(selectedIds)}>
                   Mark Irrelevant
                 </button>
               )}
               {showMarkAs === 'both' && (
                 <>
-                  <button className="btn-xs btn-success" onClick={() => handleBatchAction(onMarkHigh)}>
+                  <button className="btn-xs btn-success" onClick={() => onMarkHigh(selectedIds)}>
                     → High
                   </button>
-                  <button className="btn-xs btn-danger" onClick={() => handleBatchAction(onMarkIrrelevant)}>
+                  <button className="btn-xs btn-danger" onClick={() => onMarkIrrelevant(selectedIds)}>
                     Mark Irrelevant
                   </button>
                 </>
               )}
               {showMarkAs === 'restore' && (
                 <>
-                  <button className="btn-xs btn-success" onClick={() => handleBatchAction(onMarkHigh)}>
+                  <button className="btn-xs btn-success" onClick={() => onMarkHigh(selectedIds)}>
                     → High
                   </button>
-                  <button className="btn-xs" onClick={() => handleBatchAction(onMarkUncertain)}>
+                  <button className="btn-xs" onClick={() => onMarkUncertain(selectedIds)}>
                     → Uncertain
                   </button>
                 </>
               )}
-              <button className="btn-xs" onClick={clearRowSelection}>Cancel</button>
             </div>
           )}
 
           <table className="edition-table">
             <thead>
               <tr>
-                <th className="col-batch">
+                <th className="col-check">
                   <input
                     type="checkbox"
-                    checked={selectedIds.size === editions.length && editions.length > 0}
-                    onChange={(e) => e.target.checked ? selectAllRows() : clearRowSelection()}
-                    title="Select rows for batch action"
+                    checked={selectedCount === editions.length && editions.length > 0}
+                    onChange={(e) => e.target.checked ? onSelectAll() : onDeselectAll()}
+                    title="Select all"
                   />
                 </th>
-                <th className="col-check"></th>
                 <th className="col-title">Title / Authors</th>
                 <th className="col-year">Year</th>
                 <th className="col-lang">Lang</th>
@@ -671,8 +642,6 @@ function EditionGroup({
                   key={ed.id}
                   edition={ed}
                   onSelect={onSelect}
-                  isRowSelected={selectedIds.has(ed.id)}
-                  onToggleRowSelect={(e) => toggleRowSelection(ed.id, e)}
                   onMarkIrrelevant={onMarkIrrelevant}
                   onMarkHigh={onMarkHigh}
                   onMarkUncertain={onMarkUncertain}
@@ -693,8 +662,6 @@ function EditionGroup({
 function EditionRow({
   edition,
   onSelect,
-  isRowSelected,
-  onToggleRowSelect,
   onMarkIrrelevant,
   onMarkHigh,
   onMarkUncertain,
@@ -703,28 +670,13 @@ function EditionRow({
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
 
-  // Handle checkbox click without triggering row selection
-  const handleCheckboxChange = (e) => {
-    e.stopPropagation()
-    onSelect(edition.id, e.target.checked)
-  }
-
   return (
-    <tr className={`${edition.selected ? 'selected' : ''} ${isRowSelected ? 'row-selected' : ''}`}>
-      <td className="col-batch">
-        <input
-          type="checkbox"
-          checked={isRowSelected}
-          onChange={onToggleRowSelect}
-          title="Select for batch action"
-        />
-      </td>
+    <tr className={edition.selected ? 'selected' : ''}>
       <td className="col-check">
         <input
           type="checkbox"
           checked={edition.selected}
-          onChange={handleCheckboxChange}
-          title="Include in citation extraction"
+          onChange={(e) => onSelect(edition.id, e.target.checked)}
         />
       </td>
       <td className="col-title">

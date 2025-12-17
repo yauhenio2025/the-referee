@@ -1938,29 +1938,14 @@ button:disabled {
   border-bottom-color: rgba(99, 102, 241, 0.3);
 }
 
-.edition-discovery.tufte .col-batch {
-  width: 28px;
-  text-align: center;
-  padding-right: 0 !important;
-}
-
 .edition-discovery.tufte .col-check {
-  width: 28px;
+  width: 32px;
   text-align: center;
-  padding-left: 0 !important;
 }
 
 .edition-discovery.tufte .col-actions {
   width: 60px;
   text-align: right;
-}
-
-.edition-discovery.tufte .edition-table tr.row-selected {
-  background: rgba(245, 158, 11, 0.15);
-}
-
-.edition-discovery.tufte .edition-table tr.row-selected td {
-  border-bottom-color: rgba(245, 158, 11, 0.3);
 }
 
 /* Batch action bar */
