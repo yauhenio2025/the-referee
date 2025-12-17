@@ -21,7 +21,7 @@ from .schemas import (
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
     EditionFetchMoreRequest, EditionFetchMoreResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
-    JobResponse, JobDetail,
+    JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
 )
 
@@ -36,9 +36,15 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup"""
+    """Initialize database on startup, start background worker"""
     await init_db()
+    # Start background job worker
+    from .services.job_worker import start_worker
+    start_worker()
     yield
+    # Stop worker on shutdown
+    from .services.job_worker import stop_worker
+    stop_worker()
 
 
 app = FastAPI(
@@ -298,7 +304,7 @@ async def fetch_more_editions(
     request: EditionFetchMoreRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Fetch more editions in a specific language (supplementary search)"""
+    """Fetch more editions in a specific language (supplementary search) - SYNCHRONOUS version"""
     from .services.edition_discovery import EditionDiscoveryService
 
     # Get paper
@@ -376,6 +382,59 @@ async def fetch_more_editions(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Fetch more failed: {str(e)}")
+
+
+@app.post("/api/editions/fetch-more-async", response_model=FetchMoreJobResponse)
+async def fetch_more_editions_async(
+    request: FetchMoreJobRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Queue a fetch-more job to run in background - returns immediately with job ID"""
+    from .services.job_worker import create_fetch_more_job
+
+    # Verify paper exists
+    result = await db.execute(select(Paper).where(Paper.id == request.paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Check for existing pending/running job for same paper+language
+    existing = await db.execute(
+        select(Job).where(
+            Job.paper_id == request.paper_id,
+            Job.job_type == "fetch_more_editions",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    existing_job = existing.scalar_one_or_none()
+    if existing_job:
+        # Parse params to check language
+        params = json.loads(existing_job.params) if existing_job.params else {}
+        if params.get("language") == request.language:
+            return FetchMoreJobResponse(
+                job_id=existing_job.id,
+                paper_id=request.paper_id,
+                language=request.language,
+                status=existing_job.status,
+                message=f"Job already {existing_job.status} for {request.language}",
+            )
+
+    # Create new job
+    job = await create_fetch_more_job(
+        db=db,
+        paper_id=request.paper_id,
+        language=request.language,
+        max_results=request.max_results,
+    )
+    await db.commit()
+
+    return FetchMoreJobResponse(
+        job_id=job.id,
+        paper_id=request.paper_id,
+        language=request.language,
+        status="pending",
+        message=f"Queued fetch for {request.language} editions",
+    )
 
 
 # ============== Citation Extraction Endpoints ==============
@@ -485,17 +544,33 @@ async def get_cross_citations(
 async def list_jobs(
     status: str = None,
     job_type: str = None,
+    paper_id: int = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
-    """List jobs"""
+    """List jobs with parsed params"""
     query = select(Job).order_by(Job.created_at.desc()).limit(limit)
     if status:
         query = query.where(Job.status == status)
     if job_type:
         query = query.where(Job.job_type == job_type)
+    if paper_id:
+        query = query.where(Job.paper_id == paper_id)
     result = await db.execute(query)
-    return result.scalars().all()
+    jobs = result.scalars().all()
+
+    # Parse params for each job
+    response = []
+    for job in jobs:
+        job_dict = {k: v for k, v in job.__dict__.items() if not k.startswith('_')}
+        # Parse params JSON
+        if job.params:
+            try:
+                job_dict['params'] = json.loads(job.params)
+            except:
+                job_dict['params'] = None
+        response.append(JobResponse(**job_dict))
+    return response
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobDetail)

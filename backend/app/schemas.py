@@ -161,10 +161,12 @@ class CrossCitationResult(BaseModel):
 
 class JobResponse(BaseModel):
     id: int
+    paper_id: Optional[int] = None
     job_type: str
     status: str
     progress: float
     progress_message: Optional[str] = None
+    params: Optional[dict] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -176,6 +178,22 @@ class JobResponse(BaseModel):
 
 class JobDetail(JobResponse):
     result: Optional[Any] = None
+
+
+class FetchMoreJobRequest(BaseModel):
+    """Request to queue a fetch-more job"""
+    paper_id: int
+    language: str
+    max_results: int = 50
+
+
+class FetchMoreJobResponse(BaseModel):
+    """Response from queueing a fetch-more job"""
+    job_id: int
+    paper_id: int
+    language: str
+    status: str
+    message: str
 
 
 # ============== Language Schemas ==============

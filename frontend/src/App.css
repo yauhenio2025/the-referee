@@ -1802,13 +1802,33 @@ button:disabled {
   border-radius: 4px;
   font-size: 0.8rem;
   color: var(--text-secondary);
-  animation: pulse 1.5s infinite;
+  position: relative;
+  overflow: hidden;
+}
+
+.edition-discovery.tufte .fetch-progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(59, 130, 246, 0.2);
+  transition: width 0.5s ease-out;
+  z-index: 0;
+}
+
+.edition-discovery.tufte .fetch-progress-message {
+  position: relative;
+  z-index: 1;
 }
 
 .edition-discovery.tufte .fetch-progress.done {
   background: rgba(16, 185, 129, 0.1);
   color: var(--success);
-  animation: none;
+}
+
+.edition-discovery.tufte .fetch-progress.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
 }
 
 @keyframes pulse {

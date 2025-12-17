@@ -125,9 +125,12 @@ class Job(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     paper_id: Mapped[Optional[int]] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
 
-    job_type: Mapped[str] = mapped_column(String(50))  # resolve, discover_editions, extract_citations
+    job_type: Mapped[str] = mapped_column(String(50))  # resolve, discover_editions, extract_citations, fetch_more_editions
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, completed, failed
     priority: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Job parameters (JSON) - e.g., {"language": "italian", "max_results": 50}
+    params: Mapped[Optional[str]] = mapped_column(Text)
 
     # Progress
     progress: Mapped[float] = mapped_column(Float, default=0.0)

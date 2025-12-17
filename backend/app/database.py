@@ -41,6 +41,8 @@ async def run_migrations():
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS candidates TEXT",
         # Add is_supplementary column to editions table (for fetch more feature)
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS is_supplementary BOOLEAN DEFAULT FALSE",
+        # Add params column to jobs table (for job-specific parameters)
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS params TEXT",
     ]
 
     async with engine.begin() as conn:

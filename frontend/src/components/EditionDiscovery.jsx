@@ -112,20 +112,72 @@ export default function EditionDiscovery({ paper, onBack }) {
   })
 
   const [fetchMoreProgress, setFetchMoreProgress] = useState(null)
+  const [activeJobs, setActiveJobs] = useState({}) // { language: jobId }
+
+  // Poll for job status updates
+  useEffect(() => {
+    const activeJobIds = Object.values(activeJobs).filter(Boolean)
+    if (activeJobIds.length === 0) return
+
+    const pollInterval = setInterval(async () => {
+      for (const [lang, jobId] of Object.entries(activeJobs)) {
+        if (!jobId) continue
+        try {
+          const job = await api.getJob(jobId)
+
+          if (job.status === 'running') {
+            setFetchMoreProgress({
+              language: lang,
+              message: job.progress_message || `Fetching ${lang} editions...`,
+              progress: job.progress,
+            })
+          } else if (job.status === 'completed') {
+            const result = job.result || {}
+            setFetchMoreProgress({
+              language: lang,
+              message: `Found ${result.new_editions_found || 0} new ${lang} editions!`,
+              progress: 100,
+              done: true,
+            })
+            setActiveJobs(prev => ({ ...prev, [lang]: null }))
+            queryClient.invalidateQueries(['editions', paper.id])
+            setTimeout(() => setFetchMoreProgress(null), 3000)
+          } else if (job.status === 'failed') {
+            setFetchMoreProgress({
+              language: lang,
+              message: `Failed: ${job.error || 'Unknown error'}`,
+              error: true,
+            })
+            setActiveJobs(prev => ({ ...prev, [lang]: null }))
+            setTimeout(() => setFetchMoreProgress(null), 5000)
+          }
+        } catch (err) {
+          console.error('Job poll error:', err)
+        }
+      }
+    }, 2000) // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval)
+  }, [activeJobs, queryClient, paper.id])
 
   const fetchMoreInLanguage = useMutation({
     mutationFn: async (language) => {
-      setFetchMoreProgress({ language, message: `Fetching more ${language} editions...` })
-      return await api.fetchMoreInLanguage(paper.id, language)
+      setFetchMoreProgress({ language, message: `Queueing ${language} fetch...`, progress: 0 })
+      // Use async version that queues a job
+      return await api.fetchMoreInLanguageAsync(paper.id, language)
     },
     onSuccess: (result) => {
-      setFetchMoreProgress({ language: result.language, message: `Found ${result.new_editions_found} new editions!`, done: true })
-      setTimeout(() => setFetchMoreProgress(null), 3000)
-      queryClient.invalidateQueries(['editions', paper.id])
+      // Job is now queued, start polling
+      setActiveJobs(prev => ({ ...prev, [result.language]: result.job_id }))
+      setFetchMoreProgress({
+        language: result.language,
+        message: result.message || `Queued: ${result.language}`,
+        progress: 5,
+      })
     },
     onError: (error) => {
-      setFetchMoreProgress(null)
-      console.error('Fetch more failed:', error)
+      setFetchMoreProgress({ message: `Error: ${error.message}`, error: true })
+      setTimeout(() => setFetchMoreProgress(null), 5000)
     },
   })
 
@@ -290,8 +342,11 @@ export default function EditionDiscovery({ paper, onBack }) {
           </div>
           {/* Fetch more progress */}
           {fetchMoreProgress && (
-            <div className={`fetch-progress ${fetchMoreProgress.done ? 'done' : ''}`}>
-              {fetchMoreProgress.message}
+            <div className={`fetch-progress ${fetchMoreProgress.done ? 'done' : ''} ${fetchMoreProgress.error ? 'error' : ''}`}>
+              {fetchMoreProgress.progress !== undefined && !fetchMoreProgress.done && !fetchMoreProgress.error && (
+                <div className="fetch-progress-bar" style={{ width: `${fetchMoreProgress.progress}%` }} />
+              )}
+              <span className="fetch-progress-message">{fetchMoreProgress.message}</span>
             </div>
           )}
         </div>
