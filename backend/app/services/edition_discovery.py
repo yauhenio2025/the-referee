@@ -554,6 +554,7 @@ ONLY return the JSON object."""
                 ]
 
                 return {
+                    "genuineEditions": high_confidence + uncertain,
                     "highConfidence": high_confidence,
                     "uncertain": uncertain,
                     "rejected": rejected,
