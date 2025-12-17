@@ -39,6 +39,8 @@ async def run_migrations():
     migrations = [
         # Add candidates column to papers table (for reconciliation feature)
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS candidates TEXT",
+        # Add is_supplementary column to editions table (for fetch more feature)
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS is_supplementary BOOLEAN DEFAULT FALSE",
     ]
 
     async with engine.begin() as conn:
