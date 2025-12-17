@@ -581,11 +581,13 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    response = JobDetail(
-        **{k: v for k, v in job.__dict__.items() if not k.startswith('_') and k != 'result'},
-        result=json.loads(job.result) if job.result else None,
-    )
-    return response
+    # Build response dict, excluding internal fields
+    job_dict = {k: v for k, v in job.__dict__.items() if not k.startswith('_') and k not in ('result', 'params')}
+    # Parse JSON fields
+    job_dict['result'] = json.loads(job.result) if job.result else None
+    job_dict['params'] = json.loads(job.params) if job.params else None
+
+    return JobDetail(**job_dict)
 
 
 @app.post("/api/jobs/{job_id}/cancel")
