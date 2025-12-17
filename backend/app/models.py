@@ -11,11 +11,28 @@ class Base(DeclarativeBase):
     pass
 
 
+class Collection(Base):
+    """A collection of related papers for grouped analysis"""
+    __tablename__ = "collections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    color: Mapped[Optional[str]] = mapped_column(String(20))  # For UI display (hex color)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    papers: Mapped[List["Paper"]] = relationship(back_populates="collection")
+
+
 class Paper(Base):
     """A seed paper to analyze for citations"""
     __tablename__ = "papers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    collection_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"), index=True)
     scholar_id: Mapped[Optional[str]] = mapped_column(String(50), unique=True, index=True)
     cluster_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
 
@@ -40,6 +57,7 @@ class Paper(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     editions: Mapped[List["Edition"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
     citations: Mapped[List["Citation"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
     jobs: Mapped[List["Job"]] = relationship(back_populates="paper", cascade="all, delete-orphan")

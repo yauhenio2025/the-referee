@@ -43,6 +43,9 @@ async def run_migrations():
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS is_supplementary BOOLEAN DEFAULT FALSE",
         # Add params column to jobs table (for job-specific parameters)
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS params TEXT",
+        # Add collection_id to papers (for collection feature)
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_papers_collection ON papers(collection_id)",
     ]
 
     async with engine.begin() as conn:

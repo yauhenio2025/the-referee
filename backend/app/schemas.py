@@ -6,6 +6,40 @@ from typing import Optional, List, Any
 from pydantic import BaseModel, Field
 
 
+# ============== Collection Schemas ==============
+
+class CollectionBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class CollectionCreate(CollectionBase):
+    """Create a new collection"""
+    pass
+
+
+class CollectionUpdate(BaseModel):
+    """Update collection fields (all optional)"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class CollectionResponse(CollectionBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    paper_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class CollectionDetail(CollectionResponse):
+    papers: List["PaperResponse"] = []
+
+
 # ============== Paper Schemas ==============
 
 class PaperBase(BaseModel):
@@ -17,12 +51,13 @@ class PaperBase(BaseModel):
 
 class PaperCreate(PaperBase):
     """Submit a paper for analysis"""
-    pass
+    collection_id: Optional[int] = None
 
 
 class PaperSubmitBatch(BaseModel):
     """Submit multiple papers for analysis"""
     papers: List[PaperCreate]
+    collection_id: Optional[int] = None  # Default collection for all papers
     auto_discover_editions: bool = True
     language_strategy: str = "major_languages"
     custom_languages: List[str] = []
@@ -44,6 +79,7 @@ class ScholarCandidate(BaseModel):
 
 class PaperResponse(PaperBase):
     id: int
+    collection_id: Optional[int] = None
     scholar_id: Optional[str] = None
     citation_count: int = 0
     language: Optional[str] = None
@@ -224,3 +260,4 @@ class AvailableLanguagesResponse(BaseModel):
 
 # Update forward references
 PaperDetail.model_rebuild()
+CollectionDetail.model_rebuild()

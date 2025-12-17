@@ -1,0 +1,10 @@
+#!/bin/bash
+# The Referee - Frontend Start Script
+
+cd /home/evgeny/projects/the-referee/frontend
+
+echo "Starting The Referee Frontend..."
+echo "Frontend: http://localhost:5173"
+echo ""
+
+npm run dev

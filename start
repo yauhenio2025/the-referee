@@ -1,0 +1,15 @@
+#!/bin/bash
+# The Referee - Start Script
+
+cd /home/evgeny/projects/the-referee/backend
+
+# Load environment variables
+export $(grep -v '^#' .env | xargs)
+
+echo "Starting The Referee API..."
+echo "Database: Render PostgreSQL"
+echo "API docs: http://localhost:8000/docs"
+echo ""
+
+# Run with uvicorn
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

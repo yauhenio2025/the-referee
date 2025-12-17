@@ -15,7 +15,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -23,6 +23,7 @@ from .schemas import (
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
+    CollectionCreate, CollectionUpdate, CollectionResponse, CollectionDetail,
 )
 
 # Configure logging
@@ -81,6 +82,172 @@ async def root():
     }
 
 
+# ============== Collection Endpoints ==============
+
+@app.post("/api/collections", response_model=CollectionResponse)
+async def create_collection(
+    collection: CollectionCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new collection"""
+    db_collection = Collection(
+        name=collection.name,
+        description=collection.description,
+        color=collection.color,
+    )
+    db.add(db_collection)
+    await db.flush()
+    await db.refresh(db_collection)
+    return CollectionResponse(
+        id=db_collection.id,
+        name=db_collection.name,
+        description=db_collection.description,
+        color=db_collection.color,
+        created_at=db_collection.created_at,
+        updated_at=db_collection.updated_at,
+        paper_count=0,
+    )
+
+
+@app.get("/api/collections", response_model=List[CollectionResponse])
+async def list_collections(db: AsyncSession = Depends(get_db)):
+    """List all collections with paper counts"""
+    result = await db.execute(
+        select(Collection).order_by(Collection.name)
+    )
+    collections = result.scalars().all()
+
+    # Get paper counts for each collection
+    responses = []
+    for c in collections:
+        count_result = await db.execute(
+            select(func.count(Paper.id)).where(Paper.collection_id == c.id)
+        )
+        paper_count = count_result.scalar() or 0
+        responses.append(CollectionResponse(
+            id=c.id,
+            name=c.name,
+            description=c.description,
+            color=c.color,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            paper_count=paper_count,
+        ))
+    return responses
+
+
+@app.get("/api/collections/{collection_id}", response_model=CollectionDetail)
+async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db)):
+    """Get collection details with papers"""
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Get papers in collection
+    papers_result = await db.execute(
+        select(Paper).where(Paper.collection_id == collection_id).order_by(Paper.created_at.desc())
+    )
+    papers = papers_result.scalars().all()
+
+    return CollectionDetail(
+        id=collection.id,
+        name=collection.name,
+        description=collection.description,
+        color=collection.color,
+        created_at=collection.created_at,
+        updated_at=collection.updated_at,
+        paper_count=len(papers),
+        papers=[PaperResponse(**{k: v for k, v in p.__dict__.items() if not k.startswith('_')}) for p in papers],
+    )
+
+
+@app.put("/api/collections/{collection_id}", response_model=CollectionResponse)
+async def update_collection(
+    collection_id: int,
+    update: CollectionUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a collection"""
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    if update.name is not None:
+        collection.name = update.name
+    if update.description is not None:
+        collection.description = update.description
+    if update.color is not None:
+        collection.color = update.color
+
+    # Get paper count
+    count_result = await db.execute(
+        select(func.count(Paper.id)).where(Paper.collection_id == collection_id)
+    )
+    paper_count = count_result.scalar() or 0
+
+    return CollectionResponse(
+        id=collection.id,
+        name=collection.name,
+        description=collection.description,
+        color=collection.color,
+        created_at=collection.created_at,
+        updated_at=collection.updated_at,
+        paper_count=paper_count,
+    )
+
+
+@app.delete("/api/collections/{collection_id}")
+async def delete_collection(collection_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a collection (papers are unassigned, not deleted)"""
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Unassign papers from collection
+    await db.execute(
+        select(Paper).where(Paper.collection_id == collection_id)
+    )
+
+    await db.delete(collection)
+    return {"deleted": True, "collection_id": collection_id}
+
+
+class PaperCollectionAssignment(BaseModel):
+    paper_ids: List[int]
+    collection_id: Optional[int] = None  # None to unassign
+
+
+@app.post("/api/collections/assign")
+async def assign_papers_to_collection(
+    assignment: PaperCollectionAssignment,
+    db: AsyncSession = Depends(get_db)
+):
+    """Assign papers to a collection (or unassign if collection_id is None)"""
+    # Verify collection exists if provided
+    if assignment.collection_id:
+        result = await db.execute(select(Collection).where(Collection.id == assignment.collection_id))
+        if not result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Update papers
+    result = await db.execute(
+        select(Paper).where(Paper.id.in_(assignment.paper_ids))
+    )
+    papers = result.scalars().all()
+
+    for paper in papers:
+        paper.collection_id = assignment.collection_id
+
+    return {
+        "updated": len(papers),
+        "collection_id": assignment.collection_id,
+        "paper_ids": [p.id for p in papers],
+    }
+
+
 # ============== Paper Endpoints ==============
 
 @app.post("/api/papers", response_model=PaperResponse)
@@ -95,6 +262,7 @@ async def create_paper(
         authors=paper.authors,
         year=paper.year,
         venue=paper.venue,
+        collection_id=paper.collection_id,
         status="pending",
     )
     db.add(db_paper)
@@ -125,11 +293,14 @@ async def create_papers_batch(
     created_papers = []
 
     for paper_data in request.papers:
+        # Use paper's collection_id if set, otherwise use batch default
+        collection_id = paper_data.collection_id or request.collection_id
         db_paper = Paper(
             title=paper_data.title,
             authors=paper_data.authors,
             year=paper_data.year,
             venue=paper_data.venue,
+            collection_id=collection_id,
             status="pending",
         )
         db.add(db_paper)
@@ -153,12 +324,15 @@ async def list_papers(
     skip: int = 0,
     limit: int = 100,
     status: str = None,
+    collection_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """List all papers"""
+    """List all papers, optionally filtered by status or collection"""
     query = select(Paper).offset(skip).limit(limit).order_by(Paper.created_at.desc())
     if status:
         query = query.where(Paper.status == status)
+    if collection_id is not None:
+        query = query.where(Paper.collection_id == collection_id)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -482,6 +656,8 @@ async def extract_citations(
     db: AsyncSession = Depends(get_db)
 ):
     """Extract citations for a paper (from selected editions)"""
+    from .services.job_worker import create_extract_citations_job
+
     result = await db.execute(select(Paper).where(Paper.id == request.paper_id))
     paper = result.scalar_one_or_none()
     if not paper:
@@ -496,20 +672,37 @@ async def extract_citations(
             Edition.selected == True
         )
     editions_result = await db.execute(editions_query)
-    editions = editions_result.scalars().all()
+    editions = list(editions_result.scalars().all())
 
     if not editions:
         raise HTTPException(status_code=400, detail="No editions selected for extraction")
 
-    # Create extraction job
-    job = Job(
-        paper_id=paper.id,
-        job_type="extract_citations",
-        status="pending",
+    # Check for existing pending/running job
+    existing = await db.execute(
+        select(Job).where(
+            Job.paper_id == request.paper_id,
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
     )
-    db.add(job)
-    await db.flush()
-    await db.refresh(job)
+    existing_job = existing.scalar_one_or_none()
+    if existing_job:
+        return CitationExtractionResponse(
+            job_id=existing_job.id,
+            paper_id=paper.id,
+            editions_to_process=len(editions),
+            estimated_time_minutes=0,
+        )
+
+    # Create extraction job with proper params
+    job = await create_extract_citations_job(
+        db=db,
+        paper_id=paper.id,
+        edition_ids=request.edition_ids or [],
+        max_citations_per_edition=min(request.max_citations_threshold, 500),
+        skip_threshold=request.max_citations_threshold,
+    )
+    await db.commit()
 
     # Estimate time
     total_citations = sum(e.citation_count for e in editions if e.citation_count <= request.max_citations_threshold)
@@ -824,6 +1017,7 @@ async def process_pending_jobs_endpoint(
 @app.get("/api/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
     """Get system statistics"""
+    collections_count = await db.execute(select(func.count(Collection.id)))
     papers_count = await db.execute(select(func.count(Paper.id)))
     editions_count = await db.execute(select(func.count(Edition.id)))
     citations_count = await db.execute(select(func.count(Citation.id)))
@@ -831,6 +1025,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     running_jobs = await db.execute(select(func.count(Job.id)).where(Job.status == "running"))
 
     return {
+        "collections": collections_count.scalar() or 0,
         "papers": papers_count.scalar() or 0,
         "editions": editions_count.scalar() or 0,
         "citations": citations_count.scalar() or 0,
