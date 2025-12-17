@@ -442,7 +442,7 @@ ONLY return the JSON array, no other text."""
             for i, r in enumerate(batch)
         ])
 
-        prompt = f"""You are evaluating Google Scholar search results to identify genuine editions of a specific work AND classify their languages.
+        prompt = f"""You are evaluating Google Scholar search results to identify editions of a work that scholars might cite.
 
 TARGET WORK:
 - Title: "{title}"
@@ -451,58 +451,66 @@ TARGET WORK:
 SEARCH RESULTS TO EVALUATE:
 {results_text}
 
-YOUR TASK:
-1. Categorize each result (use indices 0-{len(batch) - 1}):
+CRITICAL CONTEXT - THE USE CASE:
+We are gathering ALL versions of this work that scholars have cited. Our goal is to find every
+paper that could be a citation to this work - translations, reprints, collected works, anthologies,
+variant titles, etc. When we later extract citations, we need ALL these sources to get complete
+citation coverage.
 
-   HIGH CONFIDENCE GENUINE EDITION - Clearly IS the target work:
-   - Author field shows {author or 'the target author'} (or variants/transliterations in ANY script)
-   - Title is the same work (original, translation, reprint, collected works edition)
-   - TRANSLATIONS ARE EDITIONS! Different language = still a genuine edition!
+KEY INSIGHT: Authors rarely write TWO books with similar titles. If the title looks related
+and the author matches (or is a variant), it's almost certainly the same work. For example:
+- "Il 18 brumaio di Napoleone Bonaparte" and "Il 18 brumaio di Luigi Bonaparte" = SAME WORK
+  (Marx wrote only ONE essay about the 18th Brumaire - title variations happen in translations)
+- "Rivoluzione e reazione in Francia: 1848-1850: le lotte di classe, il 18 brumaio..." = VALID
+  (This anthology CONTAINS the 18 Brumaire - scholars cite it, so we need it!)
 
-   UNCERTAIN - Needs human review (BE GENEROUS - when in doubt, mark UNCERTAIN not REJECTED):
-   - Author unclear or might be editor/translator (but work could still be an edition)
-   - Title similar but might be different work
-   - Non-Latin script where you're unsure
+YOUR TASK - BE INCLUSIVE:
+Categorize each result (indices 0-{len(batch) - 1}):
 
-   REJECTED - ONLY reject when you are CERTAIN it's NOT an edition:
-   - CLEARLY different author (dissertation BY someone STUDYING the work)
-   - CLEARLY an analysis/commentary ABOUT the work (not the work itself)
-   - Title is obviously unrelated
+HIGH CONFIDENCE - Include if ANY of these apply:
+- Author field shows {author or 'the target author'} (any variant: Marx/K Marx/M Karl/马克思/Маркс/ماركس)
+- Title contains key terms from the target work in any language
+- It's a translation, reprint, collected works, or anthology CONTAINING the work
+- Title has minor variations (different transliterations of names, year variations, etc.)
 
-CRITICAL RULES FOR NON-LATIN SCRIPTS:
-1. If author field shows "{author}" or variants (Marx/马克思/Маркс/ماركس) → likely GENUINE
-2. If found via Arabic/Chinese/Russian query AND author matches → HIGH CONFIDENCE
-3. Arabic "الثامن عشر من برومير", Chinese "雾月十八日", Russian "Восемнадцатое брюмера" → GENUINE EDITIONS
-4. When uncertain about non-Latin scripts → mark UNCERTAIN, NOT rejected!
-5. Collected works editions (Selected Works, Complete Works, etc.) ARE genuine editions
+UNCERTAIN - When there's doubt but it COULD be the work:
+- Author unclear but title is close
+- Non-Latin script where you can't verify
+- Anthology that MIGHT contain the work
 
-2. CLASSIFY THE LANGUAGE of each result based on its TITLE (not the query language):
-   - "Der achtzehnte Brumaire" → German
-   - "El dieciocho brumario" → Spanish
-   - "Le dix-huit brumaire" → French
-   - "Il diciotto brumaio" → Italian
-   - Cyrillic script → Russian
-   - Chinese characters → Chinese
-   - Arabic script → Arabic
+REJECTED - ONLY reject when you are ABSOLUTELY CERTAIN:
+- Author is CLEARLY a different scholar writing ABOUT the work (e.g., "Il bonapartismo nel Diciotto Brumaio di Marx" by F. Antonini - this is ABOUT the work, not BY Marx)
+- Title is completely unrelated to the target work
+- It's obviously a commentary, dissertation, or analysis rather than the work itself
 
-Return a JSON object:
+REJECTION TEST: Ask yourself "Could a scholar who cited this be citing {author}'s work?"
+If YES or MAYBE → HIGH CONFIDENCE or UNCERTAIN
+If DEFINITELY NO → REJECTED
+
+LANGUAGE CLASSIFICATION - Based on title:
+- "Der achtzehnte Brumaire" → German
+- "El dieciocho brumario" → Spanish
+- "Le dix-huit brumaire" → French
+- "Il diciotto brumaio" → Italian
+- Cyrillic → Russian, Chinese chars → Chinese, Arabic script → Arabic
+
+Return JSON:
 {{
   "highConfidence": [0, 2, 5, ...],
   "uncertain": [7, 12, ...],
   "rejected": [
-    {{ "index": 1, "reason": "Clearly a dissertation BY someone about the work, author is [different author name]" }},
+    {{ "index": 1, "reason": "Article BY F. Antonini analyzing Marx's work - not an edition" }},
     ...
   ],
   "languages": {{
-    "0": "English",
+    "0": "Italian",
     "1": "German",
-    "2": "Chinese",
     ...
   }},
   "reasoning": "Brief explanation"
 }}
 
-ONLY return the JSON object, no other text."""
+ONLY return the JSON object."""
 
         try:
             response = self.client.messages.create(
