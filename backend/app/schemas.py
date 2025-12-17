@@ -78,6 +78,7 @@ class EditionResponse(BaseModel):
     confidence: str
     auto_selected: bool
     selected: bool
+    is_supplementary: bool = False
 
     class Config:
         from_attributes = True
@@ -102,6 +103,22 @@ class EditionDiscoveryResponse(BaseModel):
 class EditionSelectRequest(BaseModel):
     edition_ids: List[int]
     selected: bool
+
+
+class EditionFetchMoreRequest(BaseModel):
+    """Request to fetch more editions in a specific language"""
+    paper_id: int
+    language: str  # e.g., "italian", "arabic", "chinese"
+    max_results: int = 50
+
+
+class EditionFetchMoreResponse(BaseModel):
+    """Response from fetching more editions in a language"""
+    paper_id: int
+    language: str
+    new_editions_found: int
+    total_results_searched: int
+    queries_used: List[str]
 
 
 # ============== Citation Schemas ==============

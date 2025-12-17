@@ -1776,6 +1776,46 @@ button:disabled {
   color: var(--danger);
 }
 
+.edition-discovery.tufte .lang-chip.fetch-more {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+  font-weight: 500;
+}
+
+.edition-discovery.tufte .lang-chip.fetch-more:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.edition-discovery.tufte .lang-chip.fetch-more:disabled {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: transparent;
+  cursor: wait;
+}
+
+.edition-discovery.tufte .fetch-progress {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  animation: pulse 1.5s infinite;
+}
+
+.edition-discovery.tufte .fetch-progress.done {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* Edition Groups */
 .edition-discovery.tufte .ed-group {
   margin-bottom: 1rem;

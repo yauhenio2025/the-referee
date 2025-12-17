@@ -111,6 +111,24 @@ export default function EditionDiscovery({ paper, onBack }) {
     onSuccess: () => queryClient.invalidateQueries(['editions', paper.id]),
   })
 
+  const [fetchMoreProgress, setFetchMoreProgress] = useState(null)
+
+  const fetchMoreInLanguage = useMutation({
+    mutationFn: async (language) => {
+      setFetchMoreProgress({ language, message: `Fetching more ${language} editions...` })
+      return await api.fetchMoreInLanguage(paper.id, language)
+    },
+    onSuccess: (result) => {
+      setFetchMoreProgress({ language: result.language, message: `Found ${result.new_editions_found} new editions!`, done: true })
+      setTimeout(() => setFetchMoreProgress(null), 3000)
+      queryClient.invalidateQueries(['editions', paper.id])
+    },
+    onError: (error) => {
+      setFetchMoreProgress(null)
+      console.error('Fetch more failed:', error)
+    },
+  })
+
   // Computed data
   const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
     if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
@@ -253,11 +271,29 @@ export default function EditionDiscovery({ paper, onBack }) {
               </button>
             ))}
             {languageFilter && (
-              <button className="lang-chip clear" onClick={() => setLanguageFilter(null)}>
-                × Clear filter
-              </button>
+              <>
+                <button className="lang-chip clear" onClick={() => setLanguageFilter(null)}>
+                  × Clear filter
+                </button>
+                <button
+                  className="lang-chip fetch-more"
+                  onClick={() => fetchMoreInLanguage.mutate(languageFilter)}
+                  disabled={fetchMoreInLanguage.isPending}
+                  title={`Search for more ${languageFilter} editions`}
+                >
+                  {fetchMoreInLanguage.isPending && fetchMoreProgress?.language === languageFilter
+                    ? '⏳ Searching...'
+                    : `+ Fetch more ${languageFilter}`}
+                </button>
+              </>
             )}
           </div>
+          {/* Fetch more progress */}
+          {fetchMoreProgress && (
+            <div className={`fetch-progress ${fetchMoreProgress.done ? 'done' : ''}`}>
+              {fetchMoreProgress.message}
+            </div>
+          )}
         </div>
       )}
 

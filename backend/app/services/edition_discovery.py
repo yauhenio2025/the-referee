@@ -279,7 +279,7 @@ LANGUAGE FOCUS: All Languages
             lang_names = [l.get("name", l) for l in self.custom_languages] if isinstance(self.custom_languages[0], dict) else self.custom_languages
             custom_lang_instruction = f"\n\nADDITIONAL LANGUAGES: Also include queries for: {', '.join(lang_names)}"
 
-        prompt = f"""You are helping find ALL editions of an academic work on Google Scholar.
+        prompt = f"""You are helping find ALL EDITIONS (translations, reprints, collected works) of an academic work on Google Scholar.
 
 TARGET WORK:
 - Title: "{title}"
@@ -288,39 +288,52 @@ TARGET WORK:
 {language_instructions}{custom_lang_instruction}
 
 YOUR TASK:
-Generate Google Scholar search queries to find editions based on the language focus above.
+Generate Google Scholar search queries to find ACTUAL EDITIONS (not papers ABOUT the work).
 
-CONTEXT:
-- We want to catch editions with slight title variations
-- Classic works often have many editions: original, translations, reprints, collected works
-- Different editions may be cited separately, so we need ALL of them
-- Google Scholar supports: allintitle:"...", author:"*name*" (wildcards), "exact phrase"
+CRITICAL - FINDING EDITIONS vs PAPERS ABOUT THE WORK:
+- We want to find EDITIONS: translations, reprints, original texts
+- We do NOT want: dissertations about, analyses of, critiques of the work
+- Key difference: An EDITION has the author as Marx/Dostoevsky/etc
+  A paper ABOUT has a different author who is studying the work
+
+QUERY STRATEGIES:
+1. ALWAYS include author name to find editions BY the author
+2. For CJK: use the author's name in that script (马克思, マルクス, 맑스)
+3. For Arabic: use transliterated author name (ماركس)
+4. Combine: [translated title keywords] + [author name in that script]
 
 AUTHOR NAME HANDLING:
-1. ALPHABETIC SCRIPTS (Latin, Cyrillic, Greek, Arabic):
-   - Use SURNAME ONLY with wildcards: author:"*surname*"
-2. CJK SCRIPTS (Chinese, Japanese, Korean):
-   - DO NOT use author: operator - search by TITLE ONLY
+- Latin/Cyrillic/Greek: author:"*surname*" OR just "surname" in query
+- Chinese: 马克思 (Marx), 恩格斯 (Engels), 列宁 (Lenin)
+- Japanese: マルクス (Marx), エンゲルス (Engels)
+- Arabic: ماركس (Marx), إنجلز (Engels)
+- Korean: 마르크스 (Marx)
 
-QUERY STRATEGIES TO MIX:
-- STRICT: allintitle:"exact phrase" author:"*surname*" - precise but may miss results
-- MEDIUM: "quoted phrase" author:"*surname*" - without allintitle, catches more
-- LOOSE: just keywords no quotes - catches everything, needs filtering
+EXAMPLE QUERIES FOR "The Eighteenth Brumaire of Louis Bonaparte" by Marx:
+- English: "eighteenth brumaire" author:"*marx*"
+- German: "achtzehnte Brumaire" marx
+- French: "dix-huit brumaire" marx
+- Italian: "diciotto brumaio" marx
+- Spanish: "dieciocho brumario" marx
+- Portuguese: "dezoito brumário" marx
+- Russian: "Восемнадцатое брюмера" Маркс
+- Chinese: "路易·波拿巴的雾月十八日" 马克思 OR 雾月十八日 马克思
+- Arabic: "الثامن عشر من برومير" ماركس OR برومير ماركس
+- Japanese: "ブリュメール十八日" マルクス
 
-Generate 15-25 queries total, mixing strict and loose for each language!
+Generate 20-30 queries total covering ALL target languages!
 
-Return a JSON array of queries with LANGUAGE CODE for each:
+Return a JSON array:
 [
-  {{ "query": "allintitle:\\"eighteenth brumaire\\" author:\\"*marx*\\"", "rationale": "English STRICT", "lang": "english" }},
-  {{ "query": "\\"eighteenth brumaire\\" marx", "rationale": "English MEDIUM", "lang": "english" }},
-  {{ "query": "Der achtzehnte Brumaire marx", "rationale": "German MEDIUM", "lang": "german" }},
-  {{ "query": "Le dix-huit brumaire marx", "rationale": "French MEDIUM", "lang": "french" }},
-  {{ "query": "雾月十八日 马克思", "rationale": "Chinese LOOSE - keywords", "lang": "chinese" }},
-  {{ "query": "восемнадцатое брюмера маркс", "rationale": "Russian LOOSE", "lang": "russian" }},
+  {{ "query": "\\"eighteenth brumaire\\" author:\\"*marx*\\"", "rationale": "English - author restricted", "lang": "english" }},
+  {{ "query": "路易波拿巴的雾月十八日 马克思", "rationale": "Chinese - full title + author", "lang": "chinese" }},
+  {{ "query": "雾月十八日 马克思", "rationale": "Chinese - short title + author", "lang": "chinese" }},
+  {{ "query": "برومير ماركس", "rationale": "Arabic - Brumaire + Marx", "lang": "arabic" }},
+  {{ "query": "\\"diciotto brumaio\\" marx", "rationale": "Italian - title + author", "lang": "italian" }},
   ...
 ]
 
-IMPORTANT: Include "lang" field with lowercase language name (english, german, french, spanish, portuguese, italian, russian, chinese, japanese, korean, arabic, dutch, polish, turkish, etc.)
+Include "lang" field: english, german, french, spanish, portuguese, italian, russian, chinese, japanese, korean, arabic, dutch, etc.
 
 ONLY return the JSON array, no other text."""
 
@@ -423,9 +436,9 @@ ONLY return the JSON array, no other text."""
         title = target_paper.get("title", "")
         author = target_paper.get("author") or target_paper.get("authors", "")
 
-        # Format results - LLM detects language from title
+        # Format results - include query language context
         results_text = "\n\n".join([
-            f"[{i}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations"
+            f"[{i}] \"{r.get('title', 'Unknown')}\" by {r.get('authorsRaw', 'Unknown')} ({r.get('year', '?')}) - {r.get('citationCount', 0)} citations [found via {r.get('queryLanguage', 'unknown')} query]"
             for i, r in enumerate(batch)
         ])
 
@@ -442,28 +455,32 @@ YOUR TASK:
 1. Categorize each result (use indices 0-{len(batch) - 1}):
 
    HIGH CONFIDENCE GENUINE EDITION - Clearly IS the target work:
-   - Author matches ({author or 'the target author'} or variants in ANY script)
-   - Title is clearly the same work (original, translation, reprint)
-   - TRANSLATIONS COUNT AS GENUINE EDITIONS! Arabic/Chinese/Russian titles ARE editions!
+   - Author field shows {author or 'the target author'} (or variants/transliterations in ANY script)
+   - Title is the same work (original, translation, reprint, collected works edition)
+   - TRANSLATIONS ARE EDITIONS! Different language = still a genuine edition!
 
-   UNCERTAIN - Needs human review:
-   - Author unclear or might be editor/translator
+   UNCERTAIN - Needs human review (BE GENEROUS - when in doubt, mark UNCERTAIN not REJECTED):
+   - Author unclear or might be editor/translator (but work could still be an edition)
    - Title similar but might be different work
+   - Non-Latin script where you're unsure
 
-   REJECTED - Clearly NOT a genuine edition:
-   - Different author entirely (dissertation BY someone studying the work)
-   - Commentaries, analyses, works ABOUT the target work
+   REJECTED - ONLY reject when you are CERTAIN it's NOT an edition:
+   - CLEARLY different author (dissertation BY someone STUDYING the work)
+   - CLEARLY an analysis/commentary ABOUT the work (not the work itself)
+   - Title is obviously unrelated
 
-CRITICAL FOR NON-LATIN SCRIPTS - DO NOT REJECT TRANSLATIONS!
-- Arabic titles like "الثامن عشر من برومير" ARE genuine editions - ACCEPT!
-- Chinese titles like "路易·波拿巴的雾月十八日" ARE genuine editions - ACCEPT!
-- Russian titles like "Восемнадцатое брюмера" ARE genuine editions - ACCEPT!
-- Author field might show Latin "Marx" for Arabic/Chinese editions - normal!
+CRITICAL RULES FOR NON-LATIN SCRIPTS:
+1. If author field shows "{author}" or variants (Marx/马克思/Маркс/ماركس) → likely GENUINE
+2. If found via Arabic/Chinese/Russian query AND author matches → HIGH CONFIDENCE
+3. Arabic "الثامن عشر من برومير", Chinese "雾月十八日", Russian "Восемнадцатое брюмера" → GENUINE EDITIONS
+4. When uncertain about non-Latin scripts → mark UNCERTAIN, NOT rejected!
+5. Collected works editions (Selected Works, Complete Works, etc.) ARE genuine editions
 
-2. CLASSIFY THE LANGUAGE of each result based on its TITLE:
+2. CLASSIFY THE LANGUAGE of each result based on its TITLE (not the query language):
    - "Der achtzehnte Brumaire" → German
    - "El dieciocho brumario" → Spanish
    - "Le dix-huit brumaire" → French
+   - "Il diciotto brumaio" → Italian
    - Cyrillic script → Russian
    - Chinese characters → Chinese
    - Arabic script → Arabic
@@ -473,7 +490,7 @@ Return a JSON object:
   "highConfidence": [0, 2, 5, ...],
   "uncertain": [7, 12, ...],
   "rejected": [
-    {{ "index": 1, "reason": "Dissertation BY someone about the work" }},
+    {{ "index": 1, "reason": "Clearly a dissertation BY someone about the work, author is [different author name]" }},
     ...
   ],
   "languages": {{
@@ -712,3 +729,144 @@ ONLY return the JSON object, no other text."""
             "authorLanguage": None,
             "primaryMarkets": ["english"],
         }
+
+    async def fetch_more_in_language(
+        self,
+        paper: Dict[str, Any],
+        target_language: str,
+        max_results: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Fetch more editions in a specific language.
+        Used when user clicks "Fetch more" for a language filter.
+        """
+        title = paper.get("title", "")
+        author = paper.get("author") or paper.get("authors", "")
+        year = paper.get("year")
+
+        logger.info(f"═" * 80)
+        logger.info(f"[LLM-Discovery] Fetching more editions in {target_language.upper()}")
+        logger.info(f"  Title: {title}")
+        logger.info(f"═" * 80)
+
+        # Generate targeted queries for this specific language
+        queries = await self._generate_targeted_queries(paper, target_language)
+        logger.info(f"[LLM-Discovery] Generated {len(queries)} {target_language} queries")
+
+        # Execute queries
+        all_results = []
+        queries_used = []
+        hl_code = LANGUAGE_TO_HL_CODE.get(target_language, "en")
+
+        for i, q in enumerate(queries):
+            query_text = q.get("query", "")
+            queries_used.append(query_text)
+
+            logger.info(f"[LLM-Discovery] Query {i+1}/{len(queries)}: {query_text[:60]}...")
+
+            try:
+                results = await self.scholar.search(query_text, language=hl_code, max_results=30)
+                papers = results.get("papers", [])
+                logger.info(f"  Found: {len(papers)} results")
+
+                for p in papers:
+                    existing_idx = next(
+                        (j for j, r in enumerate(all_results)
+                         if r.get("title", "").lower() == p.get("title", "").lower() or
+                         r.get("scholarId") == p.get("scholarId")),
+                        None
+                    )
+                    if existing_idx is None:
+                        all_results.append({**p, "queryLanguage": target_language})
+
+            except Exception as e:
+                logger.error(f"  ERROR: {e}")
+
+            await asyncio.sleep(2)
+
+        logger.info(f"[LLM-Discovery] Total unique results for {target_language}: {len(all_results)}")
+
+        # Evaluate results
+        if not all_results:
+            return {
+                "genuineEditions": [],
+                "highConfidence": [],
+                "uncertain": [],
+                "rejected": [],
+                "queriesUsed": queries_used,
+                "totalSearched": 0,
+            }
+
+        evaluation = await self._evaluate_results(paper, all_results)
+
+        return {
+            "genuineEditions": evaluation.get("genuineEditions", []),
+            "highConfidence": evaluation.get("highConfidence", []),
+            "uncertain": evaluation.get("uncertain", []),
+            "rejected": evaluation.get("rejected", []),
+            "queriesUsed": queries_used,
+            "totalSearched": len(all_results),
+        }
+
+    async def _generate_targeted_queries(
+        self,
+        paper: Dict[str, Any],
+        target_language: str,
+    ) -> List[Dict[str, str]]:
+        """Generate queries specifically for one language"""
+        title = paper.get("title", "")
+        author = paper.get("author") or paper.get("authors", "")
+
+        prompt = f"""Generate Google Scholar queries to find EDITIONS of this work in {target_language.upper()}:
+
+TARGET WORK:
+- Title: "{title}"
+- Author: "{author or 'Unknown'}"
+- Target Language: {target_language.upper()}
+
+CRITICAL: Generate queries that will find ACTUAL EDITIONS (translations/reprints), not papers ABOUT the work.
+
+STRATEGIES FOR {target_language.upper()}:
+1. Include the author's name (in appropriate script for this language)
+2. Use the translated title keywords
+3. Mix strict and loose queries
+
+AUTHOR NAMES IN DIFFERENT SCRIPTS:
+- Chinese: 马克思 (Marx), 恩格斯 (Engels)
+- Arabic: ماركس (Marx), إنجلز (Engels)
+- Russian: Маркс (Marx)
+- Japanese: マルクス (Marx)
+
+Generate 5-8 queries specifically for {target_language}.
+
+Return JSON array:
+[
+  {{ "query": "translated title keywords + author name", "rationale": "explanation" }},
+  ...
+]
+
+ONLY return the JSON array."""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            text = response.content[0].text
+            json_match = re.search(r"\[[\s\S]*\]", text)
+            if json_match:
+                queries = json.loads(json_match.group())
+                # Add language tag to each query
+                for q in queries:
+                    q["lang"] = target_language
+                return queries
+
+        except Exception as e:
+            logger.error(f"[LLM-Discovery] Targeted query generation error: {e}")
+
+        # Fallback: simple query with author
+        return [
+            {"query": f'"{title}" {author}', "rationale": f"Fallback: title + author", "lang": target_language},
+        ]

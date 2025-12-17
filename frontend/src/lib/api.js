@@ -134,6 +134,17 @@ class RefereeAPI {
     });
   }
 
+  async fetchMoreInLanguage(paperId, language, maxResults = 50) {
+    return this.request('/api/editions/fetch-more', {
+      method: 'POST',
+      body: {
+        paper_id: paperId,
+        language: language.toLowerCase(),
+        max_results: maxResults,
+      },
+    });
+  }
+
   // Citations
   async extractCitations(paperId, options = {}) {
     return this.request('/api/citations/extract', {

@@ -19,6 +19,7 @@ from .models import Paper, Edition, Citation, Job
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
+    EditionFetchMoreRequest, EditionFetchMoreResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
@@ -290,6 +291,91 @@ async def select_editions(request: EditionSelectRequest, db: AsyncSession = Depe
         edition.selected = request.selected
 
     return {"updated": len(editions), "selected": request.selected}
+
+
+@app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)
+async def fetch_more_editions(
+    request: EditionFetchMoreRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Fetch more editions in a specific language (supplementary search)"""
+    from .services.edition_discovery import EditionDiscoveryService
+
+    # Get paper
+    result = await db.execute(select(Paper).where(Paper.id == request.paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get existing editions to check for duplicates
+    existing_result = await db.execute(
+        select(Edition.scholar_id, Edition.title).where(Edition.paper_id == request.paper_id)
+    )
+    existing_editions = {(e.scholar_id, e.title.lower()) for e in existing_result.fetchall()}
+
+    # Run targeted search
+    service = EditionDiscoveryService(
+        language_strategy="custom",
+        custom_languages=[request.language],
+    )
+
+    paper_dict = {
+        "title": paper.title,
+        "authors": paper.authors,
+        "year": paper.year,
+    }
+
+    try:
+        discovery_result = await service.fetch_more_in_language(
+            paper=paper_dict,
+            target_language=request.language,
+            max_results=request.max_results,
+        )
+
+        # Store new editions (skip duplicates)
+        new_editions = []
+        for edition_data in discovery_result.get("genuineEditions", []):
+            scholar_id = edition_data.get("scholarId")
+            title = edition_data.get("title", "")
+
+            # Check for duplicates
+            if (scholar_id, title.lower()) in existing_editions:
+                continue
+
+            edition = Edition(
+                paper_id=request.paper_id,
+                scholar_id=scholar_id,
+                cluster_id=edition_data.get("clusterId"),
+                title=title,
+                authors=edition_data.get("authorsRaw"),
+                year=edition_data.get("year"),
+                venue=edition_data.get("venue"),
+                abstract=edition_data.get("abstract"),
+                link=edition_data.get("link"),
+                citation_count=edition_data.get("citationCount", 0),
+                language=edition_data.get("language", request.language.capitalize()),
+                confidence=edition_data.get("confidence", "uncertain"),
+                auto_selected=edition_data.get("autoSelected", False),
+                selected=edition_data.get("confidence") == "high",
+                is_supplementary=True,  # Mark as supplementary addition
+            )
+            db.add(edition)
+            new_editions.append(edition)
+            existing_editions.add((scholar_id, title.lower()))
+
+        await db.commit()
+
+        return EditionFetchMoreResponse(
+            paper_id=request.paper_id,
+            language=request.language,
+            new_editions_found=len(new_editions),
+            total_results_searched=discovery_result.get("totalSearched", 0),
+            queries_used=discovery_result.get("queriesUsed", []),
+        )
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fetch more failed: {str(e)}")
 
 
 # ============== Citation Extraction Endpoints ==============

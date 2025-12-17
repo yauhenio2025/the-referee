@@ -77,6 +77,9 @@ class Edition(Base):
     # Selection status
     selected: Mapped[bool] = mapped_column(Boolean, default=False)  # User selected for citation extraction
 
+    # Supplementary flag - True if added via "Fetch more" button
+    is_supplementary: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
