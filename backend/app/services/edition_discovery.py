@@ -867,18 +867,29 @@ TARGET WORK:
 
 CRITICAL: Generate queries that will find ACTUAL EDITIONS (translations/reprints), not papers ABOUT the work.
 
+IMPORTANT - TITLE VARIANTS IN TRANSLATIONS:
+Translations often have DIFFERENT titles than the original! Consider:
+1. People's names may be localized (e.g., "Louis Bonaparte" → "Luigi Bonaparte" OR "Luigi Napoleone" OR "Napoleone Bonaparte")
+2. Anthologies/collected works with different titles that CONTAIN this work
+3. Shortened titles, expanded titles, subtitle variations
+4. Historical name variants (Napoleon/Napoleone, Louis/Luigi/Ludwig)
+
 STRATEGIES FOR {target_language.upper()}:
-1. Include the author's name (in appropriate script for this language)
-2. Use the translated title keywords
-3. Mix strict and loose queries
+1. Include author's name in appropriate script
+2. Use MULTIPLE title translations - not just the literal one!
+3. Search for key unique terms (e.g., "brumaio" is rare, will find all variants)
+4. Search for collected works / anthologies by this author
+5. Try both strict (allintitle:) and loose queries
 
-AUTHOR NAMES IN DIFFERENT SCRIPTS:
-- Chinese: 马克思 (Marx), 恩格斯 (Engels)
-- Arabic: ماركس (Marx), إنجلز (Engels)
-- Russian: Маркс (Marx)
-- Japanese: マルクス (Marx)
+EXAMPLE FOR "The Eighteenth Brumaire of Louis Bonaparte" IN ITALIAN:
+- "diciotto brumaio Luigi Bonaparte" marx
+- "diciotto brumaio Napoleone" marx (different name!)
+- "brumaio Luigi Napoleone" marx (variant formulation!)
+- allintitle:brumaio author:marx (broad catch-all)
+- "Rivoluzione reazione Francia" marx (anthology title)
+- "opere scelte" marx brumaio (collected works)
 
-Generate 5-8 queries specifically for {target_language}.
+Generate 8-12 queries specifically for {target_language}, covering ALL possible title variants!
 
 Return JSON array:
 [
