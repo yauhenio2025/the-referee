@@ -95,7 +95,12 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     raw_results = discovery_result.get("rawResults", [])
     if raw_results:
         queries_used = discovery_result.get("queriesUsed", [])
-        query_str = "; ".join([q.get("query", str(q))[:100] for q in queries_used[:3]]) if queries_used else "unknown"
+        # Handle both dict and string formats for queries
+        def get_query_str(q):
+            if isinstance(q, dict):
+                return q.get("query", str(q))[:100]
+            return str(q)[:100]
+        query_str = "; ".join([get_query_str(q) for q in queries_used[:3]]) if queries_used else "unknown"
 
         raw_search_record = RawSearchResult(
             paper_id=paper_id,
