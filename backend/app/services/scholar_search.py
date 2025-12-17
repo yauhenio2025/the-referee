@@ -463,7 +463,10 @@ class ScholarSearchService:
                 cited_by_link = el.select_one("a[href*='cites=']")
                 if cited_by_link:
                     cited_text = cited_by_link.get_text(strip=True)
-                    count_match = re.search(r"Cited by (\d+)", cited_text)
+                    # Match citation count in multiple languages:
+                    # English: "Cited by 123", Spanish: "Citado por 123",
+                    # French: "Cité 123 fois", German: "Zitiert von: 123", etc.
+                    count_match = re.search(r"(\d+)", cited_text)
                     if count_match:
                         citation_count = int(count_match.group(1))
 
