@@ -87,7 +87,8 @@ class ScholarSearchService:
         # Build URL
         params = {
             "q": query,
-            "hl": language,
+            "hl": language,  # UI language
+            "lr": f"lang_{language}",  # FILTER results by language (e.g., lang_it, lang_es)
             "as_sdt": "0,5",  # Search articles (not patents/legal)
         }
         if year_low:
