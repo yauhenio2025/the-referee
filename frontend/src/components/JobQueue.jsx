@@ -8,7 +8,8 @@ export default function JobQueue() {
     queryKey: ['jobs'],
     queryFn: () => api.listJobs(),
     // Poll faster when there are running jobs
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
+      const data = query.state.data
       const hasRunning = data?.some(j => j.status === 'running')
       return hasRunning ? 2000 : 5000
     },
