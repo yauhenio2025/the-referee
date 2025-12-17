@@ -22,6 +22,11 @@ from ..config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Timeout constants
+HTTP_TIMEOUT = 30.0  # 30s per HTTP request (reduced from 60)
+SEARCH_TOTAL_TIMEOUT = 120.0  # 2 minutes max per search query
+FETCH_RETRY_TIMEOUT = 90.0  # 90s max for all retries combined
+
 
 class ScholarSearchService:
     """Service for searching Google Scholar via Oxylabs"""
@@ -38,7 +43,14 @@ class ScholarSearchService:
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client"""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=60.0)
+            # Explicit timeout config - connect fast, allow longer reads
+            timeout = httpx.Timeout(
+                connect=10.0,  # 10s to establish connection
+                read=HTTP_TIMEOUT,  # 30s to read response
+                write=10.0,  # 10s to send request
+                pool=10.0,  # 10s to get connection from pool
+            )
+            self._client = httpx.AsyncClient(timeout=timeout)
         return self._client
 
     async def close(self):
@@ -72,6 +84,25 @@ class ScholarSearchService:
             Dict with 'papers' list and 'totalResults' count
         """
         logger.info(f"[SCHOLAR SEARCH] Query: \"{query[:60]}...\" lang={language}")
+
+        try:
+            return await asyncio.wait_for(
+                self._search_impl(query, language, max_results, year_low, year_high),
+                timeout=SEARCH_TOTAL_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[SCHOLAR SEARCH] Total timeout ({SEARCH_TOTAL_TIMEOUT}s) exceeded for query")
+            return {"papers": [], "totalResults": 0, "error": "Search timeout"}
+
+    async def _search_impl(
+        self,
+        query: str,
+        language: str,
+        max_results: int,
+        year_low: Optional[int],
+        year_high: Optional[int],
+    ) -> Dict[str, Any]:
+        """Internal search implementation"""
 
         # Check cache
         cache_key = self._get_cache_key(query, language)
@@ -160,6 +191,27 @@ class ScholarSearchService:
         """
         logger.info(f"[CITED BY] Scholar ID: {scholar_id}")
 
+        # Calculate timeout based on expected pages (longer for citation extraction)
+        expected_pages = (max_results + 9) // 10
+        total_timeout = min(expected_pages * 30, 600)  # 30s per page, max 10 minutes
+
+        try:
+            return await asyncio.wait_for(
+                self._get_cited_by_impl(scholar_id, max_results, year_low, year_high),
+                timeout=total_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[CITED BY] Total timeout ({total_timeout}s) exceeded")
+            return {"papers": [], "totalResults": 0, "error": "Citation fetch timeout"}
+
+    async def _get_cited_by_impl(
+        self,
+        scholar_id: str,
+        max_results: int,
+        year_low: Optional[int],
+        year_high: Optional[int],
+    ) -> Dict[str, Any]:
+        """Internal cited-by implementation"""
         params = {
             "hl": "en",
             "cites": scholar_id,
@@ -207,21 +259,30 @@ class ScholarSearchService:
             "pages_fetched": current_page,
         }
 
-    async def _fetch_with_retry(self, url: str, max_retries: int = 5) -> str:
-        """Fetch URL via Oxylabs with retry logic"""
+    async def _fetch_with_retry(self, url: str, max_retries: int = 3) -> str:
+        """Fetch URL via Oxylabs with retry logic and total timeout"""
         last_error = None
 
-        for attempt in range(max_retries):
-            try:
-                html = await self._fetch_via_oxylabs(url)
-                return html
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+        try:
+            # Wrap all retries in a total timeout
+            async with asyncio.timeout(FETCH_RETRY_TIMEOUT):
+                for attempt in range(max_retries):
+                    try:
+                        html = await self._fetch_via_oxylabs(url)
+                        return html
+                    except asyncio.TimeoutError:
+                        last_error = TimeoutError(f"HTTP request timed out on attempt {attempt + 1}")
+                        logger.warning(f"Attempt {attempt + 1}/{max_retries} timed out")
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
 
-                if attempt < max_retries - 1:
-                    backoff = 1000 * (2 ** attempt) / 1000  # Exponential backoff in seconds
-                    await asyncio.sleep(backoff)
+                    if attempt < max_retries - 1:
+                        backoff = min(2 ** attempt, 8)  # Cap backoff at 8 seconds
+                        await asyncio.sleep(backoff)
+
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"All retries exhausted after {FETCH_RETRY_TIMEOUT}s total timeout")
 
         raise last_error or Exception("All retry attempts failed")
 
@@ -275,51 +336,56 @@ class ScholarSearchService:
 
         raise Exception("Invalid Oxylabs response format")
 
-    async def _poll_oxylabs_job(self, job_id: str, max_attempts: int = 30) -> str:
-        """Poll Oxylabs async job until completion"""
+    async def _poll_oxylabs_job(self, job_id: str, max_attempts: int = 15) -> str:
+        """Poll Oxylabs async job until completion (max 30 seconds)"""
         auth_string = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
         client = await self._get_client()
 
         for attempt in range(max_attempts):
             if attempt > 0:
-                await asyncio.sleep(2)
+                await asyncio.sleep(2)  # 2s between polls = 30s max total
 
-            response = await client.get(
-                f"https://data.oxylabs.io/v1/queries/{job_id}",
-                headers={"Authorization": f"Basic {auth_string}"},
-            )
-
-            if response.status_code != 200:
-                raise Exception(f"Job status check failed: HTTP {response.status_code}")
-
-            data = response.json()
-            status = data.get("status")
-
-            logger.info(f"[OXYLABS POLL] Attempt {attempt + 1}: status={status}")
-
-            if status == "done":
-                # Fetch results
-                results_response = await client.get(
-                    f"https://data.oxylabs.io/v1/queries/{job_id}/results",
+            try:
+                response = await client.get(
+                    f"https://data.oxylabs.io/v1/queries/{job_id}",
                     headers={"Authorization": f"Basic {auth_string}"},
                 )
 
-                if results_response.status_code != 200:
-                    raise Exception(f"Results fetch failed: HTTP {results_response.status_code}")
+                if response.status_code != 200:
+                    raise Exception(f"Job status check failed: HTTP {response.status_code}")
 
-                results_data = results_response.json()
-                if results_data.get("results") and results_data["results"][0]:
-                    result = results_data["results"][0]
-                    content = result.get("content") or result.get("html") or result.get("body")
-                    if content:
-                        return content
+                data = response.json()
+                status = data.get("status")
 
-                raise Exception("Job completed but no content in results")
+                logger.info(f"[OXYLABS POLL] Attempt {attempt + 1}/{max_attempts}: status={status}")
 
-            if status == "faulted":
-                raise Exception("Job faulted during processing")
+                if status == "done":
+                    # Fetch results
+                    results_response = await client.get(
+                        f"https://data.oxylabs.io/v1/queries/{job_id}/results",
+                        headers={"Authorization": f"Basic {auth_string}"},
+                    )
 
-        raise Exception(f"Job polling timeout after {max_attempts} attempts")
+                    if results_response.status_code != 200:
+                        raise Exception(f"Results fetch failed: HTTP {results_response.status_code}")
+
+                    results_data = results_response.json()
+                    if results_data.get("results") and results_data["results"][0]:
+                        result = results_data["results"][0]
+                        content = result.get("content") or result.get("html") or result.get("body")
+                        if content:
+                            return content
+
+                    raise Exception("Job completed but no content in results")
+
+                if status == "faulted":
+                    raise Exception("Job faulted during processing")
+
+            except asyncio.TimeoutError:
+                logger.warning(f"[OXYLABS POLL] Attempt {attempt + 1} timed out")
+                continue
+
+        raise TimeoutError(f"Oxylabs job polling timeout after {max_attempts} attempts (~{max_attempts * 2}s)")
 
     def _parse_scholar_page(self, html: str) -> List[Dict[str, Any]]:
         """Parse Google Scholar HTML page and extract paper metadata"""
