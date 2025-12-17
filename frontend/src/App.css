@@ -924,6 +924,33 @@ button:disabled {
   margin-left: 0.5rem;
 }
 
+.job-params {
+  color: var(--accent);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.progress-message {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-row.status-running .progress-fill {
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  animation: pulse-progress 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-progress {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
 /* Utils */
 .loading, .empty, .error {
   text-align: center;

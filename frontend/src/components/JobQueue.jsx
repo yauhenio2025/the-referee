@@ -7,7 +7,11 @@ export default function JobQueue() {
   const { data: jobs, isLoading } = useQuery({
     queryKey: ['jobs'],
     queryFn: () => api.listJobs(),
-    refetchInterval: 5000,
+    // Poll faster when there are running jobs
+    refetchInterval: (data) => {
+      const hasRunning = data?.some(j => j.status === 'running')
+      return hasRunning ? 2000 : 5000
+    },
   })
 
   const cancelJob = useMutation({
@@ -33,8 +37,22 @@ export default function JobQueue() {
       resolve: 'Paper Resolution',
       discover_editions: 'Edition Discovery',
       extract_citations: 'Citation Extraction',
+      fetch_more_editions: 'Fetch More Editions',
     }
     return labels[type] || type
+  }
+
+  const getJobParams = (job) => {
+    if (!job.params) return null
+    try {
+      const params = typeof job.params === 'string' ? JSON.parse(job.params) : job.params
+      if (job.job_type === 'fetch_more_editions' && params.language) {
+        return `(${params.language})`
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 
   const formatTime = (dateString) => {
@@ -69,15 +87,18 @@ export default function JobQueue() {
                     <span className="status-icon">{getStatusIcon(job.status)}</span>
                     {job.status}
                   </td>
-                  <td>{getJobTypeLabel(job.job_type)}</td>
+                  <td>
+                    {getJobTypeLabel(job.job_type)}
+                    {getJobParams(job) && <span className="job-params"> {getJobParams(job)}</span>}
+                  </td>
                   <td>
                     <div className="progress-bar">
                       <div
                         className="progress-fill"
-                        style={{ width: `${job.progress * 100}%` }}
+                        style={{ width: `${Math.min(job.progress, 100)}%` }}
                       />
                     </div>
-                    <span className="progress-text">{Math.round(job.progress * 100)}%</span>
+                    <span className="progress-text">{Math.round(job.progress)}%</span>
                     {job.progress_message && (
                       <span className="progress-message">{job.progress_message}</span>
                     )}

@@ -743,10 +743,14 @@ ONLY return the JSON object, no other text."""
         paper: Dict[str, Any],
         target_language: str,
         max_results: int = 50,
+        progress_callback: Optional[callable] = None,
     ) -> Dict[str, Any]:
         """
         Fetch more editions in a specific language.
         Used when user clicks "Fetch more" for a language filter.
+
+        Args:
+            progress_callback: Optional async callback for progress updates
         """
         title = paper.get("title", "")
         author = paper.get("author") or paper.get("authors", "")
@@ -758,6 +762,12 @@ ONLY return the JSON object, no other text."""
         logger.info(f"═" * 80)
 
         # Generate targeted queries for this specific language
+        if progress_callback:
+            await progress_callback({
+                "stage": "generating_queries",
+                "message": f"Generating {target_language} queries...",
+            })
+
         queries = await self._generate_targeted_queries(paper, target_language)
         logger.info(f"[LLM-Discovery] Generated {len(queries)} {target_language} queries")
 
@@ -769,6 +779,14 @@ ONLY return the JSON object, no other text."""
         for i, q in enumerate(queries):
             query_text = q.get("query", "")
             queries_used.append(query_text)
+
+            if progress_callback:
+                await progress_callback({
+                    "stage": "searching",
+                    "query": i + 1,
+                    "total_queries": len(queries),
+                    "current_query": query_text[:50],
+                })
 
             logger.info(f"[LLM-Discovery] Query {i+1}/{len(queries)}: {query_text[:60]}...")
 
@@ -804,6 +822,13 @@ ONLY return the JSON object, no other text."""
                 "queriesUsed": queries_used,
                 "totalSearched": 0,
             }
+
+        if progress_callback:
+            await progress_callback({
+                "stage": "evaluating",
+                "total_results": len(all_results),
+                "message": f"Evaluating {len(all_results)} results...",
+            })
 
         evaluation = await self._evaluate_results(paper, all_results)
 

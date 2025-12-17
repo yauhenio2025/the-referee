@@ -74,21 +74,25 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     # Progress callback to update job status
     async def progress_callback(progress_data: Dict[str, Any]):
         stage = progress_data.get("stage", "")
-        if stage == "searching":
+        if stage == "generating_queries":
+            await update_job_progress(db, job.id, 5, "Generating search queries...")
+        elif stage == "searching":
             query_num = progress_data.get("query", 0)
             total = progress_data.get("total_queries", 1)
-            pct = (query_num / total) * 50  # Searching is 0-50%
-            msg = f"Searching query {query_num}/{total}: {progress_data.get('current_query', '')[:40]}..."
+            pct = 10 + (query_num / total) * 50  # Searching is 10-60%
+            current_query = progress_data.get('current_query', '')[:40]
+            msg = f"Searching [{query_num}/{total}]: {current_query}..."
             await update_job_progress(db, job.id, pct, msg)
         elif stage == "evaluating":
             total = progress_data.get("total_results", 0)
-            await update_job_progress(db, job.id, 60, f"Evaluating {total} results...")
+            await update_job_progress(db, job.id, 65, f"Evaluating {total} results with LLM...")
 
-    # Run discovery
+    # Run discovery with progress callback
     discovery_result = await service.fetch_more_in_language(
         paper=paper_dict,
         target_language=language,
         max_results=max_results,
+        progress_callback=progress_callback,
     )
 
     # Save raw results for debugging/auditing (before LLM processing)
@@ -119,6 +123,9 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     new_editions = []
     genuine = discovery_result.get("genuineEditions", [])
     total = len(genuine)
+
+    if total > 0:
+        await update_job_progress(db, job.id, 70, f"Saving {total} editions to database...")
 
     for i, edition_data in enumerate(genuine):
         scholar_id = edition_data.get("scholarId")
@@ -153,10 +160,10 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
         })
         existing_editions.add((scholar_id, title.lower()))
 
-        # Update progress (60-100% for storing)
-        if total > 0:
-            pct = 60 + ((i + 1) / total) * 40
-            await update_job_progress(db, job.id, pct, f"Saving edition {i+1}/{total}")
+        # Update progress (70-95% for storing)
+        if total > 0 and i % 5 == 0:  # Update every 5 editions to reduce DB writes
+            pct = 70 + ((i + 1) / total) * 25
+            await update_job_progress(db, job.id, pct, f"Saving edition {i+1}/{total}...")
 
     await db.commit()
 
