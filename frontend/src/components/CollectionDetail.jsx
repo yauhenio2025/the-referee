@@ -57,6 +57,7 @@ export default function CollectionDetail({ collectionId, onBack }) {
                 <th>Year</th>
                 <th>Status</th>
                 <th>Editions</th>
+                <th>Total Citations</th>
                 <th></th>
               </tr>
             </thead>
@@ -70,6 +71,11 @@ export default function CollectionDetail({ collectionId, onBack }) {
                     >
                       {paper.title}
                     </a>
+                    {paper.canonical_edition && paper.canonical_edition.language && (
+                      <span className="canonical-lang" title={`Canonical edition: ${paper.canonical_edition.title}`}>
+                        ({paper.canonical_edition.language})
+                      </span>
+                    )}
                   </td>
                   <td className="col-authors">{paper.authors || '–'}</td>
                   <td className="col-year">{paper.year || '–'}</td>
@@ -78,7 +84,17 @@ export default function CollectionDetail({ collectionId, onBack }) {
                       {paper.status}
                     </span>
                   </td>
-                  <td className="col-editions">{paper.editions?.length || 0}</td>
+                  <td className="col-editions">{paper.edition_count || 0}</td>
+                  <td className="col-citations">
+                    <span className="citation-count" title="Sum of citations across all editions">
+                      {paper.total_edition_citations?.toLocaleString() || 0}
+                    </span>
+                    {paper.canonical_edition && paper.edition_count > 1 && (
+                      <span className="canonical-citation" title={`Top edition: ${paper.canonical_edition.citation_count.toLocaleString()}`}>
+                        (top: {paper.canonical_edition.citation_count.toLocaleString()})
+                      </span>
+                    )}
+                  </td>
                   <td className="col-actions">
                     <button
                       className="btn-icon btn-danger"

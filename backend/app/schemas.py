@@ -77,6 +77,14 @@ class ScholarCandidate(BaseModel):
     citation_count: int = 0
 
 
+class CanonicalEditionSummary(BaseModel):
+    """Summary of the canonical (highest-cited) edition"""
+    id: int
+    title: str
+    citation_count: int
+    language: Optional[str] = None
+
+
 class PaperResponse(PaperBase):
     id: int
     collection_id: Optional[int] = None
@@ -88,6 +96,10 @@ class PaperResponse(PaperBase):
     link: Optional[str] = None
     created_at: datetime
     candidates: Optional[List[ScholarCandidate]] = None  # For reconciliation
+    # Edition aggregation stats
+    edition_count: int = 0
+    total_edition_citations: int = 0  # Sum of citations across all editions
+    canonical_edition: Optional[CanonicalEditionSummary] = None  # Highest-cited edition
 
     class Config:
         from_attributes = True

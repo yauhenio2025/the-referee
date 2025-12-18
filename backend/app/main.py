@@ -24,6 +24,7 @@ from .schemas import (
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
     CollectionCreate, CollectionUpdate, CollectionResponse, CollectionDetail,
+    CanonicalEditionSummary,
 )
 
 # Configure logging
@@ -82,6 +83,41 @@ async def root():
     }
 
 
+# ============== Helper Functions ==============
+
+async def build_paper_response_with_editions(paper: Paper, db: AsyncSession) -> PaperResponse:
+    """Build a PaperResponse with edition statistics (canonical edition, total citations)"""
+    # Get editions for this paper
+    editions_result = await db.execute(
+        select(Edition).where(Edition.paper_id == paper.id).order_by(Edition.citation_count.desc())
+    )
+    editions = editions_result.scalars().all()
+
+    # Calculate stats
+    edition_count = len(editions)
+    total_edition_citations = sum(e.citation_count or 0 for e in editions)
+
+    # Get canonical edition (highest citations)
+    canonical_edition = None
+    if editions:
+        top_edition = editions[0]  # Already sorted by citation_count desc
+        canonical_edition = CanonicalEditionSummary(
+            id=top_edition.id,
+            title=top_edition.title,
+            citation_count=top_edition.citation_count or 0,
+            language=top_edition.language,
+        )
+
+    # Build response
+    paper_dict = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
+    return PaperResponse(
+        **paper_dict,
+        edition_count=edition_count,
+        total_edition_citations=total_edition_citations,
+        canonical_edition=canonical_edition,
+    )
+
+
 # ============== Collection Endpoints ==============
 
 @app.post("/api/collections", response_model=CollectionResponse)
@@ -138,7 +174,7 @@ async def list_collections(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/collections/{collection_id}", response_model=CollectionDetail)
 async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db)):
-    """Get collection details with papers"""
+    """Get collection details with papers (including edition stats)"""
     result = await db.execute(select(Collection).where(Collection.id == collection_id))
     collection = result.scalar_one_or_none()
     if not collection:
@@ -150,6 +186,12 @@ async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db))
     )
     papers = papers_result.scalars().all()
 
+    # Build paper responses with edition stats
+    paper_responses = []
+    for paper in papers:
+        paper_response = await build_paper_response_with_editions(paper, db)
+        paper_responses.append(paper_response)
+
     return CollectionDetail(
         id=collection.id,
         name=collection.name,
@@ -158,7 +200,7 @@ async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db))
         created_at=collection.created_at,
         updated_at=collection.updated_at,
         paper_count=len(papers),
-        papers=[PaperResponse(**{k: v for k, v in p.__dict__.items() if not k.startswith('_')}) for p in papers],
+        papers=paper_responses,
     )
 
 
