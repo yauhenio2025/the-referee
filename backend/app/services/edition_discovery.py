@@ -267,15 +267,26 @@ REQUIRED: Generate separate queries for EACH of these languages:
 9. Japanese - use Japanese script for title
 
 IMPORTANT: Generate at least 8-12 queries covering ALL major languages!"""
+        elif self.language_strategy == "custom" and self.custom_languages:
+            # User selected specific languages - ONLY search those
+            lang_names = [l.get("name", l) for l in self.custom_languages] if isinstance(self.custom_languages[0], dict) else self.custom_languages
+            lang_list = "\n".join([f"- {lang}" for lang in lang_names])
+            language_instructions = f"""
+LANGUAGE FOCUS: Selected Languages ONLY
+IMPORTANT: ONLY generate queries for these specific languages:
+{lang_list}
+
+Do NOT generate queries for other languages not in this list.
+Generate 2-3 queries per language to maximize coverage."""
         else:
             language_instructions = """
 LANGUAGE FOCUS: All Languages
 - Find editions in ANY language worldwide
 - Include all regional translations and local editions"""
 
-        # Add custom languages
+        # Add custom languages (only used when NOT in custom mode)
         custom_lang_instruction = ""
-        if self.custom_languages:
+        if self.custom_languages and self.language_strategy != "custom":
             lang_names = [l.get("name", l) for l in self.custom_languages] if isinstance(self.custom_languages[0], dict) else self.custom_languages
             custom_lang_instruction = f"\n\nADDITIONAL LANGUAGES: Also include queries for: {', '.join(lang_names)}"
 
