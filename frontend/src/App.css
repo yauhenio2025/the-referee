@@ -572,6 +572,20 @@ body {
   cursor: not-allowed;
 }
 
+.btn-info {
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn-info:hover {
+  background: #2563eb;
+}
+
 .btn-danger {
   padding: 0.5rem 1rem;
   background: transparent;

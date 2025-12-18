@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 
 /**
@@ -12,6 +13,7 @@ import { api } from '../lib/api'
  * - Minimal chrome: no decorative elements
  */
 export default function EditionDiscovery({ paper, onBack }) {
+  const navigate = useNavigate()
   const [languageStrategy, setLanguageStrategy] = useState('recommended')
   const [customLanguages, setCustomLanguages] = useState([])
   const [showLanguageModal, setShowLanguageModal] = useState(false)
@@ -25,6 +27,11 @@ export default function EditionDiscovery({ paper, onBack }) {
   const { data: editions, isLoading } = useQuery({
     queryKey: ['editions', paper.id],
     queryFn: () => api.getPaperEditions(paper.id),
+  })
+
+  const { data: citations } = useQuery({
+    queryKey: ['citations', paper.id],
+    queryFn: () => api.getPaperCitations(paper.id),
   })
 
   const { data: languages } = useQuery({
@@ -382,6 +389,14 @@ export default function EditionDiscovery({ paper, onBack }) {
         >
           {citationJobId ? '⏳ Extracting...' : `Extract Citations (${selectedCount} selected, ~${totalCitations.toLocaleString()} citing papers)`}
         </button>
+        {citations?.length > 0 && (
+          <button
+            onClick={() => navigate(`/paper/${paper.id}/citations`)}
+            className="btn-info"
+          >
+            🔗 View Citations ({citations.length})
+          </button>
+        )}
       </div>
 
       {/* Progress */}
