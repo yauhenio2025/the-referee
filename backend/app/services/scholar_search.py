@@ -226,30 +226,46 @@ class ScholarSearchService:
         total_results = None
         current_page = 0
         max_pages = (max_results + 9) // 10
+        consecutive_failures = 0
+        max_consecutive_failures = 3
 
         while len(papers) < max_results and current_page < max_pages:
             page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
 
-            logger.info(f"Fetching cited-by page {current_page + 1}/{max_pages}...")
-            html = await self._fetch_with_retry(page_url)
+            try:
+                logger.info(f"Fetching cited-by page {current_page + 1}/{max_pages}...")
+                html = await self._fetch_with_retry(page_url)
 
-            if current_page == 0:
-                total_results = self._extract_result_count(html)
+                if current_page == 0:
+                    total_results = self._extract_result_count(html)
 
-            extracted = self._parse_scholar_page(html)
+                extracted = self._parse_scholar_page(html)
 
-            if not extracted:
-                logger.info("No more citations, stopping")
-                break
+                if not extracted:
+                    logger.info("No more citations, stopping")
+                    break
 
-            logger.info(f"✓ Extracted {len(extracted)} citing papers from page {current_page + 1}")
-            papers.extend(extracted)
-            current_page += 1
+                logger.info(f"✓ Extracted {len(extracted)} citing papers from page {current_page + 1}")
+                papers.extend(extracted)
+                current_page += 1
+                consecutive_failures = 0  # Reset on success
 
-            if current_page < max_pages and len(papers) < max_results:
-                await asyncio.sleep(2)
+                if current_page < max_pages and len(papers) < max_results:
+                    await asyncio.sleep(2)
 
-        logger.info(f"Cited-by search complete: {len(papers)} citing papers")
+            except Exception as e:
+                consecutive_failures += 1
+                logger.warning(f"Page {current_page + 1} fetch failed ({consecutive_failures}/{max_consecutive_failures}): {e}")
+
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(f"Too many consecutive failures, returning {len(papers)} papers collected so far")
+                    break
+
+                # Skip to next page and try again
+                current_page += 1
+                await asyncio.sleep(5)  # Longer wait after failure
+
+        logger.info(f"Cited-by search complete: {len(papers)} citing papers (fetched {current_page} pages)")
 
         return {
             "papers": papers[:max_results],
