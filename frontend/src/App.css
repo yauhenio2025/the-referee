@@ -582,6 +582,20 @@ body {
   font-size: 0.85rem;
 }
 
+.btn-secondary {
+  padding: 0.5rem 1rem;
+  background: #6b7280;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn-secondary:hover {
+  background: #4b5563;
+}
+
 .btn-info:hover {
   background: #2563eb;
 }
@@ -860,6 +874,59 @@ button:disabled {
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 2rem;
+}
+
+.modal-hint {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.modal .form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.modal .form-group select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.manual-result {
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.manual-result.success {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+}
+
+.manual-result.error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.manual-result .result-edition {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid currentColor;
+  opacity: 0.8;
 }
 
 /* Job Queue */

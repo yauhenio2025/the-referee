@@ -20,6 +20,7 @@ from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
     EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
+    ManualEditionAddRequest, ManualEditionAddResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
@@ -687,6 +688,227 @@ async def fetch_more_editions_async(
         status="pending",
         message=f"Queued fetch for {request.language} editions",
     )
+
+
+@app.post("/api/editions/add-manual", response_model=ManualEditionAddResponse)
+async def add_manual_edition(
+    request: ManualEditionAddRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually add an edition using LLM-assisted resolution.
+
+    Input can be:
+    - Google Scholar URL (e.g., https://scholar.google.com/citations?...&cites=...)
+    - Translated title (e.g., "Smarte Neue Welt" for German edition)
+    - Pasted text from Google Scholar search result
+    - Raw bibliographic entry
+
+    The LLM will parse the input and search Google Scholar to find the exact edition.
+    """
+    import anthropic
+    import re
+
+    # Get the parent paper for context
+    result = await db.execute(select(Paper).where(Paper.id == request.paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get existing editions to avoid duplicates
+    existing_result = await db.execute(
+        select(Edition.scholar_id, Edition.title).where(Edition.paper_id == request.paper_id)
+    )
+    existing_editions = [(r[0], r[1]) for r in existing_result.fetchall()]
+    existing_scholar_ids = {e[0] for e in existing_editions if e[0]}
+    existing_titles = {e[1].lower() for e in existing_editions}
+
+    input_text = request.input_text.strip()
+
+    # Check if it's a Google Scholar URL - extract info directly
+    scholar_url_match = re.search(r'scholar\.google\.[^/]+/scholar\?.*cites=(\d+)', input_text)
+    cluster_id_match = re.search(r'cluster=(\d+)', input_text)
+
+    resolution_details = {"input_type": "unknown", "llm_used": False}
+    search_query = None
+    expected_language = request.language_hint
+
+    if scholar_url_match or cluster_id_match:
+        # Direct Scholar link - we can fetch it directly
+        resolution_details["input_type"] = "scholar_url"
+        cluster_id = cluster_id_match.group(1) if cluster_id_match else None
+        cites_id = scholar_url_match.group(1) if scholar_url_match else None
+        resolution_details["cluster_id"] = cluster_id
+        resolution_details["cites_id"] = cites_id
+        # For now, we'll still use title-based search as we need scholar_id
+        # Extract any title from URL params
+        title_match = re.search(r'[?&]q=([^&]+)', input_text)
+        if title_match:
+            from urllib.parse import unquote
+            search_query = unquote(title_match.group(1))
+
+    if not search_query:
+        # Use Claude to parse the input and generate a search query
+        resolution_details["llm_used"] = True
+
+        try:
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+            prompt = f"""You are helping to find a specific edition of an academic work on Google Scholar.
+
+PARENT WORK:
+- Title: {paper.title}
+- Authors: {paper.authors or 'Unknown'}
+- Year: {paper.year or 'Unknown'}
+
+USER INPUT (might be a translated title, pasted Scholar entry, or partial info):
+{input_text}
+
+{f"Language hint: {expected_language}" if expected_language else ""}
+
+Your task:
+1. Determine what type of input this is (translated title, bibliographic entry, partial info)
+2. Generate the BEST Google Scholar search query to find this specific edition
+3. If it's a translation, identify the language
+
+Respond in JSON format:
+{{
+    "input_type": "translated_title" | "bibliographic_entry" | "partial_info" | "google_scholar_paste",
+    "detected_language": "german" | "french" | "spanish" | etc. (or null if unknown),
+    "search_query": "the exact query to use on Google Scholar",
+    "expected_title": "the title we expect to find (if known)",
+    "confidence": "high" | "medium" | "low",
+    "reasoning": "brief explanation of your interpretation"
+}}"""
+
+            response = client.messages.create(
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = response.content[0].text
+            # Parse JSON from response
+            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            if json_match:
+                llm_result = json.loads(json_match.group())
+                resolution_details["llm_interpretation"] = llm_result
+                search_query = llm_result.get("search_query", input_text)
+                expected_language = llm_result.get("detected_language") or expected_language
+                resolution_details["input_type"] = llm_result.get("input_type", "unknown")
+            else:
+                search_query = input_text
+
+        except Exception as e:
+            logging.error(f"LLM parsing failed: {e}")
+            # Fall back to using input as search query
+            search_query = input_text
+
+    if not search_query:
+        return ManualEditionAddResponse(
+            success=False,
+            message="Could not determine search query from input",
+            resolution_details=resolution_details,
+        )
+
+    # Search Google Scholar for the edition
+    from .services.scholar_service import get_scholar_service
+    scholar_service = get_scholar_service()
+
+    try:
+        search_result = await scholar_service.search(
+            query=search_query,
+            max_results=10,
+        )
+
+        papers_found = search_result.get("papers", [])
+        resolution_details["search_query_used"] = search_query
+        resolution_details["results_found"] = len(papers_found)
+
+        if not papers_found:
+            return ManualEditionAddResponse(
+                success=False,
+                message=f"No results found for query: {search_query}",
+                resolution_details=resolution_details,
+            )
+
+        # Find the best match - prioritize by author match and citation count
+        best_match = None
+        for p in papers_found:
+            scholar_id = p.get("scholarId") or p.get("id")
+            title = p.get("title", "")
+
+            # Skip if already exists
+            if scholar_id and scholar_id in existing_scholar_ids:
+                continue
+            if title.lower() in existing_titles:
+                continue
+
+            # First non-duplicate is best match (results are ranked by Scholar)
+            if best_match is None:
+                best_match = p
+                break
+
+        if not best_match:
+            return ManualEditionAddResponse(
+                success=False,
+                message="All matching results already exist as editions",
+                resolution_details=resolution_details,
+            )
+
+        # Create the edition
+        new_edition = Edition(
+            paper_id=request.paper_id,
+            scholar_id=best_match.get("scholarId") or best_match.get("id"),
+            title=best_match.get("title", "Unknown"),
+            authors=best_match.get("authorsRaw") or ", ".join(best_match.get("authors", [])),
+            year=best_match.get("year"),
+            venue=best_match.get("venue"),
+            abstract=best_match.get("abstract"),
+            link=best_match.get("link"),
+            citation_count=best_match.get("citationCount") or best_match.get("citations") or 0,
+            language=expected_language,
+            confidence="high",  # Manual additions are high confidence
+            auto_selected=False,
+            selected=True,  # Auto-select manual additions
+            is_supplementary=True,  # Mark as supplementary (manually added)
+        )
+        db.add(new_edition)
+        await db.commit()
+        await db.refresh(new_edition)
+
+        resolution_details["matched_title"] = best_match.get("title")
+        resolution_details["matched_scholar_id"] = best_match.get("scholarId") or best_match.get("id")
+
+        return ManualEditionAddResponse(
+            success=True,
+            edition=EditionResponse(
+                id=new_edition.id,
+                scholar_id=new_edition.scholar_id,
+                title=new_edition.title,
+                authors=new_edition.authors,
+                year=new_edition.year,
+                venue=new_edition.venue,
+                abstract=new_edition.abstract,
+                link=new_edition.link,
+                citation_count=new_edition.citation_count,
+                language=new_edition.language,
+                confidence=new_edition.confidence,
+                auto_selected=new_edition.auto_selected,
+                selected=new_edition.selected,
+                is_supplementary=new_edition.is_supplementary,
+            ),
+            message=f"Added edition: {new_edition.title}",
+            resolution_details=resolution_details,
+        )
+
+    except Exception as e:
+        logging.error(f"Scholar search failed: {e}")
+        return ManualEditionAddResponse(
+            success=False,
+            message=f"Search failed: {str(e)}",
+            resolution_details=resolution_details,
+        )
 
 
 # ============== Citation Extraction Endpoints ==============

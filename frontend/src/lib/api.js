@@ -167,6 +167,18 @@ class RefereeAPI {
     });
   }
 
+  // Manual edition addition with LLM resolution
+  async addManualEdition(paperId, inputText, languageHint = null) {
+    return this.request('/api/editions/add-manual', {
+      method: 'POST',
+      body: {
+        paper_id: paperId,
+        input_text: inputText,
+        language_hint: languageHint,
+      },
+    });
+  }
+
   // Citations
   async extractCitations(paperId, options = {}) {
     return this.request('/api/citations/extract', {

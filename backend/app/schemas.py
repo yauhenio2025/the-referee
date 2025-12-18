@@ -167,6 +167,21 @@ class EditionFetchMoreRequest(BaseModel):
     max_results: int = 50
 
 
+class ManualEditionAddRequest(BaseModel):
+    """Request to manually add an edition via LLM resolution"""
+    paper_id: int
+    input_text: str  # Can be: Google Scholar URL, title, or pasted Scholar entry
+    language_hint: Optional[str] = None  # Optional hint about expected language
+
+
+class ManualEditionAddResponse(BaseModel):
+    """Response from manual edition addition"""
+    success: bool
+    edition: Optional[EditionResponse] = None
+    message: str
+    resolution_details: Optional[dict] = None  # How LLM resolved the input
+
+
 class EditionFetchMoreResponse(BaseModel):
     """Response from fetching more editions in a language"""
     paper_id: int

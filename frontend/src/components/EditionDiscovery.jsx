@@ -17,6 +17,10 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [languageStrategy, setLanguageStrategy] = useState('recommended')
   const [customLanguages, setCustomLanguages] = useState([])
   const [showLanguageModal, setShowLanguageModal] = useState(false)
+  const [showManualEditionModal, setShowManualEditionModal] = useState(false)
+  const [manualEditionInput, setManualEditionInput] = useState('')
+  const [manualEditionLanguage, setManualEditionLanguage] = useState('')
+  const [manualEditionResult, setManualEditionResult] = useState(null)
   const [isLoadingRecs, setIsLoadingRecs] = useState(false)
   const [recommendations, setRecommendations] = useState(null)
   const [discoveryProgress, setDiscoveryProgress] = useState(null)
@@ -286,6 +290,30 @@ export default function EditionDiscovery({ paper, onBack }) {
     },
   })
 
+  const addManualEdition = useMutation({
+    mutationFn: async () => {
+      return await api.addManualEdition(
+        paper.id,
+        manualEditionInput,
+        manualEditionLanguage || null
+      )
+    },
+    onSuccess: (result) => {
+      setManualEditionResult(result)
+      if (result.success) {
+        queryClient.invalidateQueries(['editions', paper.id])
+        // Clear input after successful add
+        setTimeout(() => {
+          setManualEditionInput('')
+          setManualEditionLanguage('')
+        }, 2000)
+      }
+    },
+    onError: (error) => {
+      setManualEditionResult({ success: false, message: error.message })
+    },
+  })
+
   // Computed data
   const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
     if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
@@ -397,6 +425,16 @@ export default function EditionDiscovery({ paper, onBack }) {
             🔗 View Citations ({citations.length})
           </button>
         )}
+        <button
+          onClick={() => {
+            setShowManualEditionModal(true)
+            setManualEditionResult(null)
+          }}
+          className="btn-secondary"
+          title="Manually add an edition by title, URL, or pasted text"
+        >
+          ➕ Add Edition
+        </button>
       </div>
 
       {/* Progress */}
@@ -611,6 +649,73 @@ export default function EditionDiscovery({ paper, onBack }) {
                 className="btn-primary"
               >
                 Start Discovery
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Edition Modal */}
+      {showManualEditionModal && (
+        <div className="modal-overlay" onClick={() => setShowManualEditionModal(false)}>
+          <div className="modal compact" onClick={e => e.stopPropagation()}>
+            <h3>➕ Add Edition Manually</h3>
+
+            <p className="modal-hint">
+              Enter a translated title, Google Scholar URL, or paste text from Scholar.
+              AI will find the matching edition.
+            </p>
+
+            <div className="form-group">
+              <label>Title / URL / Pasted Text</label>
+              <textarea
+                value={manualEditionInput}
+                onChange={e => setManualEditionInput(e.target.value)}
+                placeholder={`Examples:\n• Smarte Neue Welt (German title)\n• https://scholar.google.com/scholar?cluster=...\n• Paste citation text from Scholar`}
+                rows={4}
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Language (optional hint)</label>
+              <select
+                value={manualEditionLanguage}
+                onChange={e => setManualEditionLanguage(e.target.value)}
+              >
+                <option value="">Auto-detect</option>
+                {languages?.languages?.map(lang => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.icon} {lang.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {manualEditionResult && (
+              <div className={`manual-result ${manualEditionResult.success ? 'success' : 'error'}`}>
+                {manualEditionResult.success ? '✓' : '✗'} {manualEditionResult.message}
+                {manualEditionResult.edition && (
+                  <div className="result-edition">
+                    <strong>{manualEditionResult.edition.title}</strong>
+                    <br />
+                    <small>
+                      {manualEditionResult.edition.citation_count?.toLocaleString() || 0} citations
+                      {manualEditionResult.edition.language && ` • ${manualEditionResult.edition.language}`}
+                    </small>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="modal-footer">
+              <button onClick={() => setShowManualEditionModal(false)}>Cancel</button>
+              <button
+                onClick={() => addManualEdition.mutate()}
+                disabled={!manualEditionInput.trim() || addManualEdition.isPending}
+                className="btn-primary"
+              >
+                {addManualEdition.isPending ? 'Searching...' : 'Find & Add Edition'}
               </button>
             </div>
           </div>
