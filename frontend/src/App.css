@@ -2594,3 +2594,115 @@ button:disabled {
   border-color: white;
   box-shadow: 0 0 0 2px var(--bg-dark);
 }
+
+/* Collection Detail */
+.collection-detail {
+  padding: 1rem;
+}
+
+.collection-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.collection-detail-header .btn-text {
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.collection-info {
+  flex: 1;
+}
+
+.collection-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.collection-title-row .color-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.collection-title-row h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.collection-info .description {
+  color: var(--text-secondary);
+  margin: 0 0 0.5rem 0;
+}
+
+.collection-info .paper-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.papers-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.papers-table th {
+  text-align: left;
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.papers-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.papers-table tr:hover {
+  background: var(--bg-hover);
+}
+
+.papers-table .col-title a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.papers-table .col-title a:hover {
+  color: var(--accent);
+}
+
+.papers-table .col-authors,
+.papers-table .col-year {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.status-badge.status-resolved {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+}
+
+.status-badge.status-pending {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
+.status-badge.status-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger);
+}

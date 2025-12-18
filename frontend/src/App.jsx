@@ -10,6 +10,7 @@ import PaperList from './components/PaperList'
 import EditionDiscovery from './components/EditionDiscovery'
 import Citations from './components/Citations'
 import Collections from './components/Collections'
+import CollectionDetail from './components/CollectionDetail'
 import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
 
@@ -105,6 +106,9 @@ function AppContent() {
           <Route path="/collections" element={
             <Collections onSelectCollection={(c) => navigate(`/collections/${c.id}`)} />
           } />
+          <Route path="/collections/:collectionId" element={
+            <CollectionDetailRoute />
+          } />
           <Route path="/paper/:paperId" element={
             <PaperEditionsRoute
               selectedPaper={selectedPaper}
@@ -198,6 +202,19 @@ function PaperCitationsRoute({ selectedPaper, setSelectedPaper, onBack }) {
   }
 
   return <Citations paper={selectedPaper} onBack={onBack} />
+}
+
+// Route component for collection detail
+function CollectionDetailRoute() {
+  const { collectionId } = useParams()
+  const navigate = useNavigate()
+
+  return (
+    <CollectionDetail
+      collectionId={parseInt(collectionId)}
+      onBack={() => navigate('/collections')}
+    />
+  )
 }
 
 function App() {
