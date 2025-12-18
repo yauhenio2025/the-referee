@@ -260,15 +260,15 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
         # Check for resume state from previous run
         resume_page = 0
-        if job.params and job.params.get("resume_state"):
-            resume_state = job.params["resume_state"]
+        if params.get("resume_state"):
+            resume_state = params["resume_state"]
             if resume_state.get("edition_id") == edition.id:
                 resume_page = resume_state.get("last_page", 0)
                 logger.info(f"[Worker] Resuming edition {edition.id} from page {resume_page}")
 
         # Callback to save citations IMMEDIATELY after each page
         async def save_page_citations(page_num: int, papers: List[Dict]):
-            nonlocal total_new_citations, total_updated_citations, existing_scholar_ids
+            nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params
 
             new_count = 0
             for paper_data in papers:
@@ -310,13 +310,13 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 f"Edition {i+1}/{total_editions}, page {page_num + 1}: {total_new_citations} citations saved"
             )
 
-            # Save resume state
-            job.params = job.params or {}
-            job.params["resume_state"] = {
+            # Save resume state (update params dict and serialize to job)
+            params["resume_state"] = {
                 "edition_id": edition.id,
                 "last_page": page_num + 1,
                 "total_citations": total_new_citations,
             }
+            job.params = json.dumps(params)
             await db.commit()
 
         try:
@@ -344,8 +344,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     logger.info(f"[Worker] TOTAL: {total_new_citations} new citations, {total_updated_citations} duplicates skipped")
 
     # Clear resume state on successful completion
-    if job.params:
-        job.params.pop("resume_state", None)
+    if params.get("resume_state"):
+        params.pop("resume_state", None)
+        job.params = json.dumps(params)
         await db.commit()
 
     return {
