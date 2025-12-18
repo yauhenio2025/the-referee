@@ -239,122 +239,122 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     logger.info(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
     await update_job_progress(db, job.id, 5, f"Processing {len(valid_editions)} editions...")
 
-    # Get existing citations to avoid duplicates
-    existing_result = await db.execute(
-        select(Citation.scholar_id).where(Citation.paper_id == paper_id)
-    )
-    existing_scholar_ids = {r[0] for r in existing_result.fetchall() if r[0]}
+    # Get existing citations to avoid duplicates (refreshed after each save)
+    async def get_existing_scholar_ids():
+        result = await db.execute(
+            select(Citation.scholar_id).where(Citation.paper_id == paper_id)
+        )
+        return {r[0] for r in result.fetchall() if r[0]}
 
-    # Track citations and their intersection counts
-    # scholar_id -> { citation_data, source_editions: [edition_ids] }
-    all_citations: Dict[str, Dict] = {}
+    existing_scholar_ids = await get_existing_scholar_ids()
+
+    # Stats tracking
+    total_new_citations = 0
+    total_updated_citations = 0
 
     scholar_service = get_scholar_service()
     total_editions = len(valid_editions)
 
     for i, edition in enumerate(valid_editions):
-        progress_pct = 10 + (i / total_editions) * 70  # 10-80%
-        await update_job_progress(
-            db, job.id, progress_pct,
-            f"Fetching citations for edition {i+1}/{total_editions}: {edition.title[:40]}..."
-        )
+        edition_start_citations = total_new_citations
 
-        try:
-            logger.info(f"[Worker] Fetching citations for edition {edition.id} (scholar_id={edition.scholar_id})")
-            result = await scholar_service.get_cited_by(
-                scholar_id=edition.scholar_id,
-                max_results=max_citations_per_edition,
-            )
+        # Check for resume state from previous run
+        resume_page = 0
+        if job.params and job.params.get("resume_state"):
+            resume_state = job.params["resume_state"]
+            if resume_state.get("edition_id") == edition.id:
+                resume_page = resume_state.get("last_page", 0)
+                logger.info(f"[Worker] Resuming edition {edition.id} from page {resume_page}")
 
-            citing_papers = result.get("papers", [])
-            logger.info(f"[Worker] Found {len(citing_papers)} citations for edition {edition.id}")
+        # Callback to save citations IMMEDIATELY after each page
+        async def save_page_citations(page_num: int, papers: List[Dict]):
+            nonlocal total_new_citations, total_updated_citations, existing_scholar_ids
 
-            for paper_data in citing_papers:
+            new_count = 0
+            for paper_data in papers:
                 scholar_id = paper_data.get("scholarId")
                 if not scholar_id:
                     continue
 
-                if scholar_id in all_citations:
-                    # Already seen - increment intersection count
-                    all_citations[scholar_id]["source_editions"].append(edition.id)
+                if scholar_id in existing_scholar_ids:
+                    # Already exists - could update intersection count here if needed
+                    total_updated_citations += 1
                 else:
-                    # New citation
-                    all_citations[scholar_id] = {
-                        "data": paper_data,
-                        "source_editions": [edition.id],
-                    }
+                    # NEW citation - save immediately
+                    citation = Citation(
+                        paper_id=paper_id,
+                        edition_id=edition.id,
+                        scholar_id=scholar_id,
+                        title=paper_data.get("title", "Unknown"),
+                        authors=paper_data.get("authorsRaw"),
+                        year=paper_data.get("year"),
+                        venue=paper_data.get("venue"),
+                        abstract=paper_data.get("abstract"),
+                        link=paper_data.get("link"),
+                        citation_count=paper_data.get("citationCount", 0),
+                        intersection_count=1,
+                    )
+                    db.add(citation)
+                    existing_scholar_ids.add(scholar_id)
+                    new_count += 1
+                    total_new_citations += 1
+
+            # COMMIT IMMEDIATELY after each page
+            await db.commit()
+            logger.info(f"[Worker] Page {page_num + 1}: saved {new_count} new citations (total: {total_new_citations})")
+
+            # Update job progress with current state for resume
+            progress_pct = 10 + ((i + (page_num / 20)) / total_editions) * 70
+            await update_job_progress(
+                db, job.id, progress_pct,
+                f"Edition {i+1}/{total_editions}, page {page_num + 1}: {total_new_citations} citations saved"
+            )
+
+            # Save resume state
+            job.params = job.params or {}
+            job.params["resume_state"] = {
+                "edition_id": edition.id,
+                "last_page": page_num + 1,
+                "total_citations": total_new_citations,
+            }
+            await db.commit()
+
+        try:
+            logger.info(f"[Worker] Fetching citations for edition {edition.id} (scholar_id={edition.scholar_id})")
+
+            result = await scholar_service.get_cited_by(
+                scholar_id=edition.scholar_id,
+                max_results=max_citations_per_edition,
+                on_page_complete=save_page_citations,
+                start_page=resume_page,
+            )
+
+            edition_citations = total_new_citations - edition_start_citations
+            logger.info(f"[Worker] Edition {edition.id} complete: {edition_citations} new citations")
 
             # Rate limit between editions
             if i < total_editions - 1:
                 await asyncio.sleep(3)
 
         except Exception as e:
-            logger.error(f"[Worker] Error fetching citations for edition {edition.id}: {e}")
-            # Continue with other editions
+            logger.error(f"[Worker] Error with edition {edition.id}: {e}")
+            logger.info(f"[Worker] Continuing with next edition. {total_new_citations} citations saved so far.")
+            # Continue with other editions - we've already saved what we got
 
-    logger.info(f"[Worker] Total unique citations found: {len(all_citations)}")
-    await update_job_progress(db, job.id, 85, f"Saving {len(all_citations)} citations...")
+    logger.info(f"[Worker] TOTAL: {total_new_citations} new citations, {total_updated_citations} duplicates skipped")
 
-    # Store citations
-    new_citations = []
-    updated_citations = []
-
-    for scholar_id, citation_info in all_citations.items():
-        paper_data = citation_info["data"]
-        intersection_count = len(citation_info["source_editions"])
-
-        if scholar_id in existing_scholar_ids:
-            # Update intersection count if higher
-            existing_citation = await db.execute(
-                select(Citation).where(
-                    Citation.paper_id == paper_id,
-                    Citation.scholar_id == scholar_id
-                )
-            )
-            existing = existing_citation.scalar_one_or_none()
-            if existing and intersection_count > existing.intersection_count:
-                existing.intersection_count = intersection_count
-                updated_citations.append(scholar_id)
-        else:
-            # New citation
-            citation = Citation(
-                paper_id=paper_id,
-                edition_id=citation_info["source_editions"][0],  # First edition that found it
-                scholar_id=scholar_id,
-                title=paper_data.get("title", "Unknown"),
-                authors=paper_data.get("authorsRaw"),
-                year=paper_data.get("year"),
-                venue=paper_data.get("venue"),
-                abstract=paper_data.get("abstract"),
-                link=paper_data.get("link"),
-                citation_count=paper_data.get("citationCount", 0),
-                intersection_count=intersection_count,
-            )
-            db.add(citation)
-            new_citations.append({
-                "scholar_id": scholar_id,
-                "title": paper_data.get("title", "")[:50],
-                "intersection_count": intersection_count,
-            })
-            existing_scholar_ids.add(scholar_id)
-
-    await db.commit()
-
-    # Calculate stats
-    intersection_distribution = {}
-    for scholar_id, citation_info in all_citations.items():
-        count = len(citation_info["source_editions"])
-        intersection_distribution[count] = intersection_distribution.get(count, 0) + 1
+    # Clear resume state on successful completion
+    if job.params:
+        job.params.pop("resume_state", None)
+        await db.commit()
 
     return {
         "paper_id": paper_id,
         "editions_processed": len(valid_editions),
         "editions_skipped": len(skipped_editions),
-        "skipped_details": skipped_editions[:10],  # First 10 for logging
-        "total_citations_found": len(all_citations),
-        "new_citations_added": len(new_citations),
-        "citations_updated": len(updated_citations),
-        "intersection_distribution": intersection_distribution,
+        "skipped_details": skipped_editions[:10],
+        "new_citations_added": total_new_citations,
+        "duplicates_skipped": total_updated_citations,
     }
 
 

@@ -177,32 +177,28 @@ class ScholarSearchService:
         max_results: int = 200,
         year_low: Optional[int] = None,
         year_high: Optional[int] = None,
+        on_page_complete: Optional[callable] = None,
+        start_page: int = 0,
     ) -> Dict[str, Any]:
         """
-        Get papers that cite a given paper
+        Get papers that cite a given paper - WITH PAGE-BY-PAGE CALLBACK
 
         Args:
             scholar_id: Google Scholar cluster ID
             max_results: Maximum results to fetch
             year_low/high: Year filters
+            on_page_complete: Callback(page_num, papers) called after each page - SAVE TO DB HERE
+            start_page: Resume from this page (0-indexed)
 
         Returns:
-            Dict with 'papers' list and 'totalResults' count
+            Dict with 'papers' list, 'totalResults' count, 'last_page' for resume
         """
-        logger.info(f"[CITED BY] Scholar ID: {scholar_id}")
+        logger.info(f"[CITED BY] Scholar ID: {scholar_id}, start_page={start_page}")
 
-        # Calculate timeout based on expected pages (longer for citation extraction)
-        expected_pages = (max_results + 9) // 10
-        total_timeout = min(expected_pages * 30, 600)  # 30s per page, max 10 minutes
-
-        try:
-            return await asyncio.wait_for(
-                self._get_cited_by_impl(scholar_id, max_results, year_low, year_high),
-                timeout=total_timeout
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"[CITED BY] Total timeout ({total_timeout}s) exceeded")
-            return {"papers": [], "totalResults": 0, "error": "Citation fetch timeout"}
+        # No timeout wrapper - let it run, save pages as we go
+        return await self._get_cited_by_impl(
+            scholar_id, max_results, year_low, year_high, on_page_complete, start_page
+        )
 
     async def _get_cited_by_impl(
         self,
@@ -210,33 +206,33 @@ class ScholarSearchService:
         max_results: int,
         year_low: Optional[int],
         year_high: Optional[int],
+        on_page_complete: Optional[callable] = None,
+        start_page: int = 0,
     ) -> Dict[str, Any]:
-        """Internal cited-by implementation - matches gs-harvester JS exactly"""
-        # Build URL exactly like gs-harvester JS version:
-        # let baseUrl = `https://scholar.google.com/scholar?cites=${scholarId}&hl=en`;
+        """Internal cited-by implementation with page-by-page callback for immediate DB saves"""
+        # Build URL exactly like gs-harvester JS version
         base_url = f"https://scholar.google.com/scholar?cites={scholar_id}&hl=en"
 
-        # Add year range if configured (matches JS)
         if year_low:
             base_url += f"&as_ylo={year_low}"
         if year_high:
             base_url += f"&as_yhi={year_high}"
 
-        papers = []
+        all_papers = []
         total_results = None
-        current_page = 0
+        current_page = start_page
         max_pages = (max_results + 9) // 10
         consecutive_failures = 0
         max_consecutive_failures = 3
 
-        while len(papers) < max_results and current_page < max_pages:
+        while len(all_papers) < max_results and current_page < max_pages:
             page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
 
             try:
                 logger.info(f"Fetching cited-by page {current_page + 1}/{max_pages}...")
                 html = await self._fetch_with_retry(page_url)
 
-                if current_page == 0:
+                if current_page == 0 or total_results is None:
                     total_results = self._extract_result_count(html)
 
                 extracted = self._parse_scholar_page(html)
@@ -246,11 +242,21 @@ class ScholarSearchService:
                     break
 
                 logger.info(f"✓ Extracted {len(extracted)} citing papers from page {current_page + 1}")
-                papers.extend(extracted)
-                current_page += 1
-                consecutive_failures = 0  # Reset on success
 
-                if current_page < max_pages and len(papers) < max_results:
+                # IMMEDIATE CALLBACK - save to DB NOW before anything can fail
+                if on_page_complete:
+                    try:
+                        await on_page_complete(current_page, extracted)
+                        logger.info(f"✓ Page {current_page + 1} saved to database")
+                    except Exception as save_error:
+                        logger.error(f"Failed to save page {current_page + 1}: {save_error}")
+                        # Continue anyway - at least we tried
+
+                all_papers.extend(extracted)
+                current_page += 1
+                consecutive_failures = 0
+
+                if current_page < max_pages and len(all_papers) < max_results:
                     await asyncio.sleep(2)
 
             except Exception as e:
@@ -258,19 +264,19 @@ class ScholarSearchService:
                 logger.warning(f"Page {current_page + 1} fetch failed ({consecutive_failures}/{max_consecutive_failures}): {e}")
 
                 if consecutive_failures >= max_consecutive_failures:
-                    logger.error(f"Too many consecutive failures, returning {len(papers)} papers collected so far")
+                    logger.error(f"Too many failures, stopping at page {current_page}. Saved {len(all_papers)} papers so far.")
                     break
 
-                # Skip to next page and try again
                 current_page += 1
-                await asyncio.sleep(5)  # Longer wait after failure
+                await asyncio.sleep(5)
 
-        logger.info(f"Cited-by search complete: {len(papers)} citing papers (fetched {current_page} pages)")
+        logger.info(f"Cited-by complete: {len(all_papers)} papers from {current_page} pages")
 
         return {
-            "papers": papers[:max_results],
-            "totalResults": total_results or len(papers),
+            "papers": all_papers[:max_results],
+            "totalResults": total_results or len(all_papers),
             "pages_fetched": current_page,
+            "last_page": current_page,  # For resume
         }
 
     async def _fetch_with_retry(self, url: str, max_retries: int = 5) -> str:
