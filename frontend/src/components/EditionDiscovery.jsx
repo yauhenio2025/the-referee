@@ -222,6 +222,7 @@ export default function EditionDiscovery({ paper, onBack }) {
 
   const [fetchMoreProgress, setFetchMoreProgress] = useState(null)
   const [activeJobs, setActiveJobs] = useState({}) // { language: jobId }
+  const [harvestingEditions, setHarvestingEditions] = useState({}) // { editionId: jobId }
 
   // Poll for job status updates
   useEffect(() => {
@@ -313,6 +314,54 @@ export default function EditionDiscovery({ paper, onBack }) {
       setManualEditionResult({ success: false, message: error.message })
     },
   })
+
+  // Poll for edition harvest jobs
+  useEffect(() => {
+    const activeHarvestIds = Object.entries(harvestingEditions).filter(([_, jobId]) => jobId)
+    if (activeHarvestIds.length === 0) return
+
+    const pollInterval = setInterval(async () => {
+      for (const [editionId, jobId] of activeHarvestIds) {
+        if (!jobId) continue
+        try {
+          const job = await api.getJob(jobId)
+
+          if (job.status === 'completed') {
+            // Job done - remove from tracking and refresh
+            setHarvestingEditions(prev => {
+              const next = { ...prev }
+              delete next[editionId]
+              return next
+            })
+            queryClient.invalidateQueries(['citations', paper.id])
+            queryClient.invalidateQueries(['stats'])
+          } else if (job.status === 'failed') {
+            // Job failed - remove from tracking
+            setHarvestingEditions(prev => {
+              const next = { ...prev }
+              delete next[editionId]
+              return next
+            })
+          }
+        } catch (err) {
+          console.error('Harvest job poll error:', err)
+        }
+      }
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [harvestingEditions, queryClient, paper.id])
+
+  // Harvest citations from a single edition
+  const harvestEdition = useCallback(async (editionId) => {
+    try {
+      const result = await api.extractCitations(paper.id, { editionIds: [editionId] })
+      setHarvestingEditions(prev => ({ ...prev, [editionId]: result.job_id }))
+      queryClient.invalidateQueries(['jobs'])
+    } catch (error) {
+      console.error('Failed to start harvest:', error)
+    }
+  }, [paper.id, queryClient])
 
   // Computed data
   const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
@@ -550,6 +599,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onDeselectAll={() => deselectByConfidence('high')}
               onMarkIrrelevant={(ids) => markAsIrrelevant(ids)}
               onMarkUncertain={(ids) => markAsUncertain(ids)}
+              onHarvest={harvestEdition}
+              harvestingEditions={harvestingEditions}
               className="group-high"
               showMarkAs="uncertain"
             />
@@ -567,6 +618,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onDeselectAll={() => deselectByConfidence('uncertain')}
               onMarkIrrelevant={(ids) => markAsIrrelevant(ids)}
               onMarkHigh={(ids) => markAsHigh(ids)}
+              onHarvest={harvestEdition}
+              harvestingEditions={harvestingEditions}
               className="group-uncertain"
               showMarkAs="both"
             />
@@ -584,6 +637,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onDeselectAll={() => {}}
               onMarkUncertain={(ids) => markAsUncertain(ids)}
               onMarkHigh={(ids) => markAsHigh(ids)}
+              onHarvest={harvestEdition}
+              harvestingEditions={harvestingEditions}
               className="group-rejected"
               showMarkAs="restore"
             />
@@ -739,6 +794,8 @@ function EditionGroup({
   onMarkIrrelevant,
   onMarkUncertain,
   onMarkHigh,
+  onHarvest,
+  harvestingEditions,
   className,
   showMarkAs
 }) {
@@ -831,6 +888,8 @@ function EditionGroup({
                   onMarkIrrelevant={onMarkIrrelevant}
                   onMarkHigh={onMarkHigh}
                   onMarkUncertain={onMarkUncertain}
+                  onHarvest={onHarvest}
+                  isHarvesting={!!harvestingEditions[ed.id]}
                   showMarkAs={showMarkAs}
                 />
               ))}
@@ -851,13 +910,16 @@ function EditionRow({
   onMarkIrrelevant,
   onMarkHigh,
   onMarkUncertain,
+  onHarvest,
+  isHarvesting,
   showMarkAs
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
+  const hasCitations = edition.citation_count > 0
 
   return (
-    <tr className={edition.selected ? 'selected' : ''}>
+    <tr className={`${edition.selected ? 'selected' : ''} ${isHarvesting ? 'harvesting' : ''}`}>
       <td className="col-check">
         <input
           type="checkbox"
@@ -891,6 +953,17 @@ function EditionRow({
         </div>
       </td>
       <td className="col-actions">
+        {/* Harvest button - only show if there are citations to harvest */}
+        {hasCitations && (
+          <button
+            className={`btn-harvest ${isHarvesting ? 'harvesting' : ''}`}
+            onClick={() => onHarvest(edition.id)}
+            disabled={isHarvesting}
+            title={isHarvesting ? 'Harvesting...' : `Harvest ${edition.citation_count.toLocaleString()} citations`}
+          >
+            {isHarvesting ? '⏳' : '📥'}
+          </button>
+        )}
         {showMarkAs === 'uncertain' && (
           <button
             className="btn-icon"

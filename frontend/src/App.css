@@ -2130,6 +2130,45 @@ button:disabled {
   color: var(--accent);
 }
 
+/* Harvest button */
+.edition-discovery.tufte .btn-harvest {
+  background: transparent;
+  border: 1px solid var(--accent);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.85rem;
+  transition: all 0.15s ease;
+  margin-right: 0.25rem;
+}
+
+.edition-discovery.tufte .btn-harvest:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
+}
+
+.edition-discovery.tufte .btn-harvest:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.edition-discovery.tufte .btn-harvest.harvesting {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+.edition-discovery.tufte tr.harvesting {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* Button variants */
 .edition-discovery.tufte .btn-danger {
   background: var(--danger) !important;
