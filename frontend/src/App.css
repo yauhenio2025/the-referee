@@ -2249,3 +2249,348 @@ button:disabled {
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
 }
+
+/* ============================================
+   CITATIONS VIEW
+   ============================================ */
+
+.citations-view {
+  padding: 1rem;
+}
+
+.citations-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.citations-header .btn-text {
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.citations-title h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.citations-title .meta {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.citations-summary {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.intersection-bars {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.intersection-bars .label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-right: 0.5rem;
+}
+
+.intersection-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.intersection-bar:hover {
+  background: var(--bg-hover);
+}
+
+.intersection-bar.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.intersection-bar .bar-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.intersection-bar .bar-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.intersection-bar.active .bar-count {
+  color: rgba(255,255,255,0.8);
+}
+
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sort-controls label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.sort-controls select {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
+.results-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+/* Citations Table */
+.citations-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.citations-table th {
+  text-align: left;
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.citations-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.citations-table tr:hover {
+  background: var(--bg-hover);
+}
+
+.citations-table tr.multi-cross {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.citations-table .col-cross {
+  width: 60px;
+}
+
+.citations-table .col-year {
+  width: 60px;
+}
+
+.citations-table .col-venue {
+  width: 150px;
+}
+
+.citations-table .col-cites {
+  width: 80px;
+  text-align: right;
+}
+
+.cross-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.cross-num {
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.cross-bar {
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  min-width: 4px;
+}
+
+.citations-table .title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.citations-table .title-cell a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.citations-table .title-cell a:hover {
+  color: var(--accent);
+}
+
+.citations-table .authors-line {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.citations-table .venue-tag {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* ============================================
+   COLLECTIONS VIEW
+   ============================================ */
+
+.collections-view {
+  padding: 1rem;
+}
+
+.collections-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.collections-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.collections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.collection-card {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 1rem;
+  border-left: 4px solid var(--accent);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.collection-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.collection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.collection-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.collection-header h3:hover {
+  color: var(--accent);
+}
+
+.collection-desc {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.4;
+}
+
+.collection-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.collection-stats .paper-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.collection-stats .color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+/* Collections Modal */
+.collections-view .form-group {
+  margin-bottom: 1rem;
+}
+
+.collections-view .form-group label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.collections-view .form-group input,
+.collections-view .form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.collections-view .form-group textarea {
+  resize: vertical;
+}
+
+.color-picker {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.color-option {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+}
+
+.color-option.selected {
+  border-color: white;
+  box-shadow: 0 0 0 2px var(--bg-dark);
+}

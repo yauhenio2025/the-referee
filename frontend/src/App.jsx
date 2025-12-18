@@ -8,6 +8,8 @@ import './App.css'
 import PaperInput from './components/PaperInput'
 import PaperList from './components/PaperList'
 import EditionDiscovery from './components/EditionDiscovery'
+import Citations from './components/Citations'
+import Collections from './components/Collections'
 import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
 
@@ -20,7 +22,9 @@ function AppContent() {
 
   // Determine active tab from URL
   const getActiveTab = () => {
+    if (location.pathname.startsWith('/paper/') && location.pathname.includes('/citations')) return 'citations'
     if (location.pathname.startsWith('/paper/')) return 'editions'
+    if (location.pathname === '/collections') return 'collections'
     if (location.pathname === '/jobs') return 'jobs'
     return 'papers'
   }
@@ -63,11 +67,24 @@ function AppContent() {
           📚 Papers
         </button>
         <button
+          className={`tab ${activeTab === 'collections' ? 'active' : ''}`}
+          onClick={() => navigate('/collections')}
+        >
+          📁 Collections {stats?.collections > 0 && <span className="badge">{stats.collections}</span>}
+        </button>
+        <button
           className={`tab ${activeTab === 'editions' ? 'active' : ''}`}
           onClick={() => selectedPaper && navigate(`/paper/${selectedPaper.id}`)}
           disabled={!selectedPaper && activeTab !== 'editions'}
         >
-          📖 Editions {selectedPaper && `(${selectedPaper.title.slice(0, 30)}...)`}
+          📖 Editions {selectedPaper && `(${selectedPaper.title.slice(0, 20)}...)`}
+        </button>
+        <button
+          className={`tab ${activeTab === 'citations' ? 'active' : ''}`}
+          onClick={() => selectedPaper && navigate(`/paper/${selectedPaper.id}/citations`)}
+          disabled={!selectedPaper && activeTab !== 'citations'}
+        >
+          🔗 Citations {stats?.citations > 0 && <span className="badge">{stats.citations}</span>}
         </button>
         <button
           className={`tab ${activeTab === 'jobs' ? 'active' : ''}`}
@@ -85,11 +102,21 @@ function AppContent() {
               <PaperList onSelectPaper={handleSelectPaper} />
             </div>
           } />
+          <Route path="/collections" element={
+            <Collections onSelectCollection={(c) => navigate(`/collections/${c.id}`)} />
+          } />
           <Route path="/paper/:paperId" element={
             <PaperEditionsRoute
               selectedPaper={selectedPaper}
               setSelectedPaper={setSelectedPaper}
               onBack={handleBack}
+            />
+          } />
+          <Route path="/paper/:paperId/citations" element={
+            <PaperCitationsRoute
+              selectedPaper={selectedPaper}
+              setSelectedPaper={setSelectedPaper}
+              onBack={() => navigate(`/paper/${selectedPaper?.id || ''}`)}
             />
           } />
           <Route path="/jobs" element={<JobQueue />} />
@@ -137,6 +164,40 @@ function PaperEditionsRoute({ selectedPaper, setSelectedPaper, onBack }) {
   }
 
   return <EditionDiscovery paper={selectedPaper} onBack={onBack} />
+}
+
+// Route component that loads paper citations by ID from URL
+function PaperCitationsRoute({ selectedPaper, setSelectedPaper, onBack }) {
+  const { paperId } = useParams()
+  const [loading, setLoading] = useState(!selectedPaper || selectedPaper.id !== parseInt(paperId))
+
+  useEffect(() => {
+    if (selectedPaper && selectedPaper.id === parseInt(paperId)) {
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    api.getPaper(parseInt(paperId))
+      .then(paper => {
+        setSelectedPaper(paper)
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error('Failed to load paper:', err)
+        setLoading(false)
+      })
+  }, [paperId, selectedPaper, setSelectedPaper])
+
+  if (loading) {
+    return <div className="loading">Loading paper...</div>
+  }
+
+  if (!selectedPaper) {
+    return <div className="error">Paper not found</div>
+  }
+
+  return <Citations paper={selectedPaper} onBack={onBack} />
 }
 
 function App() {

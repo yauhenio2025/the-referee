@@ -225,6 +225,45 @@ class RefereeAPI {
       body: { text },
     });
   }
+
+  // Collections
+  async getCollections() {
+    return this.request('/api/collections');
+  }
+
+  async getCollection(collectionId) {
+    return this.request(`/api/collections/${collectionId}`);
+  }
+
+  async createCollection(collection) {
+    return this.request('/api/collections', {
+      method: 'POST',
+      body: collection,
+    });
+  }
+
+  async updateCollection(collectionId, updates) {
+    return this.request(`/api/collections/${collectionId}`, {
+      method: 'PUT',
+      body: updates,
+    });
+  }
+
+  async deleteCollection(collectionId) {
+    return this.request(`/api/collections/${collectionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async assignPapersToCollection(paperIds, collectionId) {
+    return this.request('/api/collections/assign', {
+      method: 'POST',
+      body: {
+        paper_ids: paperIds,
+        collection_id: collectionId,
+      },
+    });
+  }
 }
 
 export const api = new RefereeAPI();
