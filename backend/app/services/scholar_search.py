@@ -211,18 +211,16 @@ class ScholarSearchService:
         year_low: Optional[int],
         year_high: Optional[int],
     ) -> Dict[str, Any]:
-        """Internal cited-by implementation"""
-        params = {
-            "hl": "en",
-            "cites": scholar_id,
-            "scipsc": "1",  # Search within citations
-        }
-        if year_low:
-            params["as_ylo"] = year_low
-        if year_high:
-            params["as_yhi"] = year_high
+        """Internal cited-by implementation - matches gs-harvester JS exactly"""
+        # Build URL exactly like gs-harvester JS version:
+        # let baseUrl = `https://scholar.google.com/scholar?cites=${scholarId}&hl=en`;
+        base_url = f"https://scholar.google.com/scholar?cites={scholar_id}&hl=en"
 
-        base_url = f"https://scholar.google.com/scholar?{urlencode(params)}"
+        # Add year range if configured (matches JS)
+        if year_low:
+            base_url += f"&as_ylo={year_low}"
+        if year_high:
+            base_url += f"&as_yhi={year_high}"
 
         papers = []
         total_results = None
@@ -259,8 +257,12 @@ class ScholarSearchService:
             "pages_fetched": current_page,
         }
 
-    async def _fetch_with_retry(self, url: str, max_retries: int = 3) -> str:
-        """Fetch URL via Oxylabs with retry logic and total timeout"""
+    async def _fetch_with_retry(self, url: str, max_retries: int = 5) -> str:
+        """
+        Fetch URL via Oxylabs with retry logic - matches gs-harvester JS exactly
+
+        JS version uses: maxRetries = 5, then falls back to direct scraping
+        """
         last_error = None
 
         try:
@@ -269,6 +271,8 @@ class ScholarSearchService:
                 for attempt in range(max_retries):
                     try:
                         html = await self._fetch_via_oxylabs(url)
+                        if attempt > 0:
+                            logger.info(f"✓ Oxylabs succeeded on attempt {attempt + 1}")
                         return html
                     except asyncio.TimeoutError:
                         last_error = TimeoutError(f"HTTP request timed out on attempt {attempt + 1}")
@@ -278,24 +282,38 @@ class ScholarSearchService:
                         logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
 
                     if attempt < max_retries - 1:
-                        backoff = min(2 ** attempt, 8)  # Cap backoff at 8 seconds
+                        # Exponential backoff: 1s, 2s, 4s, 8s (matches JS)
+                        backoff = min(2 ** attempt, 8)
+                        logger.info(f"  Retrying in {backoff}s...")
                         await asyncio.sleep(backoff)
 
         except asyncio.TimeoutError:
-            raise TimeoutError(f"All retries exhausted after {FETCH_RETRY_TIMEOUT}s total timeout")
+            logger.error(f"Oxylabs exhausted ({max_retries} attempts). Trying direct scraping fallback...")
+            # FALLBACK: Try direct scraping like JS does
+            try:
+                return await self._fetch_direct(url, max_retries=2)
+            except Exception as direct_error:
+                logger.error(f"Direct scraping also failed: {direct_error}")
+                raise last_error or TimeoutError(f"All retries exhausted after {FETCH_RETRY_TIMEOUT}s total timeout")
 
-        raise last_error or Exception("All retry attempts failed")
+        # If we get here, all Oxylabs attempts failed - try direct scraping
+        logger.warning(f"Oxylabs exhausted ({max_retries} attempts). Falling back to direct scraping...")
+        try:
+            return await self._fetch_direct(url, max_retries=2)
+        except Exception as direct_error:
+            logger.error(f"Direct scraping also failed: {direct_error}")
+            raise last_error or Exception("All retry attempts failed")
 
     async def _fetch_via_oxylabs(self, url: str) -> str:
-        """Fetch URL via Oxylabs SERP Scraper API"""
+        """Fetch URL via Oxylabs SERP Scraper API - matches gs-harvester JS exactly"""
         if not self.username or not self.password:
             raise ValueError("Oxylabs credentials not configured")
 
+        # Match JS exactly: const payload = { source: 'google', url: url };
+        # DO NOT add extra parameters like geo_location, user_agent_type
         payload = {
             "source": "google",
             "url": url,
-            "geo_location": "United States",
-            "user_agent_type": "desktop",
         }
 
         auth_string = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
@@ -386,6 +404,62 @@ class ScholarSearchService:
                 continue
 
         raise TimeoutError(f"Oxylabs job polling timeout after {max_attempts} attempts (~{max_attempts * 2}s)")
+
+    async def _fetch_direct(self, url: str, max_retries: int = 2) -> str:
+        """
+        Direct fetch fallback when Oxylabs fails - matches gs-harvester JS exactly
+
+        JS version: fetchDirect(url, maxRetries = 2)
+        More aggressive than Oxylabs since we use it as last resort
+        """
+        client = await self._get_client()
+
+        for attempt in range(max_retries):
+            try:
+                # Timeout: 15s for first attempt, 30s for retry (matches JS)
+                timeout = 15.0 + (attempt * 15.0)
+
+                response = await client.get(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Accept-Encoding": "gzip, deflate",
+                        "Connection": "keep-alive",
+                    },
+                    timeout=timeout,
+                    follow_redirects=True,
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"HTTP {response.status_code}")
+
+                html = response.text
+
+                # Check for CAPTCHA or blocking (matches JS)
+                if "unusual traffic" in html.lower() or "captcha" in html.lower() or "recaptcha" in html.lower():
+                    raise Exception("Google Scholar CAPTCHA detected")
+
+                if len(html) < 500:
+                    raise Exception("Response too short - likely blocked")
+
+                if attempt > 0:
+                    logger.info(f"✓ Direct scraping succeeded on attempt {attempt + 1}")
+                return html
+
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e} - all methods exhausted")
+                    raise
+                else:
+                    logger.warning(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e}")
+                    # Longer backoff for direct scraping: 5s, 10s (matches JS)
+                    backoff = 5.0 * (attempt + 1)
+                    logger.info(f"  Retrying in {backoff}s...")
+                    await asyncio.sleep(backoff)
+
+        raise Exception("Direct scraping failed after all attempts")
 
     def _parse_scholar_page(self, html: str) -> List[Dict[str, Any]]:
         """Parse Google Scholar HTML page and extract paper metadata"""
