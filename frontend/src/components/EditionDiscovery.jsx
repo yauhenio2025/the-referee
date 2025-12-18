@@ -144,9 +144,59 @@ export default function EditionDiscovery({ paper, onBack }) {
     },
   })
 
+  const [citationJobId, setCitationJobId] = useState(null)
+  const [citationProgress, setCitationProgress] = useState(null)
+
+  // Poll for citation extraction job
+  useEffect(() => {
+    if (!citationJobId) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const job = await api.getJob(citationJobId)
+
+        if (job.status === 'running') {
+          setCitationProgress({
+            message: job.progress_message || 'Extracting citations...',
+            progress: job.progress,
+          })
+        } else if (job.status === 'completed') {
+          const result = job.result || {}
+          setCitationProgress({
+            message: `Done! Found ${result.total_citations_found?.toLocaleString() || 0} unique citations`,
+            progress: 100,
+            done: true,
+            result,
+          })
+          setCitationJobId(null)
+          queryClient.invalidateQueries(['stats'])
+          setTimeout(() => setCitationProgress(null), 10000)
+        } else if (job.status === 'failed') {
+          setCitationProgress({
+            message: `Failed: ${job.error || 'Unknown error'}`,
+            error: true,
+          })
+          setCitationJobId(null)
+          setTimeout(() => setCitationProgress(null), 10000)
+        }
+      } catch (err) {
+        console.error('Citation job poll error:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [citationJobId, queryClient])
+
   const extractCitations = useMutation({
     mutationFn: () => api.extractCitations(paper.id),
-    onSuccess: () => queryClient.invalidateQueries(['jobs']),
+    onSuccess: (data) => {
+      setCitationJobId(data.job_id)
+      setCitationProgress({
+        message: `Queued: extracting from ${data.editions_to_process} editions (~${data.estimated_time_minutes} min)`,
+        progress: 0,
+      })
+      queryClient.invalidateQueries(['jobs'])
+    },
   })
 
   const clearAndRediscover = useMutation({
@@ -327,10 +377,10 @@ export default function EditionDiscovery({ paper, onBack }) {
         )}
         <button
           onClick={() => extractCitations.mutate()}
-          disabled={selectedCount === 0 || extractCitations.isPending}
+          disabled={selectedCount === 0 || extractCitations.isPending || !!citationJobId}
           className="btn-success"
         >
-          Extract Citations ({selectedCount} selected, ~{totalCitations.toLocaleString()} citing papers)
+          {citationJobId ? '⏳ Extracting...' : `Extract Citations (${selectedCount} selected, ~${totalCitations.toLocaleString()} citing papers)`}
         </button>
       </div>
 
@@ -339,6 +389,22 @@ export default function EditionDiscovery({ paper, onBack }) {
         <div className="ed-progress">
           <div className="progress-bar" style={{ width: `${discoveryProgress.progress}%` }} />
           <span>{discoveryProgress.message}</span>
+        </div>
+      )}
+
+      {/* Citation Extraction Progress */}
+      {citationProgress && (
+        <div className={`ed-progress citation-progress ${citationProgress.done ? 'done' : ''} ${citationProgress.error ? 'error' : ''}`}>
+          <div className="progress-bar" style={{ width: `${citationProgress.progress || 0}%` }} />
+          <span>{citationProgress.message}</span>
+          {citationProgress.done && citationProgress.result && (
+            <span className="citation-stats">
+              {' '}| {citationProgress.result.editions_processed} editions processed
+              {citationProgress.result.intersection_distribution && Object.entries(citationProgress.result.intersection_distribution)
+                .filter(([k]) => parseInt(k) > 1)
+                .map(([k, v]) => ` | ${v} cite ${k}+ editions`).join('')}
+            </span>
+          )}
         </div>
       )}
 

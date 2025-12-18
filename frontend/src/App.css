@@ -1678,6 +1678,32 @@ button:disabled {
   color: white;
 }
 
+/* Citation Progress */
+.edition-discovery.tufte .citation-progress {
+  background: #1a365d;
+}
+
+.edition-discovery.tufte .citation-progress .progress-bar {
+  background: linear-gradient(90deg, #3182ce, #38a169);
+}
+
+.edition-discovery.tufte .citation-progress.done {
+  background: #22543d;
+}
+
+.edition-discovery.tufte .citation-progress.done .progress-bar {
+  background: #38a169;
+}
+
+.edition-discovery.tufte .citation-progress.error {
+  background: #742a2a;
+}
+
+.edition-discovery.tufte .citation-progress .citation-stats {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
 /* Toolbar */
 .edition-discovery.tufte .ed-toolbar {
   background: var(--bg-dark);
