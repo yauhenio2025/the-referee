@@ -18,8 +18,21 @@ const queryClient = new QueryClient()
 
 function AppContent() {
   const [selectedPaper, setSelectedPaper] = useState(null)
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('referee-theme') || 'dark'
+  })
   const navigate = useNavigate()
   const location = useLocation()
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('referee-theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
 
   // Determine active tab from URL
   const getActiveTab = () => {
@@ -57,7 +70,12 @@ function AppContent() {
           </h1>
           <p className="tagline">Citation Analysis Engine</p>
         </div>
-        <Stats stats={stats} />
+        <div className="header-right">
+          <Stats stats={stats} />
+          <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            <span className="theme-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
+          </button>
+        </div>
       </header>
 
       <nav className="tabs">
