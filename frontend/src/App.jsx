@@ -103,7 +103,7 @@ function AppContent() {
           onClick={() => selectedPaper && navigate(`/paper/${selectedPaper.id}/citations`)}
           disabled={!selectedPaper && activeTab !== 'citations'}
         >
-          🔗 Citations {stats?.citations > 0 && <span className="badge">{stats.citations}</span>}
+          🔗 Citations
         </button>
         <button
           className={`tab ${activeTab === 'jobs' ? 'active' : ''}`}
