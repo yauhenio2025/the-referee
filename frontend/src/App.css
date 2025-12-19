@@ -2258,6 +2258,41 @@ button:disabled {
   width: 100px;
 }
 
+.edition-discovery.tufte .col-harvested {
+  width: 70px;
+  text-align: center;
+}
+
+.edition-discovery.tufte .btn-harvested {
+  background: var(--success);
+  color: white;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.edition-discovery.tufte .btn-harvested:hover {
+  background: var(--success-hover, #059669);
+  transform: scale(1.05);
+}
+
+.edition-discovery.tufte .not-harvested {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.edition-discovery.tufte tr.has-harvested {
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.edition-discovery.tufte tr.has-harvested:hover {
+  background: rgba(16, 185, 129, 0.1);
+}
+
 .edition-discovery.tufte .title-cell {
   display: flex;
   flex-direction: column;

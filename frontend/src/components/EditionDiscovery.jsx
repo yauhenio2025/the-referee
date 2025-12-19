@@ -363,6 +363,11 @@ export default function EditionDiscovery({ paper, onBack }) {
     }
   }, [paper.id, queryClient])
 
+  // Navigate to citations filtered by a specific edition
+  const viewCitationsForEdition = useCallback((editionId) => {
+    navigate(`/paper/${paper.id}/citations?edition=${editionId}`)
+  }, [paper.id, navigate])
+
   // Computed data
   const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
     if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
@@ -603,6 +608,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               harvestingEditions={harvestingEditions}
               className="group-high"
               showMarkAs="uncertain"
+              onViewCitations={viewCitationsForEdition}
             />
           )}
 
@@ -622,6 +628,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               harvestingEditions={harvestingEditions}
               className="group-uncertain"
               showMarkAs="both"
+              onViewCitations={viewCitationsForEdition}
             />
           )}
 
@@ -641,6 +648,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               harvestingEditions={harvestingEditions}
               className="group-rejected"
               showMarkAs="restore"
+              onViewCitations={viewCitationsForEdition}
             />
           )}
         </div>
@@ -797,7 +805,8 @@ function EditionGroup({
   onHarvest,
   harvestingEditions,
   className,
-  showMarkAs
+  showMarkAs,
+  onViewCitations
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
@@ -876,6 +885,7 @@ function EditionGroup({
                 <th className="col-year">Year</th>
                 <th className="col-lang">Lang</th>
                 <th className="col-cites">Citations</th>
+                <th className="col-harvested">Harvested</th>
                 <th className="col-actions"></th>
               </tr>
             </thead>
@@ -891,6 +901,7 @@ function EditionGroup({
                   onHarvest={onHarvest}
                   isHarvesting={!!harvestingEditions[ed.id]}
                   showMarkAs={showMarkAs}
+                  onViewCitations={onViewCitations}
                 />
               ))}
             </tbody>
@@ -912,14 +923,16 @@ function EditionRow({
   onMarkUncertain,
   onHarvest,
   isHarvesting,
-  showMarkAs
+  showMarkAs,
+  onViewCitations
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
   const hasCitations = edition.citation_count > 0
+  const hasHarvested = edition.harvested_citations > 0
 
   return (
-    <tr className={`${edition.selected ? 'selected' : ''} ${isHarvesting ? 'harvesting' : ''}`}>
+    <tr className={`${edition.selected ? 'selected' : ''} ${isHarvesting ? 'harvesting' : ''} ${hasHarvested ? 'has-harvested' : ''}`}>
       <td className="col-check">
         <input
           type="checkbox"
@@ -951,6 +964,19 @@ function EditionRow({
           <span className="cite-num">{edition.citation_count?.toLocaleString() || 0}</span>
           <div className="cite-bar" style={{ width: `${barWidth}%` }} />
         </div>
+      </td>
+      <td className="col-harvested">
+        {hasHarvested ? (
+          <button
+            className="btn-harvested"
+            onClick={() => onViewCitations(edition.id)}
+            title={`View ${edition.harvested_citations} harvested citations`}
+          >
+            {edition.harvested_citations}
+          </button>
+        ) : (
+          <span className="not-harvested">–</span>
+        )}
       </td>
       <td className="col-actions">
         {/* Harvest button - only show if there are citations to harvest */}

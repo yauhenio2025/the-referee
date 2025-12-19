@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 
 /**
@@ -7,9 +8,25 @@ import { api } from '../lib/api'
  * With edition filtering (by specific edition, not just language)
  */
 export default function Citations({ paper, onBack }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [sortBy, setSortBy] = useState('citations') // intersection, citations, year
   const [minIntersection, setMinIntersection] = useState(1)
-  const [selectedEdition, setSelectedEdition] = useState(null) // null = all editions
+
+  // Initialize selected edition from URL param
+  const editionParam = searchParams.get('edition')
+  const [selectedEdition, setSelectedEdition] = useState(
+    editionParam ? parseInt(editionParam) : null
+  )
+
+  // Update URL when edition selection changes
+  const handleEditionSelect = (editionId) => {
+    setSelectedEdition(editionId)
+    if (editionId !== null) {
+      setSearchParams({ edition: editionId.toString() })
+    } else {
+      setSearchParams({})
+    }
+  }
 
   const { data: citations, isLoading } = useQuery({
     queryKey: ['citations', paper.id],
@@ -85,13 +102,13 @@ export default function Citations({ paper, onBack }) {
       ) : (
         <>
           {/* Edition Filter */}
-          {editionGroups.length > 1 && (
+          {editionGroups.length > 0 && (
             <div className="edition-filter">
               <span className="label">Filter by Edition:</span>
               <div className="edition-buttons">
                 <button
                   className={`edition-btn ${selectedEdition === null ? 'active' : ''}`}
-                  onClick={() => setSelectedEdition(null)}
+                  onClick={() => handleEditionSelect(null)}
                 >
                   All Editions ({citations.length})
                 </button>
@@ -99,7 +116,7 @@ export default function Citations({ paper, onBack }) {
                   <button
                     key={edition.id || 'unknown'}
                     className={`edition-btn ${selectedEdition === edition.id ? 'active' : ''}`}
-                    onClick={() => setSelectedEdition(edition.id)}
+                    onClick={() => handleEditionSelect(edition.id)}
                     title={edition.title}
                   >
                     <span className="edition-flag">{getLangEmoji(edition.language)}</span>

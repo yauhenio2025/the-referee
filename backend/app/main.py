@@ -521,11 +521,29 @@ async def discover_editions(
 
 @app.get("/api/papers/{paper_id}/editions", response_model=List[EditionResponse])
 async def get_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
-    """Get all editions of a paper"""
+    """Get all editions of a paper, including harvested citation counts"""
+    # Get editions
     result = await db.execute(
         select(Edition).where(Edition.paper_id == paper_id).order_by(Edition.citation_count.desc())
     )
-    return result.scalars().all()
+    editions = result.scalars().all()
+
+    # Get harvested citation counts per edition
+    citation_counts = await db.execute(
+        select(Citation.edition_id, func.count(Citation.id).label('count'))
+        .where(Citation.edition_id.in_([e.id for e in editions]))
+        .group_by(Citation.edition_id)
+    )
+    harvested_map = {row.edition_id: row.count for row in citation_counts}
+
+    # Build response with harvested counts
+    responses = []
+    for ed in editions:
+        ed_dict = {k: v for k, v in ed.__dict__.items() if not k.startswith('_')}
+        ed_dict['harvested_citations'] = harvested_map.get(ed.id, 0)
+        responses.append(EditionResponse(**ed_dict))
+
+    return responses
 
 
 @app.delete("/api/papers/{paper_id}/editions")

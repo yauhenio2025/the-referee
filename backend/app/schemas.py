@@ -122,6 +122,7 @@ class EditionResponse(BaseModel):
     abstract: Optional[str] = None
     link: Optional[str] = None
     citation_count: int = 0
+    harvested_citations: int = 0  # Number of citations actually harvested from this edition
     language: Optional[str] = None
     confidence: str
     auto_selected: bool
