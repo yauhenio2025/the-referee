@@ -11,10 +11,6 @@ export default function Stats({ stats }) {
         <span className="stat-value">{stats.editions || 0}</span>
         <span className="stat-label">Editions</span>
       </div>
-      <div className="stat">
-        <span className="stat-value">{stats.citations || 0}</span>
-        <span className="stat-label">Citations</span>
-      </div>
     </div>
   )
 }
