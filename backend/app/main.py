@@ -986,32 +986,38 @@ async def get_paper_citations(
     skip: int = 0,
     limit: int = 500,
     language: Optional[str] = None,
+    edition_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get citations for a paper with optional language filter"""
-    from sqlalchemy.orm import joinedload
-
-    # Build query with edition join for language
+    """Get citations for a paper with optional language/edition filter"""
+    # Build query with edition join for language and title
     query = (
-        select(Citation, Edition.language.label('edition_language'))
+        select(
+            Citation,
+            Edition.language.label('edition_language'),
+            Edition.title.label('edition_title')
+        )
         .outerjoin(Edition, Citation.edition_id == Edition.id)
         .where(Citation.paper_id == paper_id)
     )
 
-    # Apply language filter if specified
+    # Apply filters
     if language:
         query = query.where(Edition.language.ilike(f"%{language}%"))
+    if edition_id:
+        query = query.where(Citation.edition_id == edition_id)
 
     query = query.order_by(Citation.citation_count.desc()).offset(skip).limit(limit)
 
     result = await db.execute(query)
     rows = result.all()
 
-    # Build response with edition_language
+    # Build response with edition info
     citations = []
-    for citation, edition_lang in rows:
+    for citation, edition_lang, edition_title in rows:
         citation_dict = {k: v for k, v in citation.__dict__.items() if not k.startswith('_')}
         citation_dict['edition_language'] = edition_lang
+        citation_dict['edition_title'] = edition_title
         citations.append(CitationResponse(**citation_dict))
 
     return citations

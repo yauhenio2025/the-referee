@@ -205,6 +205,7 @@ class CitationResponse(BaseModel):
     intersection_count: int = 1
     edition_id: Optional[int] = None
     edition_language: Optional[str] = None
+    edition_title: Optional[str] = None  # For edition-specific filtering
 
     class Config:
         from_attributes = True
