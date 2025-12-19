@@ -13,6 +13,7 @@ import base64
 import asyncio
 import re
 import logging
+import traceback
 from typing import Optional, List, Dict, Any
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode, quote_plus
@@ -193,7 +194,15 @@ class ScholarSearchService:
         Returns:
             Dict with 'papers' list, 'totalResults' count, 'last_page' for resume
         """
-        logger.info(f"[CITED BY] Scholar ID: {scholar_id}, start_page={start_page}")
+        logger.info(f"╔{'═'*60}╗")
+        logger.info(f"║  GET_CITED_BY ENTRY POINT")
+        logger.info(f"╠{'═'*60}╣")
+        logger.info(f"║  scholar_id: {scholar_id}")
+        logger.info(f"║  max_results: {max_results}")
+        logger.info(f"║  year_low: {year_low}, year_high: {year_high}")
+        logger.info(f"║  start_page: {start_page}")
+        logger.info(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
+        logger.info(f"╚{'═'*60}╝")
 
         # No timeout wrapper - let it run, save pages as we go
         return await self._get_cited_by_impl(
@@ -211,12 +220,18 @@ class ScholarSearchService:
     ) -> Dict[str, Any]:
         """Internal cited-by implementation with page-by-page callback for immediate DB saves"""
         # Build URL exactly like gs-harvester JS version
-        base_url = f"https://scholar.google.com/scholar?cites={scholar_id}&hl=en"
+        # CRITICAL: scipsc=1 tells Scholar to search WITHIN citations, not just the paper
+        base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
+
+        logger.info(f"[CITED_BY_IMPL] ═══════════════════════════════════════════════")
+        logger.info(f"[CITED_BY_IMPL] BASE URL (with scipsc=1): {base_url}")
 
         if year_low:
             base_url += f"&as_ylo={year_low}"
         if year_high:
             base_url += f"&as_yhi={year_high}"
+
+        logger.info(f"[CITED_BY_IMPL] FINAL BASE URL: {base_url}")
 
         all_papers = []
         total_results = None
@@ -225,52 +240,86 @@ class ScholarSearchService:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
+        logger.info(f"[CITED_BY_IMPL] max_pages calculated: {max_pages}")
+        logger.info(f"[CITED_BY_IMPL] Starting page loop...")
+
         while len(all_papers) < max_results and current_page < max_pages:
             page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
 
+            logger.info(f"[PAGE {current_page + 1}/{max_pages}] ───────────────────────────────")
+            logger.info(f"[PAGE {current_page + 1}] URL: {page_url}")
+
             try:
-                logger.info(f"Fetching cited-by page {current_page + 1}/{max_pages}...")
+                logger.info(f"[PAGE {current_page + 1}] Calling _fetch_with_retry...")
                 html = await self._fetch_with_retry(page_url)
+                logger.info(f"[PAGE {current_page + 1}] HTML received, length: {len(html)} bytes")
+                logger.info(f"[PAGE {current_page + 1}] HTML preview: {html[:500]}...")
 
                 if current_page == 0 or total_results is None:
                     total_results = self._extract_result_count(html)
+                    logger.info(f"[PAGE {current_page + 1}] Extracted total_results: {total_results}")
 
+                logger.info(f"[PAGE {current_page + 1}] Calling _parse_scholar_page...")
                 extracted = self._parse_scholar_page(html)
+                logger.info(f"[PAGE {current_page + 1}] Parse returned {len(extracted)} papers")
 
                 if not extracted:
-                    logger.info("No more citations, stopping")
+                    logger.info(f"[PAGE {current_page + 1}] *** NO PAPERS EXTRACTED - stopping loop ***")
+                    logger.info(f"[PAGE {current_page + 1}] HTML snippet for debugging: {html[500:2000]}...")
                     break
 
-                logger.info(f"✓ Extracted {len(extracted)} citing papers from page {current_page + 1}")
+                logger.info(f"[PAGE {current_page + 1}] ✓ Extracted {len(extracted)} citing papers")
+                for idx, paper in enumerate(extracted[:3]):
+                    logger.info(f"[PAGE {current_page + 1}]   [{idx}] {paper.get('title', 'NO TITLE')[:60]}...")
 
                 # IMMEDIATE CALLBACK - save to DB NOW before anything can fail
                 if on_page_complete:
+                    logger.info(f"[PAGE {current_page + 1}] Calling on_page_complete callback...")
+                    logger.info(f"[PAGE {current_page + 1}] Callback type: {type(on_page_complete)}")
+                    logger.info(f"[PAGE {current_page + 1}] Papers to save: {len(extracted)}")
                     try:
                         await on_page_complete(current_page, extracted)
-                        logger.info(f"✓ Page {current_page + 1} saved to database")
+                        logger.info(f"[PAGE {current_page + 1}] ✓ Callback completed successfully")
                     except Exception as save_error:
-                        logger.error(f"Failed to save page {current_page + 1}: {save_error}")
+                        logger.error(f"[PAGE {current_page + 1}] ✗✗✗ CALLBACK FAILED ✗✗✗")
+                        logger.error(f"[PAGE {current_page + 1}] Error type: {type(save_error).__name__}")
+                        logger.error(f"[PAGE {current_page + 1}] Error message: {save_error}")
+                        logger.error(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
                         # Continue anyway - at least we tried
+                else:
+                    logger.info(f"[PAGE {current_page + 1}] No callback set - papers not saved to DB")
 
                 all_papers.extend(extracted)
                 current_page += 1
                 consecutive_failures = 0
+                logger.info(f"[PROGRESS] Total papers so far: {len(all_papers)}")
 
                 if current_page < max_pages and len(all_papers) < max_results:
+                    logger.info(f"[RATE LIMIT] Sleeping 2 seconds before next page...")
                     await asyncio.sleep(2)
 
             except Exception as e:
                 consecutive_failures += 1
-                logger.warning(f"Page {current_page + 1} fetch failed ({consecutive_failures}/{max_consecutive_failures}): {e}")
+                logger.warning(f"[PAGE {current_page + 1}] ✗ FETCH FAILED ({consecutive_failures}/{max_consecutive_failures})")
+                logger.warning(f"[PAGE {current_page + 1}] Error type: {type(e).__name__}")
+                logger.warning(f"[PAGE {current_page + 1}] Error: {e}")
+                logger.warning(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
 
                 if consecutive_failures >= max_consecutive_failures:
-                    logger.error(f"Too many failures, stopping at page {current_page}. Saved {len(all_papers)} papers so far.")
+                    logger.error(f"[CITED_BY_IMPL] ✗✗✗ TOO MANY FAILURES - STOPPING ✗✗✗")
+                    logger.error(f"[CITED_BY_IMPL] Stopped at page {current_page}. Saved {len(all_papers)} papers.")
                     break
 
                 current_page += 1
                 await asyncio.sleep(5)
 
-        logger.info(f"Cited-by complete: {len(all_papers)} papers from {current_page} pages")
+        logger.info(f"╔{'═'*60}╗")
+        logger.info(f"║  CITED_BY_IMPL COMPLETE")
+        logger.info(f"╠{'═'*60}╣")
+        logger.info(f"║  Total papers: {len(all_papers)}")
+        logger.info(f"║  Pages fetched: {current_page}")
+        logger.info(f"║  Total results (Scholar count): {total_results}")
+        logger.info(f"╚{'═'*60}╝")
 
         return {
             "papers": all_papers[:max_results],

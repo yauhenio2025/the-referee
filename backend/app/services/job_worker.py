@@ -7,8 +7,9 @@ Supports concurrent execution of multiple jobs.
 import asyncio
 import json
 import logging
+import traceback
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,13 +191,21 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
 
 async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     """Process a citation extraction job - fetch all papers citing selected editions"""
+    logger.info(f"╔{'═'*70}╗")
+    logger.info(f"║  EXTRACT_CITATIONS JOB ENTRY POINT")
+    logger.info(f"╠{'═'*70}╣")
+    logger.info(f"║  Job ID: {job.id}")
+    logger.info(f"║  Paper ID: {job.paper_id}")
+    logger.info(f"║  Raw params: {job.params}")
+    logger.info(f"╚{'═'*70}╝")
+
     params = json.loads(job.params) if job.params else {}
     paper_id = job.paper_id
     edition_ids = params.get("edition_ids", [])  # Empty = all selected
     max_citations_per_edition = params.get("max_citations_per_edition", 500)
     skip_threshold = params.get("skip_threshold", 5000)  # Skip editions with > this many citations
 
-    logger.info(f"[Worker] Processing extract_citations job {job.id} for paper {paper_id}")
+    logger.info(f"[Worker] Parsed params: edition_ids={edition_ids}, max_citations={max_citations_per_edition}, skip_threshold={skip_threshold}")
 
     # Get paper
     result = await db.execute(select(Paper).where(Paper.id == paper_id))
@@ -270,10 +279,31 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         async def save_page_citations(page_num: int, papers: List[Dict]):
             nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params
 
+            logger.info(f"[CALLBACK] ═══════════════════════════════════════════════")
+            logger.info(f"[CALLBACK] save_page_citations called")
+            logger.info(f"[CALLBACK] page_num: {page_num}")
+            logger.info(f"[CALLBACK] papers type: {type(papers)}")
+            logger.info(f"[CALLBACK] papers length: {len(papers) if isinstance(papers, list) else 'NOT A LIST'}")
+
+            if not isinstance(papers, list):
+                logger.error(f"[CALLBACK] ✗✗✗ PAPERS IS NOT A LIST! Type: {type(papers)}")
+                logger.error(f"[CALLBACK] Papers value: {papers}")
+                raise TypeError(f"Expected list of papers, got {type(papers)}")
+
+            if papers and len(papers) > 0:
+                logger.info(f"[CALLBACK] First paper: {papers[0]}")
+                logger.info(f"[CALLBACK] First paper type: {type(papers[0])}")
+
             new_count = 0
-            for paper_data in papers:
+            skipped_no_id = 0
+            for idx, paper_data in enumerate(papers):
+                if not isinstance(paper_data, dict):
+                    logger.error(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
+                    continue
+
                 scholar_id = paper_data.get("scholarId")
                 if not scholar_id:
+                    skipped_no_id += 1
                     continue
 
                 if scholar_id in existing_scholar_ids:
@@ -301,7 +331,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             # COMMIT IMMEDIATELY after each page
             await db.commit()
-            logger.info(f"[Worker] Page {page_num + 1}: saved {new_count} new citations (total: {total_new_citations})")
+            logger.info(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
             # Update job progress with current state for resume
             progress_pct = 10 + ((i + (page_num / 20)) / total_editions) * 70
@@ -320,7 +350,15 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             await db.commit()
 
         try:
-            logger.info(f"[Worker] Fetching citations for edition {edition.id} (scholar_id={edition.scholar_id})")
+            logger.info(f"[EDITION {i+1}/{total_editions}] ═══════════════════════════════════════════════")
+            logger.info(f"[EDITION {i+1}] Edition ID: {edition.id}")
+            logger.info(f"[EDITION {i+1}] Scholar ID: {edition.scholar_id}")
+            logger.info(f"[EDITION {i+1}] Title: {edition.title[:60] if edition.title else 'NO TITLE'}...")
+            logger.info(f"[EDITION {i+1}] Language: {edition.language}")
+            logger.info(f"[EDITION {i+1}] Citation count (Scholar): {edition.citation_count}")
+            logger.info(f"[EDITION {i+1}] max_results: {max_citations_per_edition}")
+            logger.info(f"[EDITION {i+1}] start_page: {resume_page}")
+            logger.info(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
 
             result = await scholar_service.get_cited_by(
                 scholar_id=edition.scholar_id,
@@ -329,19 +367,35 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 start_page=resume_page,
             )
 
+            logger.info(f"[EDITION {i+1}] get_cited_by returned:")
+            logger.info(f"[EDITION {i+1}]   result type: {type(result)}")
+            logger.info(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
+            logger.info(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
+            logger.info(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
+
             edition_citations = total_new_citations - edition_start_citations
-            logger.info(f"[Worker] Edition {edition.id} complete: {edition_citations} new citations")
+            logger.info(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
 
             # Rate limit between editions
             if i < total_editions - 1:
+                logger.info(f"[EDITION {i+1}] Sleeping 3 seconds before next edition...")
                 await asyncio.sleep(3)
 
         except Exception as e:
-            logger.error(f"[Worker] Error with edition {edition.id}: {e}")
-            logger.info(f"[Worker] Continuing with next edition. {total_new_citations} citations saved so far.")
+            logger.error(f"[EDITION {i+1}] ✗✗✗ EXCEPTION ✗✗✗")
+            logger.error(f"[EDITION {i+1}] Error type: {type(e).__name__}")
+            logger.error(f"[EDITION {i+1}] Error message: {e}")
+            logger.error(f"[EDITION {i+1}] Traceback: {traceback.format_exc()}")
+            logger.info(f"[EDITION {i+1}] Continuing with next edition. {total_new_citations} citations saved so far.")
             # Continue with other editions - we've already saved what we got
 
-    logger.info(f"[Worker] TOTAL: {total_new_citations} new citations, {total_updated_citations} duplicates skipped")
+    logger.info(f"╔{'═'*70}╗")
+    logger.info(f"║  EXTRACT_CITATIONS JOB COMPLETE")
+    logger.info(f"╠{'═'*70}╣")
+    logger.info(f"║  Total new citations: {total_new_citations}")
+    logger.info(f"║  Total duplicates skipped: {total_updated_citations}")
+    logger.info(f"║  Editions processed: {len(valid_editions)}")
+    logger.info(f"╚{'═'*70}╝")
 
     # Clear resume state on successful completion
     if params.get("resume_state"):
