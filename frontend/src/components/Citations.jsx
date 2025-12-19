@@ -1,35 +1,61 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
 /**
  * Citations View - Shows extracted citations for a paper
+ * With language filtering and advanced sorting
  */
 export default function Citations({ paper, onBack }) {
-  const [sortBy, setSortBy] = useState('intersection') // intersection, citations, year
+  const [sortBy, setSortBy] = useState('citations') // intersection, citations, year
   const [minIntersection, setMinIntersection] = useState(1)
+  const [selectedLanguage, setSelectedLanguage] = useState(null) // null = all languages
 
   const { data: citations, isLoading } = useQuery({
     queryKey: ['citations', paper.id],
     queryFn: () => api.getPaperCitations(paper.id),
   })
 
-  // Sort and filter citations
-  const filteredCitations = citations
-    ?.filter(c => c.intersection_count >= minIntersection)
-    ?.sort((a, b) => {
-      if (sortBy === 'intersection') return b.intersection_count - a.intersection_count
-      if (sortBy === 'citations') return (b.citation_count || 0) - (a.citation_count || 0)
-      if (sortBy === 'year') return (b.year || 0) - (a.year || 0)
-      return 0
-    }) || []
+  // Extract unique languages from citations
+  const languageGroups = useMemo(() => {
+    if (!citations) return {}
+    return citations.reduce((acc, c) => {
+      const lang = c.edition_language || 'Unknown'
+      acc[lang] = (acc[lang] || 0) + 1
+      return acc
+    }, {})
+  }, [citations])
+
+  // Sort languages by count
+  const sortedLanguages = useMemo(() => {
+    return Object.entries(languageGroups)
+      .sort((a, b) => b[1] - a[1])
+      .map(([lang, count]) => ({ lang, count }))
+  }, [languageGroups])
+
+  // Filter and sort citations
+  const filteredCitations = useMemo(() => {
+    if (!citations) return []
+    return citations
+      .filter(c => c.intersection_count >= minIntersection)
+      .filter(c => !selectedLanguage || (c.edition_language || 'Unknown') === selectedLanguage)
+      .sort((a, b) => {
+        if (sortBy === 'intersection') return b.intersection_count - a.intersection_count
+        if (sortBy === 'citations') return (b.citation_count || 0) - (a.citation_count || 0)
+        if (sortBy === 'year') return (b.year || 0) - (a.year || 0)
+        return 0
+      })
+  }, [citations, minIntersection, selectedLanguage, sortBy])
 
   // Group by intersection count for summary
-  const intersectionGroups = citations?.reduce((acc, c) => {
-    const count = c.intersection_count || 1
-    acc[count] = (acc[count] || 0) + 1
-    return acc
-  }, {}) || {}
+  const intersectionGroups = useMemo(() => {
+    if (!citations) return {}
+    return citations.reduce((acc, c) => {
+      const count = c.intersection_count || 1
+      acc[count] = (acc[count] || 0) + 1
+      return acc
+    }, {})
+  }, [citations])
 
   const maxIntersection = Math.max(...Object.keys(intersectionGroups).map(Number), 1)
 
@@ -52,6 +78,30 @@ export default function Citations({ paper, onBack }) {
         </div>
       ) : (
         <>
+          {/* Language Filter */}
+          {sortedLanguages.length > 1 && (
+            <div className="language-filter">
+              <span className="label">Filter by Edition Language:</span>
+              <div className="language-buttons">
+                <button
+                  className={`language-btn ${selectedLanguage === null ? 'active' : ''}`}
+                  onClick={() => setSelectedLanguage(null)}
+                >
+                  All ({citations.length})
+                </button>
+                {sortedLanguages.map(({ lang, count }) => (
+                  <button
+                    key={lang}
+                    className={`language-btn ${selectedLanguage === lang ? 'active' : ''}`}
+                    onClick={() => setSelectedLanguage(lang)}
+                  >
+                    {lang} ({count})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Summary Stats */}
           <div className="citations-summary">
             <div className="intersection-bars">
@@ -80,8 +130,8 @@ export default function Citations({ paper, onBack }) {
             <div className="sort-controls">
               <label>Sort by:</label>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
-                <option value="intersection">Cross-citation count</option>
                 <option value="citations">Citation count</option>
+                <option value="intersection">Cross-citation count</option>
                 <option value="year">Year (newest first)</option>
               </select>
             </div>
@@ -90,7 +140,8 @@ export default function Citations({ paper, onBack }) {
           {/* Results count */}
           <div className="results-count">
             Showing {filteredCitations.length} of {citations.length} citations
-            {minIntersection > 1 && ` (citing ${minIntersection}+ editions)`}
+            {selectedLanguage && ` • Language: ${selectedLanguage}`}
+            {minIntersection > 1 && ` • Citing ${minIntersection}+ editions`}
           </div>
 
           {/* Citations Table */}
@@ -100,6 +151,7 @@ export default function Citations({ paper, onBack }) {
                 <th className="col-cross">Cross</th>
                 <th className="col-title">Title / Authors</th>
                 <th className="col-year">Year</th>
+                <th className="col-lang">Lang</th>
                 <th className="col-venue">Venue</th>
                 <th className="col-cites">Cited by</th>
               </tr>
@@ -118,6 +170,27 @@ export default function Citations({ paper, onBack }) {
 
 function CitationRow({ citation, maxIntersection }) {
   const crossWidth = (citation.intersection_count / maxIntersection) * 100
+
+  // Language flag emoji based on language
+  const getLangEmoji = (lang) => {
+    const flags = {
+      'English': '🇬🇧',
+      'Italian': '🇮🇹',
+      'Spanish': '🇪🇸',
+      'French': '🇫🇷',
+      'German': '🇩🇪',
+      'Portuguese': '🇵🇹',
+      'Russian': '🇷🇺',
+      'Chinese': '🇨🇳',
+      'Japanese': '🇯🇵',
+      'Korean': '🇰🇷',
+      'Dutch': '🇳🇱',
+      'Polish': '🇵🇱',
+      'Turkish': '🇹🇷',
+      'Arabic': '🇸🇦',
+    }
+    return flags[lang] || '🌐'
+  }
 
   return (
     <tr className={citation.intersection_count > 1 ? 'multi-cross' : ''}>
@@ -142,6 +215,11 @@ function CitationRow({ citation, maxIntersection }) {
         </div>
       </td>
       <td className="col-year">{citation.year || '–'}</td>
+      <td className="col-lang">
+        <span className="lang-badge" title={citation.edition_language || 'Unknown'}>
+          {getLangEmoji(citation.edition_language)} {(citation.edition_language || '?').substring(0, 3)}
+        </span>
+      </td>
       <td className="col-venue">
         <span className="venue-tag" title={citation.venue}>
           {citation.venue ? (citation.venue.length > 30 ? citation.venue.substring(0, 27) + '...' : citation.venue) : '–'}

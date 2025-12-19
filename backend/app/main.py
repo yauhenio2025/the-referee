@@ -984,18 +984,37 @@ async def extract_citations(
 async def get_paper_citations(
     paper_id: int,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 500,
+    language: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get citations for a paper"""
-    result = await db.execute(
-        select(Citation)
+    """Get citations for a paper with optional language filter"""
+    from sqlalchemy.orm import joinedload
+
+    # Build query with edition join for language
+    query = (
+        select(Citation, Edition.language.label('edition_language'))
+        .outerjoin(Edition, Citation.edition_id == Edition.id)
         .where(Citation.paper_id == paper_id)
-        .order_by(Citation.citation_count.desc())
-        .offset(skip)
-        .limit(limit)
     )
-    return result.scalars().all()
+
+    # Apply language filter if specified
+    if language:
+        query = query.where(Edition.language.ilike(f"%{language}%"))
+
+    query = query.order_by(Citation.citation_count.desc()).offset(skip).limit(limit)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    # Build response with edition_language
+    citations = []
+    for citation, edition_lang in rows:
+        citation_dict = {k: v for k, v in citation.__dict__.items() if not k.startswith('_')}
+        citation_dict['edition_language'] = edition_lang
+        citations.append(CitationResponse(**citation_dict))
+
+    return citations
 
 
 @app.get("/api/papers/{paper_id}/cross-citations", response_model=CrossCitationResult)

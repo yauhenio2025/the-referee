@@ -200,8 +200,11 @@ class CitationResponse(BaseModel):
     authors: Optional[str] = None
     year: Optional[int] = None
     venue: Optional[str] = None
+    link: Optional[str] = None
     citation_count: int = 0
     intersection_count: int = 1
+    edition_id: Optional[int] = None
+    edition_language: Optional[str] = None
 
     class Config:
         from_attributes = True
