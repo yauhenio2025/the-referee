@@ -219,7 +219,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     params = json.loads(job.params) if job.params else {}
     paper_id = job.paper_id
     edition_ids = params.get("edition_ids", [])  # Empty = all selected
-    max_citations_per_edition = params.get("max_citations_per_edition", 500)
+    max_citations_per_edition = params.get("max_citations_per_edition", 1000)
     skip_threshold = params.get("skip_threshold", 5000)  # Skip editions with > this many citations
 
     log_now(f"[Worker] Parsed params: edition_ids={edition_ids}, max_citations={max_citations_per_edition}, skip_threshold={skip_threshold}")
@@ -375,20 +375,62 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[EDITION {i+1}] Citation count (Scholar): {edition.citation_count}")
             log_now(f"[EDITION {i+1}] max_results: {max_citations_per_edition}")
             log_now(f"[EDITION {i+1}] start_page: {resume_page}")
-            log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
 
-            result = await scholar_service.get_cited_by(
-                scholar_id=edition.scholar_id,
-                max_results=max_citations_per_edition,
-                on_page_complete=save_page_citations,
-                start_page=resume_page,
-            )
+            # For editions with >1000 citations, use year-by-year fetching
+            # Google Scholar limits ~1000 results per query
+            YEAR_BY_YEAR_THRESHOLD = 1000
+            current_year = datetime.now().year
 
-            log_now(f"[EDITION {i+1}] get_cited_by returned:")
-            log_now(f"[EDITION {i+1}]   result type: {type(result)}")
-            log_now(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
-            log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
-            log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
+            if edition.citation_count and edition.citation_count > YEAR_BY_YEAR_THRESHOLD:
+                log_now(f"[EDITION {i+1}] 🗓️ YEAR-BY-YEAR MODE: {edition.citation_count} citations > {YEAR_BY_YEAR_THRESHOLD} threshold")
+                log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to 1990...")
+
+                # Fetch year by year from current year backwards
+                min_year = 1990  # Don't go further back than this
+                for year in range(current_year, min_year - 1, -1):
+                    year_start_citations = total_new_citations
+
+                    log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
+
+                    result = await scholar_service.get_cited_by(
+                        scholar_id=edition.scholar_id,
+                        max_results=1000,  # Max per year
+                        year_low=year,
+                        year_high=year,
+                        on_page_complete=save_page_citations,
+                        start_page=0,  # Always start from 0 for each year
+                    )
+
+                    year_citations = total_new_citations - year_start_citations
+                    total_this_year = result.get('totalResults', 0) if isinstance(result, dict) else 0
+                    log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total for year)")
+
+                    # If no results for this year and previous few years, we're likely done
+                    if year_citations == 0 and total_this_year == 0:
+                        # Check if we've had 3 consecutive empty years
+                        if year < current_year - 2:  # Give some buffer for recent years
+                            log_now(f"[EDITION {i+1}] 📅 No citations found for {year}, stopping year-by-year fetch")
+                            break
+
+                    # Small delay between year queries
+                    await asyncio.sleep(2)
+
+            else:
+                # Standard fetch for editions with <=1000 citations
+                log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
+
+                result = await scholar_service.get_cited_by(
+                    scholar_id=edition.scholar_id,
+                    max_results=max_citations_per_edition,
+                    on_page_complete=save_page_citations,
+                    start_page=resume_page,
+                )
+
+                log_now(f"[EDITION {i+1}] get_cited_by returned:")
+                log_now(f"[EDITION {i+1}]   result type: {type(result)}")
+                log_now(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
+                log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
+                log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
 
             edition_citations = total_new_citations - edition_start_citations
             log_now(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
@@ -563,8 +605,8 @@ async def create_extract_citations_job(
     db: AsyncSession,
     paper_id: int,
     edition_ids: list = None,
-    max_citations_per_edition: int = 500,
-    skip_threshold: int = 5000,
+    max_citations_per_edition: int = 1000,
+    skip_threshold: int = 10000,
 ) -> Job:
     """Create an extract_citations job"""
     job = Job(

@@ -1022,7 +1022,7 @@ async def extract_citations(
         db=db,
         paper_id=paper.id,
         edition_ids=request.edition_ids or [],
-        max_citations_per_edition=min(request.max_citations_threshold, 500),
+        max_citations_per_edition=min(request.max_citations_threshold, 1000),
         skip_threshold=request.max_citations_threshold,
     )
     await db.commit()
