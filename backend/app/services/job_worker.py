@@ -3,12 +3,14 @@ Background Job Worker Service
 
 Processes jobs from the queue asynchronously.
 Supports concurrent execution of multiple jobs.
+Includes watchdog for stuck jobs.
 """
 import asyncio
 import json
 import logging
 import traceback
-from datetime import datetime
+import sys
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,17 @@ from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
 
 logger = logging.getLogger(__name__)
+
+# Force immediate log output
+def log_now(msg: str, level: str = "info"):
+    """Log message and immediately flush to stdout"""
+    timestamp = datetime.utcnow().strftime("%H:%M:%S")
+    print(f"{timestamp} | job_worker | {level.upper()} | {msg}", flush=True)
+    sys.stdout.flush()
+
+# Job timeout settings
+JOB_TIMEOUT_MINUTES = 30  # Mark job as failed if no progress for this long
+HEARTBEAT_INTERVAL = 60  # Seconds between heartbeat updates
 
 # Global worker state
 _worker_task: Optional[asyncio.Task] = None
@@ -31,11 +44,16 @@ async def update_job_progress(
     progress: float,
     message: str,
 ):
-    """Update job progress in database"""
+    """Update job progress in database with heartbeat timestamp"""
+    log_now(f"[Job {job_id}] Progress: {progress:.1f}% - {message}")
     await db.execute(
         update(Job)
         .where(Job.id == job_id)
-        .values(progress=progress, progress_message=message)
+        .values(
+            progress=progress,
+            progress_message=message,
+            started_at=datetime.utcnow()  # Use started_at as heartbeat (hacky but works)
+        )
     )
     await db.commit()
 
@@ -47,7 +65,7 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     language = params.get("language", "english")
     max_results = params.get("max_results", 50)
 
-    logger.info(f"[Worker] Processing fetch_more job {job.id} for paper {paper_id}, language={language}")
+    log_now(f"[Worker] Processing fetch_more job {job.id} for paper {paper_id}, language={language}")
 
     # Get paper
     result = await db.execute(select(Paper).where(Paper.id == paper_id))
@@ -128,7 +146,7 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
             llm_classification=json.dumps(discovery_result.get("llmClassification", {}), ensure_ascii=False),
         )
         db.add(raw_search_record)
-        logger.info(f"[Worker] Saved {len(raw_results)} raw results for debugging")
+        log_now(f"[Worker] Saved {len(raw_results)} raw results for debugging")
 
     # Store new editions
     new_editions = []
@@ -191,13 +209,12 @@ async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
 
 async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     """Process a citation extraction job - fetch all papers citing selected editions"""
-    logger.info(f"╔{'═'*70}╗")
-    logger.info(f"║  EXTRACT_CITATIONS JOB ENTRY POINT")
-    logger.info(f"╠{'═'*70}╣")
-    logger.info(f"║  Job ID: {job.id}")
-    logger.info(f"║  Paper ID: {job.paper_id}")
-    logger.info(f"║  Raw params: {job.params}")
-    logger.info(f"╚{'═'*70}╝")
+    log_now("="*70)
+    log_now(f"EXTRACT_CITATIONS JOB START - Job {job.id}")
+    log_now("="*70)
+    log_now(f"Job ID: {job.id}")
+    log_now(f"Paper ID: {job.paper_id}")
+    log_now(f"Raw params: {job.params}")
 
     params = json.loads(job.params) if job.params else {}
     paper_id = job.paper_id
@@ -205,7 +222,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     max_citations_per_edition = params.get("max_citations_per_edition", 500)
     skip_threshold = params.get("skip_threshold", 5000)  # Skip editions with > this many citations
 
-    logger.info(f"[Worker] Parsed params: edition_ids={edition_ids}, max_citations={max_citations_per_edition}, skip_threshold={skip_threshold}")
+    log_now(f"[Worker] Parsed params: edition_ids={edition_ids}, max_citations={max_citations_per_edition}, skip_threshold={skip_threshold}")
 
     # Get paper
     result = await db.execute(select(Paper).where(Paper.id == paper_id))
@@ -245,7 +262,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     if not valid_editions:
         raise ValueError(f"No valid editions to process (all {len(skipped_editions)} skipped)")
 
-    logger.info(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
+    log_now(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
     await update_job_progress(db, job.id, 5, f"Processing {len(valid_editions)} editions...")
 
     # Get existing citations to avoid duplicates (refreshed after each save)
@@ -273,32 +290,32 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             resume_state = params["resume_state"]
             if resume_state.get("edition_id") == edition.id:
                 resume_page = resume_state.get("last_page", 0)
-                logger.info(f"[Worker] Resuming edition {edition.id} from page {resume_page}")
+                log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page}")
 
         # Callback to save citations IMMEDIATELY after each page
         async def save_page_citations(page_num: int, papers: List[Dict]):
             nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params
 
-            logger.info(f"[CALLBACK] ═══════════════════════════════════════════════")
-            logger.info(f"[CALLBACK] save_page_citations called")
-            logger.info(f"[CALLBACK] page_num: {page_num}")
-            logger.info(f"[CALLBACK] papers type: {type(papers)}")
-            logger.info(f"[CALLBACK] papers length: {len(papers) if isinstance(papers, list) else 'NOT A LIST'}")
+            log_now(f"[CALLBACK] ═══════════════════════════════════════════════")
+            log_now(f"[CALLBACK] save_page_citations called")
+            log_now(f"[CALLBACK] page_num: {page_num}")
+            log_now(f"[CALLBACK] papers type: {type(papers)}")
+            log_now(f"[CALLBACK] papers length: {len(papers) if isinstance(papers, list) else 'NOT A LIST'}")
 
             if not isinstance(papers, list):
-                logger.error(f"[CALLBACK] ✗✗✗ PAPERS IS NOT A LIST! Type: {type(papers)}")
-                logger.error(f"[CALLBACK] Papers value: {papers}")
+                log_now(f"[CALLBACK] ✗✗✗ PAPERS IS NOT A LIST! Type: {type(papers)}")
+                log_now(f"[CALLBACK] Papers value: {papers}")
                 raise TypeError(f"Expected list of papers, got {type(papers)}")
 
             if papers and len(papers) > 0:
-                logger.info(f"[CALLBACK] First paper: {papers[0]}")
-                logger.info(f"[CALLBACK] First paper type: {type(papers[0])}")
+                log_now(f"[CALLBACK] First paper: {papers[0]}")
+                log_now(f"[CALLBACK] First paper type: {type(papers[0])}")
 
             new_count = 0
             skipped_no_id = 0
             for idx, paper_data in enumerate(papers):
                 if not isinstance(paper_data, dict):
-                    logger.error(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
+                    log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
                     continue
 
                 scholar_id = paper_data.get("scholarId")
@@ -331,7 +348,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             # COMMIT IMMEDIATELY after each page
             await db.commit()
-            logger.info(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
+            log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
             # Update job progress with current state for resume
             progress_pct = 10 + ((i + (page_num / 20)) / total_editions) * 70
@@ -350,15 +367,15 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             await db.commit()
 
         try:
-            logger.info(f"[EDITION {i+1}/{total_editions}] ═══════════════════════════════════════════════")
-            logger.info(f"[EDITION {i+1}] Edition ID: {edition.id}")
-            logger.info(f"[EDITION {i+1}] Scholar ID: {edition.scholar_id}")
-            logger.info(f"[EDITION {i+1}] Title: {edition.title[:60] if edition.title else 'NO TITLE'}...")
-            logger.info(f"[EDITION {i+1}] Language: {edition.language}")
-            logger.info(f"[EDITION {i+1}] Citation count (Scholar): {edition.citation_count}")
-            logger.info(f"[EDITION {i+1}] max_results: {max_citations_per_edition}")
-            logger.info(f"[EDITION {i+1}] start_page: {resume_page}")
-            logger.info(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
+            log_now(f"[EDITION {i+1}/{total_editions}] ═══════════════════════════════════════════════")
+            log_now(f"[EDITION {i+1}] Edition ID: {edition.id}")
+            log_now(f"[EDITION {i+1}] Scholar ID: {edition.scholar_id}")
+            log_now(f"[EDITION {i+1}] Title: {edition.title[:60] if edition.title else 'NO TITLE'}...")
+            log_now(f"[EDITION {i+1}] Language: {edition.language}")
+            log_now(f"[EDITION {i+1}] Citation count (Scholar): {edition.citation_count}")
+            log_now(f"[EDITION {i+1}] max_results: {max_citations_per_edition}")
+            log_now(f"[EDITION {i+1}] start_page: {resume_page}")
+            log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
 
             result = await scholar_service.get_cited_by(
                 scholar_id=edition.scholar_id,
@@ -367,35 +384,35 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 start_page=resume_page,
             )
 
-            logger.info(f"[EDITION {i+1}] get_cited_by returned:")
-            logger.info(f"[EDITION {i+1}]   result type: {type(result)}")
-            logger.info(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
-            logger.info(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
-            logger.info(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
+            log_now(f"[EDITION {i+1}] get_cited_by returned:")
+            log_now(f"[EDITION {i+1}]   result type: {type(result)}")
+            log_now(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
+            log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
+            log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
 
             edition_citations = total_new_citations - edition_start_citations
-            logger.info(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
+            log_now(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
 
             # Rate limit between editions
             if i < total_editions - 1:
-                logger.info(f"[EDITION {i+1}] Sleeping 3 seconds before next edition...")
+                log_now(f"[EDITION {i+1}] Sleeping 3 seconds before next edition...")
                 await asyncio.sleep(3)
 
         except Exception as e:
-            logger.error(f"[EDITION {i+1}] ✗✗✗ EXCEPTION ✗✗✗")
-            logger.error(f"[EDITION {i+1}] Error type: {type(e).__name__}")
-            logger.error(f"[EDITION {i+1}] Error message: {e}")
-            logger.error(f"[EDITION {i+1}] Traceback: {traceback.format_exc()}")
-            logger.info(f"[EDITION {i+1}] Continuing with next edition. {total_new_citations} citations saved so far.")
+            log_now(f"[EDITION {i+1}] ✗✗✗ EXCEPTION ✗✗✗")
+            log_now(f"[EDITION {i+1}] Error type: {type(e).__name__}")
+            log_now(f"[EDITION {i+1}] Error message: {e}")
+            log_now(f"[EDITION {i+1}] Traceback: {traceback.format_exc()}")
+            log_now(f"[EDITION {i+1}] Continuing with next edition. {total_new_citations} citations saved so far.")
             # Continue with other editions - we've already saved what we got
 
-    logger.info(f"╔{'═'*70}╗")
-    logger.info(f"║  EXTRACT_CITATIONS JOB COMPLETE")
-    logger.info(f"╠{'═'*70}╣")
-    logger.info(f"║  Total new citations: {total_new_citations}")
-    logger.info(f"║  Total duplicates skipped: {total_updated_citations}")
-    logger.info(f"║  Editions processed: {len(valid_editions)}")
-    logger.info(f"╚{'═'*70}╝")
+    log_now(f"╔{'═'*70}╗")
+    log_now(f"║  EXTRACT_CITATIONS JOB COMPLETE")
+    log_now(f"╠{'═'*70}╣")
+    log_now(f"║  Total new citations: {total_new_citations}")
+    log_now(f"║  Total duplicates skipped: {total_updated_citations}")
+    log_now(f"║  Editions processed: {len(valid_editions)}")
+    log_now(f"╚{'═'*70}╝")
 
     # Clear resume state on successful completion
     if params.get("resume_state"):
@@ -421,11 +438,11 @@ async def process_single_job(job_id: int):
             result = await db.execute(select(Job).where(Job.id == job_id))
             job = result.scalar_one_or_none()
             if not job:
-                logger.error(f"[Worker] Job {job_id} not found")
+                log_now(f"[Worker] Job {job_id} not found")
                 return
 
             if job.status != "pending":
-                logger.info(f"[Worker] Job {job_id} status is {job.status}, skipping")
+                log_now(f"[Worker] Job {job_id} status is {job.status}, skipping")
                 return
 
             # Mark as running
@@ -435,7 +452,7 @@ async def process_single_job(job_id: int):
             job.progress_message = "Starting..."
             await db.commit()
 
-            logger.info(f"[Worker] Starting job {job_id} ({job.job_type})")
+            log_now(f"[Worker] Starting job {job_id} ({job.job_type})")
 
             # Process based on job type
             if job.job_type == "fetch_more_editions":
@@ -453,10 +470,10 @@ async def process_single_job(job_id: int):
             job.completed_at = datetime.utcnow()
             await db.commit()
 
-            logger.info(f"[Worker] Completed job {job_id}")
+            log_now(f"[Worker] Completed job {job_id}")
 
         except Exception as e:
-            logger.error(f"[Worker] Job {job_id} failed: {e}")
+            log_now(f"[Worker] Job {job_id} failed: {e}")
             # Mark as failed
             try:
                 job.status = "failed"
@@ -471,7 +488,7 @@ async def worker_loop():
     """Main worker loop - processes pending jobs"""
     global _worker_running
     _worker_running = True
-    logger.info("[Worker] Starting job worker loop")
+    log_now("[Worker] Starting job worker loop")
 
     while _worker_running:
         try:
@@ -494,10 +511,10 @@ async def worker_loop():
                     await asyncio.sleep(5)
 
         except Exception as e:
-            logger.error(f"[Worker] Loop error: {e}")
+            log_now(f"[Worker] Loop error: {e}")
             await asyncio.sleep(10)
 
-    logger.info("[Worker] Worker loop stopped")
+    log_now("[Worker] Worker loop stopped")
 
 
 def start_worker():
@@ -505,7 +522,7 @@ def start_worker():
     global _worker_task
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(worker_loop())
-        logger.info("[Worker] Background worker started")
+        log_now("[Worker] Background worker started")
 
 
 def stop_worker():
@@ -515,7 +532,7 @@ def stop_worker():
     if _worker_task:
         _worker_task.cancel()
         _worker_task = None
-    logger.info("[Worker] Background worker stopped")
+    log_now("[Worker] Background worker stopped")
 
 
 async def create_fetch_more_job(

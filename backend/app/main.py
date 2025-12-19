@@ -5,6 +5,7 @@ A robust API for discovering editions and extracting citations from academic pap
 """
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,11 +29,51 @@ from .schemas import (
     CanonicalEditionSummary,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging with immediate flush for Render
+import sys
+
+# Remove any existing handlers
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create handler that flushes immediately
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+handler.setFormatter(logging.Formatter(
+    '%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    datefmt='%H:%M:%S'
+))
+
+# Force immediate flush after each log
+class FlushHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+flush_handler = FlushHandler(sys.stdout)
+flush_handler.setLevel(logging.INFO)
+flush_handler.setFormatter(logging.Formatter(
+    '%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    datefmt='%H:%M:%S'
+))
+
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(flush_handler)
+
+# Also log to stderr for Render's log capture
+stderr_handler = FlushHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
+stderr_handler.setFormatter(logging.Formatter(
+    '%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    datefmt='%H:%M:%S'
+))
+root_logger.addHandler(stderr_handler)
+
+logger = logging.getLogger(__name__)
+logger.info("="*60)
+logger.info("THE REFEREE API STARTING UP")
+logger.info("="*60)
 
 settings = get_settings()
 
@@ -1110,7 +1151,7 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/jobs/{job_id}/cancel")
 async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db)):
-    """Cancel a pending job"""
+    """Cancel a pending or running job"""
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
@@ -1120,7 +1161,28 @@ async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Cannot cancel job with status: {job.status}")
 
     job.status = "cancelled"
+    job.error = "Cancelled by user"
+    job.completed_at = datetime.utcnow()
+    await db.commit()
+    logger.info(f"Job {job_id} cancelled by user")
     return {"cancelled": True, "job_id": job_id}
+
+
+@app.post("/api/jobs/{job_id}/fail")
+async def force_fail_job(job_id: int, reason: str = "Manually marked as failed", db: AsyncSession = Depends(get_db)):
+    """Force a stuck job to failed status"""
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    old_status = job.status
+    job.status = "failed"
+    job.error = reason
+    job.completed_at = datetime.utcnow()
+    await db.commit()
+    logger.info(f"Job {job_id} force-failed: {reason} (was: {old_status})")
+    return {"failed": True, "job_id": job_id, "previous_status": old_status, "reason": reason}
 
 
 # ============== Debug Endpoints ==============

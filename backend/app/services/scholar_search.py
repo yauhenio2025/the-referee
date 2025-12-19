@@ -14,6 +14,8 @@ import asyncio
 import re
 import logging
 import traceback
+import sys
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode, quote_plus
@@ -22,6 +24,13 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Force immediate log output
+def log_now(msg: str, level: str = "info"):
+    """Log message and immediately flush to stdout"""
+    timestamp = datetime.utcnow().strftime("%H:%M:%S")
+    print(f"{timestamp} | scholar | {level.upper()} | {msg}", flush=True)
+    sys.stdout.flush()
 
 # Timeout constants
 HTTP_TIMEOUT = 30.0  # 30s per HTTP request (reduced from 60)
@@ -84,7 +93,7 @@ class ScholarSearchService:
         Returns:
             Dict with 'papers' list and 'totalResults' count
         """
-        logger.info(f"[SCHOLAR SEARCH] Query: \"{query[:60]}...\" lang={language}")
+        log_now(f"[SCHOLAR SEARCH] Query: \"{query[:60]}...\" lang={language}")
 
         try:
             return await asyncio.wait_for(
@@ -92,7 +101,7 @@ class ScholarSearchService:
                 timeout=SEARCH_TOTAL_TIMEOUT
             )
         except asyncio.TimeoutError:
-            logger.error(f"[SCHOLAR SEARCH] Total timeout ({SEARCH_TOTAL_TIMEOUT}s) exceeded for query")
+            log_now(f"[SCHOLAR SEARCH] Total timeout ({SEARCH_TOTAL_TIMEOUT}s) exceeded for query")
             return {"papers": [], "totalResults": 0, "error": "Search timeout"}
 
     async def _search_impl(
@@ -110,7 +119,7 @@ class ScholarSearchService:
         if cache_key in self._query_cache:
             cached = self._query_cache[cache_key]
             if cached.get("papers"):
-                logger.info(f"[CACHE HIT] {len(cached['papers'])} papers from cache")
+                log_now(f"[CACHE HIT] {len(cached['papers'])} papers from cache")
                 return {
                     "papers": cached["papers"][:max_results],
                     "totalResults": cached.get("totalResults", len(cached["papers"]))
@@ -138,7 +147,7 @@ class ScholarSearchService:
         while len(papers) < max_results and current_page < max_pages:
             page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
 
-            logger.info(f"Fetching page {current_page + 1}/{max_pages}...")
+            log_now(f"Fetching page {current_page + 1}/{max_pages}...")
             html = await self._fetch_with_retry(page_url)
 
             if current_page == 0:
@@ -147,10 +156,10 @@ class ScholarSearchService:
             extracted = self._parse_scholar_page(html)
 
             if not extracted:
-                logger.info(f"No results on page {current_page + 1}, stopping")
+                log_now(f"No results on page {current_page + 1}, stopping")
                 break
 
-            logger.info(f"✓ Extracted {len(extracted)} papers from page {current_page + 1}")
+            log_now(f"✓ Extracted {len(extracted)} papers from page {current_page + 1}")
             papers.extend(extracted)
             current_page += 1
 
@@ -165,7 +174,7 @@ class ScholarSearchService:
                 "totalResults": total_results or len(papers),
             }
 
-        logger.info(f"Search complete: {len(papers)} papers found")
+        log_now(f"Search complete: {len(papers)} papers found")
 
         return {
             "papers": papers[:max_results],
@@ -194,15 +203,15 @@ class ScholarSearchService:
         Returns:
             Dict with 'papers' list, 'totalResults' count, 'last_page' for resume
         """
-        logger.info(f"╔{'═'*60}╗")
-        logger.info(f"║  GET_CITED_BY ENTRY POINT")
-        logger.info(f"╠{'═'*60}╣")
-        logger.info(f"║  scholar_id: {scholar_id}")
-        logger.info(f"║  max_results: {max_results}")
-        logger.info(f"║  year_low: {year_low}, year_high: {year_high}")
-        logger.info(f"║  start_page: {start_page}")
-        logger.info(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
-        logger.info(f"╚{'═'*60}╝")
+        log_now(f"╔{'═'*60}╗")
+        log_now(f"║  GET_CITED_BY ENTRY POINT")
+        log_now(f"╠{'═'*60}╣")
+        log_now(f"║  scholar_id: {scholar_id}")
+        log_now(f"║  max_results: {max_results}")
+        log_now(f"║  year_low: {year_low}, year_high: {year_high}")
+        log_now(f"║  start_page: {start_page}")
+        log_now(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
+        log_now(f"╚{'═'*60}╝")
 
         # No timeout wrapper - let it run, save pages as we go
         return await self._get_cited_by_impl(
@@ -223,15 +232,15 @@ class ScholarSearchService:
         # CRITICAL: scipsc=1 tells Scholar to search WITHIN citations, not just the paper
         base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
 
-        logger.info(f"[CITED_BY_IMPL] ═══════════════════════════════════════════════")
-        logger.info(f"[CITED_BY_IMPL] BASE URL (with scipsc=1): {base_url}")
+        log_now(f"[CITED_BY_IMPL] ═══════════════════════════════════════════════")
+        log_now(f"[CITED_BY_IMPL] BASE URL (with scipsc=1): {base_url}")
 
         if year_low:
             base_url += f"&as_ylo={year_low}"
         if year_high:
             base_url += f"&as_yhi={year_high}"
 
-        logger.info(f"[CITED_BY_IMPL] FINAL BASE URL: {base_url}")
+        log_now(f"[CITED_BY_IMPL] FINAL BASE URL: {base_url}")
 
         all_papers = []
         total_results = None
@@ -240,86 +249,86 @@ class ScholarSearchService:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
-        logger.info(f"[CITED_BY_IMPL] max_pages calculated: {max_pages}")
-        logger.info(f"[CITED_BY_IMPL] Starting page loop...")
+        log_now(f"[CITED_BY_IMPL] max_pages calculated: {max_pages}")
+        log_now(f"[CITED_BY_IMPL] Starting page loop...")
 
         while len(all_papers) < max_results and current_page < max_pages:
             page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
 
-            logger.info(f"[PAGE {current_page + 1}/{max_pages}] ───────────────────────────────")
-            logger.info(f"[PAGE {current_page + 1}] URL: {page_url}")
+            log_now(f"[PAGE {current_page + 1}/{max_pages}] ───────────────────────────────")
+            log_now(f"[PAGE {current_page + 1}] URL: {page_url}")
 
             try:
-                logger.info(f"[PAGE {current_page + 1}] Calling _fetch_with_retry...")
+                log_now(f"[PAGE {current_page + 1}] Calling _fetch_with_retry...")
                 html = await self._fetch_with_retry(page_url)
-                logger.info(f"[PAGE {current_page + 1}] HTML received, length: {len(html)} bytes")
-                logger.info(f"[PAGE {current_page + 1}] HTML preview: {html[:500]}...")
+                log_now(f"[PAGE {current_page + 1}] HTML received, length: {len(html)} bytes")
+                log_now(f"[PAGE {current_page + 1}] HTML preview: {html[:500]}...")
 
                 if current_page == 0 or total_results is None:
                     total_results = self._extract_result_count(html)
-                    logger.info(f"[PAGE {current_page + 1}] Extracted total_results: {total_results}")
+                    log_now(f"[PAGE {current_page + 1}] Extracted total_results: {total_results}")
 
-                logger.info(f"[PAGE {current_page + 1}] Calling _parse_scholar_page...")
+                log_now(f"[PAGE {current_page + 1}] Calling _parse_scholar_page...")
                 extracted = self._parse_scholar_page(html)
-                logger.info(f"[PAGE {current_page + 1}] Parse returned {len(extracted)} papers")
+                log_now(f"[PAGE {current_page + 1}] Parse returned {len(extracted)} papers")
 
                 if not extracted:
-                    logger.info(f"[PAGE {current_page + 1}] *** NO PAPERS EXTRACTED - stopping loop ***")
-                    logger.info(f"[PAGE {current_page + 1}] HTML snippet for debugging: {html[500:2000]}...")
+                    log_now(f"[PAGE {current_page + 1}] *** NO PAPERS EXTRACTED - stopping loop ***")
+                    log_now(f"[PAGE {current_page + 1}] HTML snippet for debugging: {html[500:2000]}...")
                     break
 
-                logger.info(f"[PAGE {current_page + 1}] ✓ Extracted {len(extracted)} citing papers")
+                log_now(f"[PAGE {current_page + 1}] ✓ Extracted {len(extracted)} citing papers")
                 for idx, paper in enumerate(extracted[:3]):
-                    logger.info(f"[PAGE {current_page + 1}]   [{idx}] {paper.get('title', 'NO TITLE')[:60]}...")
+                    log_now(f"[PAGE {current_page + 1}]   [{idx}] {paper.get('title', 'NO TITLE')[:60]}...")
 
                 # IMMEDIATE CALLBACK - save to DB NOW before anything can fail
                 if on_page_complete:
-                    logger.info(f"[PAGE {current_page + 1}] Calling on_page_complete callback...")
-                    logger.info(f"[PAGE {current_page + 1}] Callback type: {type(on_page_complete)}")
-                    logger.info(f"[PAGE {current_page + 1}] Papers to save: {len(extracted)}")
+                    log_now(f"[PAGE {current_page + 1}] Calling on_page_complete callback...")
+                    log_now(f"[PAGE {current_page + 1}] Callback type: {type(on_page_complete)}")
+                    log_now(f"[PAGE {current_page + 1}] Papers to save: {len(extracted)}")
                     try:
                         await on_page_complete(current_page, extracted)
-                        logger.info(f"[PAGE {current_page + 1}] ✓ Callback completed successfully")
+                        log_now(f"[PAGE {current_page + 1}] ✓ Callback completed successfully")
                     except Exception as save_error:
-                        logger.error(f"[PAGE {current_page + 1}] ✗✗✗ CALLBACK FAILED ✗✗✗")
-                        logger.error(f"[PAGE {current_page + 1}] Error type: {type(save_error).__name__}")
-                        logger.error(f"[PAGE {current_page + 1}] Error message: {save_error}")
-                        logger.error(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
+                        log_now(f"[PAGE {current_page + 1}] ✗✗✗ CALLBACK FAILED ✗✗✗")
+                        log_now(f"[PAGE {current_page + 1}] Error type: {type(save_error).__name__}")
+                        log_now(f"[PAGE {current_page + 1}] Error message: {save_error}")
+                        log_now(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
                         # Continue anyway - at least we tried
                 else:
-                    logger.info(f"[PAGE {current_page + 1}] No callback set - papers not saved to DB")
+                    log_now(f"[PAGE {current_page + 1}] No callback set - papers not saved to DB")
 
                 all_papers.extend(extracted)
                 current_page += 1
                 consecutive_failures = 0
-                logger.info(f"[PROGRESS] Total papers so far: {len(all_papers)}")
+                log_now(f"[PROGRESS] Total papers so far: {len(all_papers)}")
 
                 if current_page < max_pages and len(all_papers) < max_results:
-                    logger.info(f"[RATE LIMIT] Sleeping 2 seconds before next page...")
+                    log_now(f"[RATE LIMIT] Sleeping 2 seconds before next page...")
                     await asyncio.sleep(2)
 
             except Exception as e:
                 consecutive_failures += 1
-                logger.warning(f"[PAGE {current_page + 1}] ✗ FETCH FAILED ({consecutive_failures}/{max_consecutive_failures})")
-                logger.warning(f"[PAGE {current_page + 1}] Error type: {type(e).__name__}")
-                logger.warning(f"[PAGE {current_page + 1}] Error: {e}")
-                logger.warning(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
+                log_now(f"[PAGE {current_page + 1}] ✗ FETCH FAILED ({consecutive_failures}/{max_consecutive_failures})")
+                log_now(f"[PAGE {current_page + 1}] Error type: {type(e).__name__}")
+                log_now(f"[PAGE {current_page + 1}] Error: {e}")
+                log_now(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
 
                 if consecutive_failures >= max_consecutive_failures:
-                    logger.error(f"[CITED_BY_IMPL] ✗✗✗ TOO MANY FAILURES - STOPPING ✗✗✗")
-                    logger.error(f"[CITED_BY_IMPL] Stopped at page {current_page}. Saved {len(all_papers)} papers.")
+                    log_now(f"[CITED_BY_IMPL] ✗✗✗ TOO MANY FAILURES - STOPPING ✗✗✗")
+                    log_now(f"[CITED_BY_IMPL] Stopped at page {current_page}. Saved {len(all_papers)} papers.")
                     break
 
                 current_page += 1
                 await asyncio.sleep(5)
 
-        logger.info(f"╔{'═'*60}╗")
-        logger.info(f"║  CITED_BY_IMPL COMPLETE")
-        logger.info(f"╠{'═'*60}╣")
-        logger.info(f"║  Total papers: {len(all_papers)}")
-        logger.info(f"║  Pages fetched: {current_page}")
-        logger.info(f"║  Total results (Scholar count): {total_results}")
-        logger.info(f"╚{'═'*60}╝")
+        log_now(f"╔{'═'*60}╗")
+        log_now(f"║  CITED_BY_IMPL COMPLETE")
+        log_now(f"╠{'═'*60}╣")
+        log_now(f"║  Total papers: {len(all_papers)}")
+        log_now(f"║  Pages fetched: {current_page}")
+        log_now(f"║  Total results (Scholar count): {total_results}")
+        log_now(f"╚{'═'*60}╝")
 
         return {
             "papers": all_papers[:max_results],
@@ -343,36 +352,36 @@ class ScholarSearchService:
                     try:
                         html = await self._fetch_via_oxylabs(url)
                         if attempt > 0:
-                            logger.info(f"✓ Oxylabs succeeded on attempt {attempt + 1}")
+                            log_now(f"✓ Oxylabs succeeded on attempt {attempt + 1}")
                         return html
                     except asyncio.TimeoutError:
                         last_error = TimeoutError(f"HTTP request timed out on attempt {attempt + 1}")
-                        logger.warning(f"Attempt {attempt + 1}/{max_retries} timed out")
+                        log_now(f"Attempt {attempt + 1}/{max_retries} timed out")
                     except Exception as e:
                         last_error = e
-                        logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                        log_now(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
 
                     if attempt < max_retries - 1:
                         # Exponential backoff: 1s, 2s, 4s, 8s (matches JS)
                         backoff = min(2 ** attempt, 8)
-                        logger.info(f"  Retrying in {backoff}s...")
+                        log_now(f"  Retrying in {backoff}s...")
                         await asyncio.sleep(backoff)
 
         except asyncio.TimeoutError:
-            logger.error(f"Oxylabs exhausted ({max_retries} attempts). Trying direct scraping fallback...")
+            log_now(f"Oxylabs exhausted ({max_retries} attempts). Trying direct scraping fallback...")
             # FALLBACK: Try direct scraping like JS does
             try:
                 return await self._fetch_direct(url, max_retries=2)
             except Exception as direct_error:
-                logger.error(f"Direct scraping also failed: {direct_error}")
+                log_now(f"Direct scraping also failed: {direct_error}")
                 raise last_error or TimeoutError(f"All retries exhausted after {FETCH_RETRY_TIMEOUT}s total timeout")
 
         # If we get here, all Oxylabs attempts failed - try direct scraping
-        logger.warning(f"Oxylabs exhausted ({max_retries} attempts). Falling back to direct scraping...")
+        log_now(f"Oxylabs exhausted ({max_retries} attempts). Falling back to direct scraping...")
         try:
             return await self._fetch_direct(url, max_retries=2)
         except Exception as direct_error:
-            logger.error(f"Direct scraping also failed: {direct_error}")
+            log_now(f"Direct scraping also failed: {direct_error}")
             raise last_error or Exception("All retry attempts failed")
 
     async def _fetch_via_oxylabs(self, url: str) -> str:
@@ -420,7 +429,7 @@ class ScholarSearchService:
             if job_status == "faulted":
                 raise Exception("Oxylabs job faulted")
 
-            logger.info(f"[OXYLABS] Job {data['job']['id']} status: {job_status}, polling...")
+            log_now(f"[OXYLABS] Job {data['job']['id']} status: {job_status}, polling...")
             return await self._poll_oxylabs_job(data["job"]["id"])
 
         raise Exception("Invalid Oxylabs response format")
@@ -446,7 +455,7 @@ class ScholarSearchService:
                 data = response.json()
                 status = data.get("status")
 
-                logger.info(f"[OXYLABS POLL] Attempt {attempt + 1}/{max_attempts}: status={status}")
+                log_now(f"[OXYLABS POLL] Attempt {attempt + 1}/{max_attempts}: status={status}")
 
                 if status == "done":
                     # Fetch results
@@ -471,7 +480,7 @@ class ScholarSearchService:
                     raise Exception("Job faulted during processing")
 
             except asyncio.TimeoutError:
-                logger.warning(f"[OXYLABS POLL] Attempt {attempt + 1} timed out")
+                log_now(f"[OXYLABS POLL] Attempt {attempt + 1} timed out")
                 continue
 
         raise TimeoutError(f"Oxylabs job polling timeout after {max_attempts} attempts (~{max_attempts * 2}s)")
@@ -516,18 +525,18 @@ class ScholarSearchService:
                     raise Exception("Response too short - likely blocked")
 
                 if attempt > 0:
-                    logger.info(f"✓ Direct scraping succeeded on attempt {attempt + 1}")
+                    log_now(f"✓ Direct scraping succeeded on attempt {attempt + 1}")
                 return html
 
             except Exception as e:
                 if attempt == max_retries - 1:
-                    logger.error(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e} - all methods exhausted")
+                    log_now(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e} - all methods exhausted")
                     raise
                 else:
-                    logger.warning(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e}")
+                    log_now(f"Direct fetch attempt {attempt + 1}/{max_retries} failed: {e}")
                     # Longer backoff for direct scraping: 5s, 10s (matches JS)
                     backoff = 5.0 * (attempt + 1)
-                    logger.info(f"  Retrying in {backoff}s...")
+                    log_now(f"  Retrying in {backoff}s...")
                     await asyncio.sleep(backoff)
 
         raise Exception("Direct scraping failed after all attempts")
@@ -544,11 +553,11 @@ class ScholarSearchService:
         for selector in selectors:
             elements = soup.select(selector)
             if elements:
-                logger.debug(f"Found {len(elements)} papers using selector: {selector}")
+                log_now(f"Found {len(elements)} papers using selector: {selector}")
                 break
 
         if not elements:
-            logger.warning("No papers found with any selector")
+            log_now("No papers found with any selector")
             return papers
 
         for el in elements:
@@ -640,7 +649,7 @@ class ScholarSearchService:
                 })
 
             except Exception as e:
-                logger.error(f"Error parsing paper element: {e}")
+                log_now(f"Error parsing paper element: {e}")
                 continue
 
         return papers
@@ -706,13 +715,13 @@ class ScholarSearchService:
             query_parts.append(f'source:"{publisher}"')
 
         query = " ".join(query_parts)
-        logger.info(f"[SEARCH+VERIFY] Query: {query}")
+        log_now(f"[SEARCH+VERIFY] Query: {query}")
 
         results = await self.search(query, max_results=10)
 
         if not results.get("papers"):
             # Fallback to simple title search
-            logger.info("[SEARCH+VERIFY] No results with metadata, trying title only...")
+            log_now("[SEARCH+VERIFY] No results with metadata, trying title only...")
             results = await self.search(f'"{title}"', max_results=10)
 
         if not results.get("papers"):
@@ -736,7 +745,7 @@ class ScholarSearchService:
         best_match = primary
         if verification.get("betterMatch"):
             best_match = verification["betterMatch"]
-            logger.info(f"[SEARCH+VERIFY] LLM found better match: {verification['betterMatch']['title'][:50]}...")
+            log_now(f"[SEARCH+VERIFY] LLM found better match: {verification['betterMatch']['title'][:50]}...")
 
         return {
             "paper": best_match,
