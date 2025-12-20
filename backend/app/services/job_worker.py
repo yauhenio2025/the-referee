@@ -171,7 +171,7 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
             Edition.scholar_id.isnot(None),  # Must have scholar_id to harvest
             Edition.citation_count.isnot(None),
             Edition.citation_count > 0,
-            Edition.citation_count <= 10000,  # Skip very large editions (matches skip_threshold)
+            Edition.citation_count <= 50000,  # Skip very large editions (matches skip_threshold)
             Edition.harvested_citation_count < Edition.citation_count,
             # Gap must be significant
             or_(
@@ -218,7 +218,7 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
             params=json.dumps({
                 "edition_ids": [edition.id],
                 "max_citations_per_edition": 1000,
-                "skip_threshold": 10000,
+                "skip_threshold": 50000,
                 "is_resume": True,  # Flag for logging
             }),
             progress=0,
@@ -397,7 +397,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     paper_id = job.paper_id
     edition_ids = params.get("edition_ids", [])  # Empty = all selected
     max_citations_per_edition = params.get("max_citations_per_edition", 1000)
-    skip_threshold = params.get("skip_threshold", 5000)  # Skip editions with > this many citations
+    skip_threshold = params.get("skip_threshold", 50000)  # Skip editions with > this many citations
 
     # Refresh mode params
     is_refresh = params.get("is_refresh", False)
@@ -923,7 +923,7 @@ async def create_extract_citations_job(
     paper_id: int,
     edition_ids: list = None,
     max_citations_per_edition: int = 1000,
-    skip_threshold: int = 10000,
+    skip_threshold: int = 50000,
     # Refresh mode params
     is_refresh: bool = False,
     year_low: int = None,

@@ -252,7 +252,7 @@ class CitationResponse(BaseModel):
 class CitationExtractionRequest(BaseModel):
     paper_id: int
     edition_ids: List[int] = []  # If empty, use all selected editions
-    max_citations_threshold: int = 10000
+    max_citations_threshold: int = 50000
 
 
 class CitationExtractionResponse(BaseModel):
@@ -333,7 +333,7 @@ class RefreshRequest(BaseModel):
     """Request to refresh citations for paper/collection/global"""
     force_full_refresh: bool = False  # If True, ignore year_low optimization
     max_citations_per_edition: int = 1000
-    skip_threshold: int = 10000  # Skip editions with more citations than this
+    skip_threshold: int = 50000  # Skip editions with more citations than this
 
 
 class RefreshJobResponse(BaseModel):

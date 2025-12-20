@@ -1735,7 +1735,7 @@ async def quick_harvest_paper(
         paper_id=paper_id,
         edition_ids=[edition.id],
         max_citations_per_edition=1000,
-        skip_threshold=10000,
+        skip_threshold=50000,
     )
 
     return QuickHarvestResponse(
