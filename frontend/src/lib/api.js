@@ -224,7 +224,7 @@ class RefereeAPI {
       body: {
         paper_id: paperId,
         edition_ids: options.editionIds || [],
-        max_citations_threshold: options.maxCitationsThreshold || 10000,
+        max_citations_threshold: options.maxCitationsThreshold || 50000,
       },
     });
   }
@@ -323,7 +323,7 @@ class RefereeAPI {
       body: {
         force_full_refresh: options.forceFullRefresh ?? false,
         max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
-        skip_threshold: options.skipThreshold ?? 10000,
+        skip_threshold: options.skipThreshold ?? 50000,
       },
     });
   }
@@ -334,7 +334,7 @@ class RefereeAPI {
       body: {
         force_full_refresh: options.forceFullRefresh ?? false,
         max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
-        skip_threshold: options.skipThreshold ?? 10000,
+        skip_threshold: options.skipThreshold ?? 50000,
       },
     });
   }
@@ -345,7 +345,7 @@ class RefereeAPI {
       body: {
         force_full_refresh: options.forceFullRefresh ?? false,
         max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
-        skip_threshold: options.skipThreshold ?? 10000,
+        skip_threshold: options.skipThreshold ?? 50000,
       },
     });
   }
