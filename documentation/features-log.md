@@ -4,11 +4,33 @@ A chronological log of major features introduced to the project.
 
 ---
 
-## 2025-12-20: Citation Auto-Updater
+## 2025-12-20: Citation Auto-Updater (Frontend)
+
+**Commit:** `e89061b` on `main`
+
+**Description:** Frontend implementation for the Citation Auto-Updater feature, providing visual staleness indicators and refresh controls throughout the UI.
+
+**Key Changes:**
+- Paper Cards: Harvested count display, staleness badges, Refresh button
+- Edition Table: Status column with staleness indicators, Refresh Citations button
+- Collection View: Refresh All button with progress tracking
+- API Client: New methods for refresh and staleness endpoints
+- CSS: Staleness badge styles, refresh button variants, progress animations
+
+**Files Modified:**
+- `frontend/src/lib/api.js`
+- `frontend/src/components/PaperList.jsx`
+- `frontend/src/components/EditionDiscovery.jsx`
+- `frontend/src/components/CollectionDetail.jsx`
+- `frontend/src/App.css`
+
+---
+
+## 2025-12-20: Citation Auto-Updater (Backend)
 
 **Commit:** `d85019b` on `main`
 
-**Description:** Adds functionality to track citation harvest freshness and refresh citations at paper, collection, or global scope. Uses year-aware re-harvesting to only fetch new citations since the last harvest.
+**Description:** Backend functionality to track citation harvest freshness and refresh citations at paper, collection, or global scope. Uses year-aware re-harvesting to only fetch new citations since the last harvest.
 
 **Key Changes:**
 - Schema: Added `last_harvested_at`, `last_harvest_year`, `harvested_citation_count` to Edition model
