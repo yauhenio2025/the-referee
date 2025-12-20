@@ -4,6 +4,34 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Citation Auto-Updater
+
+**Commit:** `d85019b` on `main`
+
+**Description:** Adds functionality to track citation harvest freshness and refresh citations at paper, collection, or global scope. Uses year-aware re-harvesting to only fetch new citations since the last harvest.
+
+**Key Changes:**
+- Schema: Added `last_harvested_at`, `last_harvest_year`, `harvested_citation_count` to Edition model
+- Schema: Added `any_edition_harvested_at`, `total_harvested_citations` to Paper model
+- Job Worker: Extended `extract_citations` job to support refresh mode with `year_low` filtering
+- Job Worker: Added `update_edition_harvest_stats()` and `update_paper_harvest_stats()` helpers
+- API: `POST /api/refresh/paper/{id}` - Refresh single paper
+- API: `POST /api/refresh/collection/{id}` - Refresh all papers in collection
+- API: `POST /api/refresh/global` - Refresh all (optionally stale-only)
+- API: `GET /api/refresh/status?batch_id={id}` - Track refresh progress
+- API: `GET /api/staleness` - Report on stale papers/editions
+- UI: Added `is_stale` and `days_since_harvest` computed fields to responses
+- 90-day staleness threshold
+
+**Files Modified:**
+- `backend/app/models.py`
+- `backend/app/schemas.py`
+- `backend/app/database.py`
+- `backend/app/services/job_worker.py`
+- `backend/app/main.py`
+
+---
+
 ## 2025-12-20: Add as Seed from Reconciliation Modal
 
 **Commit:** `a1f955e` on `main`
