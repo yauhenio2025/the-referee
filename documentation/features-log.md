@@ -4,6 +4,26 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Advanced Job Queue Monitor
+
+**Description:** Complete overhaul of the Job Queue UI to provide real-time detailed progress tracking for running jobs. Users can now see exactly what's happening during citation harvesting including edition details, citation counts, current page, and year-by-year mode status.
+
+**Key Changes:**
+- Backend: Extended `update_job_progress()` to accept detailed progress data stored in job params
+- Backend: Citation extraction callback now passes rich progress details including edition info, harvest stats, current year
+- Frontend: Complete rewrite of JobQueue.jsx with card-based active jobs and compact recent jobs table
+- Frontend: Detailed harvest info panel showing edition title, language, citations saved/total, current page, year
+- Frontend: Large animated progress bar with percentage overlay
+- Frontend: Year-by-year mode badge indicator
+- CSS: Comprehensive styling for job cards, stat boxes, harvest details, progress animations
+
+**Files Modified:**
+- `backend/app/services/job_worker.py`
+- `frontend/src/components/JobQueue.jsx`
+- `frontend/src/App.css`
+
+---
+
 ## 2025-12-20: Auto-Resume Incomplete Harvests
 
 **Commit:** `c9e48ff` on `main`

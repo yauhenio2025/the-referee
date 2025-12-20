@@ -1086,6 +1086,304 @@ button:disabled {
   50% { opacity: 0.7; }
 }
 
+/* Advanced Job Queue */
+.job-queue-advanced h2 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.5rem;
+}
+
+.job-queue-advanced h3 {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin: 0 0 1rem 0;
+}
+
+.active-jobs {
+  margin-bottom: 2rem;
+}
+
+.job-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  transition: border-color 0.2s;
+}
+
+.job-card.status-running {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2);
+}
+
+.job-card.status-pending {
+  border-color: var(--warning);
+  opacity: 0.8;
+}
+
+.job-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.job-type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.job-type-icon {
+  font-size: 1.25rem;
+}
+
+.job-type-label {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.job-language {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.job-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--bg-hover);
+  border-radius: 20px;
+  font-size: 0.85rem;
+}
+
+.job-status .status-icon {
+  margin-right: 0;
+}
+
+.status-label {
+  text-transform: capitalize;
+}
+
+/* Large Progress Bar */
+.job-progress-section {
+  margin-bottom: 1rem;
+}
+
+.progress-bar-large {
+  position: relative;
+  width: 100%;
+  height: 24px;
+  background: var(--bg-dark);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.progress-bar-large .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  border-radius: 12px;
+  transition: width 0.5s ease-out;
+}
+
+.progress-bar-large .progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.job-card.status-running .progress-bar-large .progress-fill {
+  animation: progress-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes progress-shimmer {
+  0% { filter: brightness(1); }
+  50% { filter: brightness(1.15); }
+  100% { filter: brightness(1); }
+}
+
+/* Harvest Details */
+.harvest-details {
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.detail-row {
+  margin-bottom: 0.75rem;
+}
+
+.detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.detail-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-right: 0.5rem;
+}
+
+.detail-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.edition-info .detail-value {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lang-badge {
+  background: var(--accent);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.detail-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.stat-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  min-width: 80px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-top: 0.25rem;
+}
+
+.stat-box.year-box {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+  border-color: var(--accent);
+}
+
+.harvest-mode-badge {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.15));
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--warning);
+}
+
+/* Job Message for non-harvest jobs */
+.job-message {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 0.5rem 0;
+}
+
+/* Job Card Footer */
+.job-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.job-timing {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.timing-item {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.job-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Recent Jobs Table */
+.recent-jobs {
+  margin-top: 1.5rem;
+}
+
+.recent-jobs .jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-card);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.recent-jobs .jobs-table th,
+.recent-jobs .jobs-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.recent-jobs .jobs-table th {
+  background: var(--bg-hover);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.recent-jobs .jobs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.job-type-compact {
+  font-size: 0.9rem;
+}
+
+.result-success {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.result-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  cursor: help;
+}
+
+.result-neutral {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
 /* Utils */
 .loading, .empty, .error {
   text-align: center;

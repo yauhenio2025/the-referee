@@ -51,17 +51,30 @@ async def update_job_progress(
     job_id: int,
     progress: float,
     message: str,
+    details: Optional[Dict[str, Any]] = None,
 ):
-    """Update job progress in database with heartbeat timestamp"""
+    """Update job progress in database with heartbeat timestamp and optional detailed progress data"""
     log_now(f"[Job {job_id}] Progress: {progress:.1f}% - {message}")
+
+    values = {
+        "progress": progress,
+        "progress_message": message,
+        "started_at": datetime.utcnow(),  # Use started_at as heartbeat (hacky but works)
+    }
+
+    # If details provided, merge into existing params under 'progress_details' key
+    if details:
+        # Get existing params
+        result = await db.execute(select(Job.params).where(Job.id == job_id))
+        existing_params_str = result.scalar()
+        existing_params = json.loads(existing_params_str) if existing_params_str else {}
+        existing_params["progress_details"] = details
+        values["params"] = json.dumps(existing_params)
+
     await db.execute(
         update(Job)
         .where(Job.id == job_id)
-        .values(
-            progress=progress,
-            progress_message=message,
-            started_at=datetime.utcnow()  # Use started_at as heartbeat (hacky but works)
-        )
+        .values(**values)
     )
     await db.commit()
 
@@ -451,6 +464,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     for i, edition in enumerate(valid_editions):
         edition_start_citations = total_new_citations
 
+        # Track current year for year-by-year mode (accessible in callback)
+        current_harvest_year = {"year": None, "mode": "standard"}
+
         # Check for resume state from previous run
         resume_page = 0
         if params.get("resume_state"):
@@ -519,9 +535,25 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             # Update job progress with current state for resume
             progress_pct = 10 + ((i + (page_num / 20)) / total_editions) * 70
+            year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
             await update_job_progress(
                 db, job.id, progress_pct,
-                f"Edition {i+1}/{total_editions}, page {page_num + 1}: {total_new_citations} citations saved"
+                f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
+                details={
+                    "edition_index": i + 1,
+                    "editions_total": total_editions,
+                    "edition_id": edition.id,
+                    "edition_title": edition.title[:80] if edition.title else "Unknown",
+                    "edition_language": edition.language,
+                    "edition_citation_count": edition.citation_count,
+                    "current_page": page_num + 1,
+                    "current_year": current_harvest_year.get("year"),
+                    "harvest_mode": current_harvest_year.get("mode", "standard"),
+                    "citations_saved": total_new_citations,
+                    "citations_this_edition": total_new_citations - edition_start_citations,
+                    "citations_updated": total_updated_citations,
+                    "stage": "harvesting",
+                }
             )
 
             # Save resume state (update params dict and serialize to job)
@@ -564,8 +596,10 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
                 # Fetch year by year from current year backwards
+                current_harvest_year["mode"] = "year_by_year"
                 for year in range(current_year, min_year - 1, -1):
                     year_start_citations = total_new_citations
+                    current_harvest_year["year"] = year
 
                     log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
 
