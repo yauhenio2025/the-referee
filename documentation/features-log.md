@@ -4,6 +4,24 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Add as Seed from Reconciliation Modal
+
+**Commit:** `a1f955e` on `main`
+
+**Description:** When reconciling papers with multiple Scholar matches, users can now add interesting candidates as new seeds even if they're not the right match for the current paper.
+
+**Key Changes:**
+- Added "Add as Seed" button to each candidate card in reconciliation modal
+- Creates new paper with title, authors, year, venue from candidate
+- New paper starts in "pending" status for later resolution
+- CSS styling for new button
+
+**Files Modified:**
+- `frontend/src/components/PaperList.jsx`
+- `frontend/src/App.css`
+
+---
+
 ## 2025-12-20: Parallel Job Processing
 
 **Commit:** `7966dfb` on `main`
