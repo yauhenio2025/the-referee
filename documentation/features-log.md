@@ -4,6 +4,29 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Auto-Resume Incomplete Harvests
+
+**Commit:** `c9e48ff` on `main`
+
+**Description:** When citation harvesting stops with a significant gap (at least 100 missing citations or 10% of total), the system now automatically queues resume jobs. The worker checks for incomplete harvests every 60 seconds when idle and queues continuation jobs to eventually get all citations.
+
+**Key Changes:**
+- Backend: `find_incomplete_harvests()` detects editions with significant gaps
+- Backend: `auto_resume_incomplete_harvests()` queues continuation jobs
+- Worker loop integration: checks every 60s when no pending jobs
+- Schema: Added `is_incomplete` and `missing_citations` computed fields
+- Frontend: New red pulsing "incomplete" status badge showing missing count
+- Tooltip explains auto-resume will handle the completion
+
+**Files Modified:**
+- `backend/app/services/job_worker.py`
+- `backend/app/main.py`
+- `backend/app/schemas.py`
+- `frontend/src/components/EditionDiscovery.jsx`
+- `frontend/src/App.css`
+
+---
+
 ## 2025-12-20: Quick Harvest
 
 **Commit:** `174a67d` on `main`
