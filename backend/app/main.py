@@ -1506,13 +1506,15 @@ async def quick_harvest_paper(
     )
     existing_job = existing_job_result.scalar_one_or_none()
 
+    estimated = edition.citation_count or 0
+
     if existing_job:
         return QuickHarvestResponse(
             job_id=existing_job.id,
             paper_id=paper_id,
             edition_id=edition.id,
             edition_created=edition_created,
-            estimated_citations=edition.citation_count,
+            estimated_citations=estimated,
             message=f"Citation extraction already in progress (job {existing_job.id})"
         )
 
@@ -1530,8 +1532,8 @@ async def quick_harvest_paper(
         paper_id=paper_id,
         edition_id=edition.id,
         edition_created=edition_created,
-        estimated_citations=edition.citation_count,
-        message=f"Queued citation extraction for {edition.citation_count:,} citations"
+        estimated_citations=estimated,
+        message=f"Queued citation extraction for {estimated:,} citations"
     )
 
 
