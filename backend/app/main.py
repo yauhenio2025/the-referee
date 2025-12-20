@@ -403,6 +403,18 @@ async def create_papers_batch(
     return created_papers
 
 
+def paper_to_response(paper: Paper) -> dict:
+    """Convert Paper model to response dict, handling JSON fields"""
+    data = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
+    # Parse candidates JSON if present
+    if data.get('candidates') and isinstance(data['candidates'], str):
+        try:
+            data['candidates'] = json.loads(data['candidates'])
+        except json.JSONDecodeError:
+            data['candidates'] = None
+    return data
+
+
 @app.get("/api/papers", response_model=List[PaperResponse])
 async def list_papers(
     skip: int = 0,
@@ -418,7 +430,8 @@ async def list_papers(
     if collection_id is not None:
         query = query.where(Paper.collection_id == collection_id)
     result = await db.execute(query)
-    return result.scalars().all()
+    papers = result.scalars().all()
+    return [PaperResponse(**paper_to_response(p)) for p in papers]
 
 
 @app.get("/api/papers/{paper_id}", response_model=PaperDetail)
@@ -441,7 +454,7 @@ async def get_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
     )
 
     return PaperDetail(
-        **{k: v for k, v in paper.__dict__.items() if not k.startswith('_')},
+        **paper_to_response(paper),
         editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
         citations_count=citation_count.scalar() or 0,
     )
