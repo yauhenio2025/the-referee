@@ -410,12 +410,12 @@ def paper_to_response(paper: Paper) -> dict:
     if data.get('candidates') and isinstance(data['candidates'], str):
         try:
             parsed = json.loads(data['candidates'])
-            # Validate it's a list of dicts with required fields
             if isinstance(parsed, list):
                 data['candidates'] = parsed
             else:
                 data['candidates'] = None
-        except (json.JSONDecodeError, Exception):
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse candidates JSON for paper {paper.id}: {e}")
             data['candidates'] = None
     return data
 

@@ -98,7 +98,7 @@ class PaperResponse(PaperBase):
     abstract: Optional[str] = None
     link: Optional[str] = None
     created_at: datetime
-    candidates: Optional[List[ScholarCandidate]] = None  # For reconciliation
+    candidates: Optional[List[Any]] = None  # For reconciliation (raw JSON from Scholar)
     # Edition aggregation stats
     edition_count: int = 0
     total_edition_citations: int = 0  # Sum of citations across all editions
