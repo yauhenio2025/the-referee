@@ -437,21 +437,7 @@ async def list_papers(
     result = await db.execute(query)
     papers = result.scalars().all()
 
-    responses = []
-    for p in papers:
-        try:
-            responses.append(PaperResponse(**paper_to_response(p)))
-        except Exception as e:
-            # Log error but continue with other papers
-            logger.error(f"Error converting paper {p.id}: {e}")
-            # Return minimal response for failed papers
-            responses.append(PaperResponse(
-                id=p.id,
-                title=p.title or "Unknown",
-                status=p.status or "error",
-                created_at=p.created_at,
-            ))
-    return responses
+    return [PaperResponse(**paper_to_response(p)) for p in papers]
 
 
 @app.get("/api/papers/{paper_id}", response_model=PaperDetail)
@@ -473,24 +459,12 @@ async def get_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
         select(func.count(Citation.id)).where(Citation.paper_id == paper_id)
     )
 
-    try:
-        return PaperDetail(
-            **paper_to_response(paper),
-            editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
-            citations_count=citation_count.scalar() or 0,
-        )
-    except Exception as e:
-        logger.error(f"Error creating PaperDetail for paper {paper_id}: {e}")
-        # Return basic info without problematic fields
-        return PaperDetail(
-            id=paper.id,
-            title=paper.title or "Unknown",
-            status=paper.status or "error",
-            created_at=paper.created_at,
-            candidates=None,
-            editions=[],
-            citations_count=0,
-        )
+    paper_data = paper_to_response(paper)
+    return PaperDetail(
+        **paper_data,
+        editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
+        citations_count=citation_count.scalar() or 0,
+    )
 
 
 @app.delete("/api/papers/{paper_id}")
