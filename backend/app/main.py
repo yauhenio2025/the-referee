@@ -27,6 +27,8 @@ from .schemas import (
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
     CollectionCreate, CollectionUpdate, CollectionResponse, CollectionDetail,
     CanonicalEditionSummary,
+    # Refresh/Auto-Updater schemas
+    RefreshRequest, RefreshJobResponse, RefreshStatusResponse, StalenessReportResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -127,8 +129,31 @@ async def root():
 
 # ============== Helper Functions ==============
 
+def build_edition_response_with_staleness(edition: Edition) -> EditionResponse:
+    """Build an EditionResponse with staleness fields computed"""
+    # Compute staleness fields
+    is_stale = False
+    days_since_harvest = None
+    if edition.last_harvested_at is None:
+        is_stale = True  # Never harvested = stale
+    else:
+        days_since_harvest = (datetime.utcnow() - edition.last_harvested_at).days
+        is_stale = days_since_harvest > 90
+
+    # Build dict from edition
+    ed_dict = {k: v for k, v in edition.__dict__.items() if not k.startswith('_')}
+
+    return EditionResponse(
+        **ed_dict,
+        is_stale=is_stale,
+        days_since_harvest=days_since_harvest,
+    )
+
+
 async def build_paper_response_with_editions(paper: Paper, db: AsyncSession) -> PaperResponse:
     """Build a PaperResponse with edition statistics (canonical edition, total citations)"""
+    from datetime import timedelta
+
     # Get editions for this paper
     editions_result = await db.execute(
         select(Edition).where(Edition.paper_id == paper.id).order_by(Edition.citation_count.desc())
@@ -150,6 +175,15 @@ async def build_paper_response_with_editions(paper: Paper, db: AsyncSession) -> 
             language=top_edition.language,
         )
 
+    # Compute staleness fields
+    is_stale = False
+    days_since_harvest = None
+    if paper.any_edition_harvested_at is None:
+        is_stale = True  # Never harvested = stale
+    else:
+        days_since_harvest = (datetime.utcnow() - paper.any_edition_harvested_at).days
+        is_stale = days_since_harvest > 90
+
     # Build response
     paper_dict = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
     return PaperResponse(
@@ -157,6 +191,8 @@ async def build_paper_response_with_editions(paper: Paper, db: AsyncSession) -> 
         edition_count=edition_count,
         total_edition_citations=total_edition_citations,
         canonical_edition=canonical_edition,
+        is_stale=is_stale,
+        days_since_harvest=days_since_harvest,
     )
 
 
@@ -462,7 +498,7 @@ async def get_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
     paper_data = paper_to_response(paper)
     return PaperDetail(
         **paper_data,
-        editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
+        editions=[build_edition_response_with_staleness(e) for e in editions],
         citations_count=citation_count.scalar() or 0,
     )
 
@@ -530,7 +566,7 @@ async def discover_editions(
             high_confidence=discovery_result.get("high_confidence", 0),
             uncertain=discovery_result.get("uncertain", 0),
             rejected=discovery_result.get("rejected", 0),
-            editions=[EditionResponse(**{k: v for k, v in e.__dict__.items() if not k.startswith('_')}) for e in editions],
+            editions=[build_edition_response_with_staleness(e) for e in editions],
             queries_used=discovery_result.get("summary", {}).get("queriesGenerated", []),
         )
 
@@ -556,11 +592,18 @@ async def get_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
     )
     harvested_map = {row.edition_id: row.count for row in citation_counts}
 
-    # Build response with harvested counts
+    # Build response with harvested counts and staleness
     responses = []
     for ed in editions:
         ed_dict = {k: v for k, v in ed.__dict__.items() if not k.startswith('_')}
         ed_dict['harvested_citations'] = harvested_map.get(ed.id, 0)
+        # Compute staleness
+        if ed.last_harvested_at is None:
+            ed_dict['is_stale'] = True
+            ed_dict['days_since_harvest'] = None
+        else:
+            ed_dict['days_since_harvest'] = (datetime.utcnow() - ed.last_harvested_at).days
+            ed_dict['is_stale'] = ed_dict['days_since_harvest'] > 90
         responses.append(EditionResponse(**ed_dict))
 
     return responses
@@ -961,22 +1004,7 @@ Respond in JSON format:
 
         return ManualEditionAddResponse(
             success=True,
-            edition=EditionResponse(
-                id=new_edition.id,
-                scholar_id=new_edition.scholar_id,
-                title=new_edition.title,
-                authors=new_edition.authors,
-                year=new_edition.year,
-                venue=new_edition.venue,
-                abstract=new_edition.abstract,
-                link=new_edition.link,
-                citation_count=new_edition.citation_count,
-                language=new_edition.language,
-                confidence=new_edition.confidence,
-                auto_selected=new_edition.auto_selected,
-                selected=new_edition.selected,
-                is_supplementary=new_edition.is_supplementary,
-            ),
+            edition=build_edition_response_with_staleness(new_edition),
             message=f"Added edition: {new_edition.title}",
             resolution_details=resolution_details,
         )
@@ -1532,3 +1560,377 @@ Bibliography text:
             success=False,
             error=f"Failed to parse bibliography: {str(e)}"
         )
+
+
+# ============== Citation Refresh/Auto-Updater Endpoints ==============
+
+import uuid
+from datetime import timedelta
+
+STALENESS_THRESHOLD_DAYS = 90
+
+
+@app.post("/api/refresh/paper/{paper_id}", response_model=RefreshJobResponse)
+async def refresh_paper_citations(
+    paper_id: int,
+    request: RefreshRequest = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Queue refresh jobs for a single paper's editions
+
+    This will re-harvest citations for all selected editions of the paper,
+    using year-aware filtering to only fetch new citations since the last harvest.
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    if request is None:
+        request = RefreshRequest()
+
+    # Get paper
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get selected editions
+    editions_result = await db.execute(
+        select(Edition).where(
+            Edition.paper_id == paper_id,
+            Edition.selected == True
+        )
+    )
+    editions = list(editions_result.scalars().all())
+
+    if not editions:
+        raise HTTPException(status_code=400, detail="No editions selected for refresh")
+
+    # Generate batch ID
+    batch_id = str(uuid.uuid4())
+
+    # Compute year_low from paper's last harvest (or None for full harvest)
+    year_low = None
+    if not request.force_full_refresh and paper.any_edition_harvested_at:
+        year_low = paper.any_edition_harvested_at.year
+
+    # Create refresh job
+    job = await create_extract_citations_job(
+        db=db,
+        paper_id=paper_id,
+        edition_ids=[e.id for e in editions],
+        max_citations_per_edition=request.max_citations_per_edition,
+        skip_threshold=request.skip_threshold,
+        is_refresh=True,
+        year_low=year_low,
+        batch_id=batch_id,
+    )
+    await db.commit()
+
+    return RefreshJobResponse(
+        jobs_created=1,
+        papers_included=1,
+        editions_included=len(editions),
+        job_ids=[job.id],
+        batch_id=batch_id,
+    )
+
+
+@app.post("/api/refresh/collection/{collection_id}", response_model=RefreshJobResponse)
+async def refresh_collection_citations(
+    collection_id: int,
+    request: RefreshRequest = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Queue refresh jobs for all papers in a collection
+
+    Creates one job per paper with selected editions.
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    if request is None:
+        request = RefreshRequest()
+
+    # Get collection
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Get all papers in collection
+    papers_result = await db.execute(
+        select(Paper).where(Paper.collection_id == collection_id)
+    )
+    papers = list(papers_result.scalars().all())
+
+    if not papers:
+        raise HTTPException(status_code=400, detail="Collection has no papers")
+
+    # Generate batch ID for tracking
+    batch_id = str(uuid.uuid4())
+
+    job_ids = []
+    papers_included = 0
+    editions_included = 0
+
+    for paper in papers:
+        # Get selected editions for this paper
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper.id,
+                Edition.selected == True
+            )
+        )
+        editions = list(editions_result.scalars().all())
+
+        if not editions:
+            continue  # Skip papers with no selected editions
+
+        # Compute year_low from paper's last harvest
+        year_low = None
+        if not request.force_full_refresh and paper.any_edition_harvested_at:
+            year_low = paper.any_edition_harvested_at.year
+
+        # Create refresh job
+        job = await create_extract_citations_job(
+            db=db,
+            paper_id=paper.id,
+            edition_ids=[e.id for e in editions],
+            max_citations_per_edition=request.max_citations_per_edition,
+            skip_threshold=request.skip_threshold,
+            is_refresh=True,
+            year_low=year_low,
+            batch_id=batch_id,
+        )
+        job_ids.append(job.id)
+        papers_included += 1
+        editions_included += len(editions)
+
+    await db.commit()
+
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No papers in collection have selected editions")
+
+    return RefreshJobResponse(
+        jobs_created=len(job_ids),
+        papers_included=papers_included,
+        editions_included=editions_included,
+        job_ids=job_ids,
+        batch_id=batch_id,
+    )
+
+
+@app.post("/api/refresh/global", response_model=RefreshJobResponse)
+async def refresh_all_citations(
+    request: RefreshRequest = None,
+    stale_only: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """Queue refresh jobs for all papers (optionally filtered to stale only)
+
+    Args:
+        stale_only: If True, only refresh papers that haven't been harvested in 90+ days
+        request: Optional refresh configuration
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    if request is None:
+        request = RefreshRequest()
+
+    # Build query for papers
+    query = select(Paper)
+
+    if stale_only:
+        # Only papers that are stale (never harvested or >90 days ago)
+        threshold_date = datetime.utcnow() - timedelta(days=STALENESS_THRESHOLD_DAYS)
+        from sqlalchemy import or_
+        query = query.where(
+            or_(
+                Paper.any_edition_harvested_at.is_(None),
+                Paper.any_edition_harvested_at < threshold_date
+            )
+        )
+
+    papers_result = await db.execute(query)
+    papers = list(papers_result.scalars().all())
+
+    if not papers:
+        return RefreshJobResponse(
+            jobs_created=0,
+            papers_included=0,
+            editions_included=0,
+            job_ids=[],
+            batch_id=str(uuid.uuid4()),
+        )
+
+    # Generate batch ID
+    batch_id = str(uuid.uuid4())
+
+    job_ids = []
+    papers_included = 0
+    editions_included = 0
+
+    for paper in papers:
+        # Get selected editions
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper.id,
+                Edition.selected == True
+            )
+        )
+        editions = list(editions_result.scalars().all())
+
+        if not editions:
+            continue
+
+        # Compute year_low
+        year_low = None
+        if not request.force_full_refresh and paper.any_edition_harvested_at:
+            year_low = paper.any_edition_harvested_at.year
+
+        # Create job
+        job = await create_extract_citations_job(
+            db=db,
+            paper_id=paper.id,
+            edition_ids=[e.id for e in editions],
+            max_citations_per_edition=request.max_citations_per_edition,
+            skip_threshold=request.skip_threshold,
+            is_refresh=True,
+            year_low=year_low,
+            batch_id=batch_id,
+        )
+        job_ids.append(job.id)
+        papers_included += 1
+        editions_included += len(editions)
+
+    await db.commit()
+
+    return RefreshJobResponse(
+        jobs_created=len(job_ids),
+        papers_included=papers_included,
+        editions_included=editions_included,
+        job_ids=job_ids,
+        batch_id=batch_id,
+    )
+
+
+@app.get("/api/refresh/status", response_model=RefreshStatusResponse)
+async def get_refresh_status(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get status of refresh operation by batch ID"""
+    # Find all jobs with this batch_id in params
+    jobs_result = await db.execute(select(Job))
+    all_jobs = jobs_result.scalars().all()
+
+    matching_jobs = []
+    for job in all_jobs:
+        if job.params:
+            try:
+                params = json.loads(job.params)
+                if params.get("batch_id") == batch_id:
+                    matching_jobs.append(job)
+            except:
+                pass
+
+    if not matching_jobs:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    # Count by status
+    completed = sum(1 for j in matching_jobs if j.status == "completed")
+    failed = sum(1 for j in matching_jobs if j.status == "failed")
+    running = sum(1 for j in matching_jobs if j.status == "running")
+    pending = sum(1 for j in matching_jobs if j.status == "pending")
+
+    # Sum new citations from completed jobs
+    new_citations = 0
+    for job in matching_jobs:
+        if job.status == "completed" and job.result:
+            try:
+                result = json.loads(job.result)
+                new_citations += result.get("new_citations_added", 0)
+            except:
+                pass
+
+    return RefreshStatusResponse(
+        batch_id=batch_id,
+        total_jobs=len(matching_jobs),
+        completed_jobs=completed,
+        failed_jobs=failed,
+        running_jobs=running,
+        pending_jobs=pending,
+        new_citations_added=new_citations,
+        is_complete=(completed + failed == len(matching_jobs)),
+    )
+
+
+@app.get("/api/staleness", response_model=StalenessReportResponse)
+async def get_staleness_report(
+    collection_id: Optional[int] = None,
+    threshold_days: int = STALENESS_THRESHOLD_DAYS,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get report on stale papers and editions
+
+    Args:
+        collection_id: Optional - filter to a specific collection
+        threshold_days: Days before considering a paper stale (default: 90)
+    """
+    from sqlalchemy import or_
+
+    threshold_date = datetime.utcnow() - timedelta(days=threshold_days)
+
+    # Build paper query
+    paper_query = select(Paper)
+    if collection_id is not None:
+        paper_query = paper_query.where(Paper.collection_id == collection_id)
+
+    papers_result = await db.execute(paper_query)
+    papers = list(papers_result.scalars().all())
+
+    # Count paper staleness
+    total_papers = len(papers)
+    never_harvested_papers = sum(1 for p in papers if p.any_edition_harvested_at is None)
+    stale_papers = sum(
+        1 for p in papers
+        if p.any_edition_harvested_at is not None and p.any_edition_harvested_at < threshold_date
+    )
+
+    # Get editions (only selected ones)
+    paper_ids = [p.id for p in papers] if papers else []
+
+    if paper_ids:
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id.in_(paper_ids),
+                Edition.selected == True
+            )
+        )
+        editions = list(editions_result.scalars().all())
+    else:
+        editions = []
+
+    # Count edition staleness
+    total_editions = len(editions)
+    never_harvested_editions = sum(1 for e in editions if e.last_harvested_at is None)
+    stale_editions = sum(
+        1 for e in editions
+        if e.last_harvested_at is not None and e.last_harvested_at < threshold_date
+    )
+
+    # Find oldest harvest date
+    oldest_harvest = None
+    for p in papers:
+        if p.any_edition_harvested_at:
+            if oldest_harvest is None or p.any_edition_harvested_at < oldest_harvest:
+                oldest_harvest = p.any_edition_harvested_at
+
+    return StalenessReportResponse(
+        total_papers=total_papers,
+        stale_papers=stale_papers,
+        never_harvested_papers=never_harvested_papers,
+        total_editions=total_editions,
+        stale_editions=stale_editions,
+        never_harvested_editions=never_harvested_editions,
+        oldest_harvest_date=oldest_harvest,
+        staleness_threshold_days=threshold_days,
+    )

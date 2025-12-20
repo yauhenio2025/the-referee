@@ -56,6 +56,10 @@ class Paper(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Aggregate harvest tracking (computed from editions, for quick staleness checks)
+    any_edition_harvested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+    total_harvested_citations: Mapped[int] = mapped_column(Integer, default=0)
+
     # Relationships
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     editions: Mapped[List["Edition"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
@@ -100,6 +104,11 @@ class Edition(Base):
 
     # Track which job added this edition (for NEW badge - null means not new)
     added_by_job_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+
+    # Citation harvest tracking (for auto-updater feature)
+    last_harvested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+    last_harvest_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    harvested_citation_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

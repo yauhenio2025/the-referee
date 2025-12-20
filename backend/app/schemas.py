@@ -103,6 +103,11 @@ class PaperResponse(PaperBase):
     edition_count: int = 0
     total_edition_citations: int = 0  # Sum of citations across all editions
     canonical_edition: Optional[CanonicalEditionSummary] = None  # Highest-cited edition
+    # Harvest freshness tracking (auto-updater feature)
+    any_edition_harvested_at: Optional[datetime] = None
+    total_harvested_citations: int = 0
+    is_stale: bool = False  # Computed: null or >90 days since any edition harvest
+    days_since_harvest: Optional[int] = None  # Computed
 
     class Config:
         from_attributes = True
@@ -132,6 +137,12 @@ class EditionResponse(BaseModel):
     selected: bool
     is_supplementary: bool = False
     added_by_job_id: Optional[int] = None  # Non-null = NEW (from recent fetch job)
+    # Harvest freshness tracking (auto-updater feature)
+    last_harvested_at: Optional[datetime] = None
+    last_harvest_year: Optional[int] = None
+    harvested_citation_count: int = 0
+    is_stale: bool = False  # Computed: null or >90 days since harvest
+    days_since_harvest: Optional[int] = None  # Computed
 
     class Config:
         from_attributes = True
@@ -291,6 +302,48 @@ class LanguageRecommendationResponse(BaseModel):
 
 class AvailableLanguagesResponse(BaseModel):
     languages: List[dict]  # {code, name, icon}
+
+
+# ============== Refresh/Auto-Updater Schemas ==============
+
+class RefreshRequest(BaseModel):
+    """Request to refresh citations for paper/collection/global"""
+    force_full_refresh: bool = False  # If True, ignore year_low optimization
+    max_citations_per_edition: int = 1000
+    skip_threshold: int = 10000  # Skip editions with more citations than this
+
+
+class RefreshJobResponse(BaseModel):
+    """Response when queueing refresh jobs"""
+    jobs_created: int
+    papers_included: int
+    editions_included: int
+    job_ids: List[int]
+    batch_id: str  # UUID to track collection/global refreshes
+
+
+class RefreshStatusResponse(BaseModel):
+    """Status of refresh operation"""
+    batch_id: str
+    total_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    running_jobs: int
+    pending_jobs: int
+    new_citations_added: int
+    is_complete: bool
+
+
+class StalenessReportResponse(BaseModel):
+    """Report on stale papers and editions"""
+    total_papers: int
+    stale_papers: int
+    never_harvested_papers: int
+    total_editions: int
+    stale_editions: int
+    never_harvested_editions: int
+    oldest_harvest_date: Optional[datetime] = None
+    staleness_threshold_days: int = 90
 
 
 # Update forward references

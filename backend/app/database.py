@@ -46,6 +46,15 @@ async def run_migrations():
         # Add collection_id to papers (for collection feature)
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS ix_papers_collection ON papers(collection_id)",
+        # Citation auto-updater feature: harvest tracking on editions
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS last_harvested_at TIMESTAMP NULL",
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS last_harvest_year INTEGER NULL",
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvested_citation_count INTEGER DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS ix_editions_last_harvested ON editions(last_harvested_at)",
+        # Citation auto-updater feature: aggregate tracking on papers
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS any_edition_harvested_at TIMESTAMP NULL",
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS total_harvested_citations INTEGER DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS ix_papers_any_harvested ON papers(any_edition_harvested_at)",
     ]
 
     async with engine.begin() as conn:

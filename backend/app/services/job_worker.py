@@ -33,6 +33,9 @@ def log_now(msg: str, level: str = "info"):
 JOB_TIMEOUT_MINUTES = 30  # Mark job as failed if no progress for this long
 HEARTBEAT_INTERVAL = 60  # Seconds between heartbeat updates
 
+# Staleness threshold (for UI indicators)
+STALENESS_THRESHOLD_DAYS = 90
+
 # Global worker state
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
@@ -61,6 +64,61 @@ async def update_job_progress(
         )
     )
     await db.commit()
+
+
+async def update_edition_harvest_stats(db: AsyncSession, edition_id: int):
+    """Update edition harvest tracking after citation extraction"""
+    from sqlalchemy import func
+
+    current_year = datetime.now().year
+
+    # Count actual harvested citations for this edition
+    result = await db.execute(
+        select(func.count(Citation.id)).where(Citation.edition_id == edition_id)
+    )
+    harvested_count = result.scalar() or 0
+
+    # Update edition
+    await db.execute(
+        update(Edition)
+        .where(Edition.id == edition_id)
+        .values(
+            last_harvested_at=datetime.utcnow(),
+            last_harvest_year=current_year,
+            harvested_citation_count=harvested_count
+        )
+    )
+    await db.commit()
+    log_now(f"[Harvest] Updated edition {edition_id}: last_harvested_at=now, year={current_year}, count={harvested_count}")
+
+
+async def update_paper_harvest_stats(db: AsyncSession, paper_id: int):
+    """Update paper-level aggregate harvest stats from edition data"""
+    from sqlalchemy import func
+
+    # Get aggregates from editions
+    result = await db.execute(
+        select(
+            func.max(Edition.last_harvested_at),
+            func.sum(Edition.harvested_citation_count)
+        ).where(Edition.paper_id == paper_id)
+    )
+    row = result.first()
+
+    any_harvested_at = row[0] if row else None
+    total_harvested = row[1] or 0 if row else 0
+
+    # Update paper
+    await db.execute(
+        update(Paper)
+        .where(Paper.id == paper_id)
+        .values(
+            any_edition_harvested_at=any_harvested_at,
+            total_harvested_citations=int(total_harvested)
+        )
+    )
+    await db.commit()
+    log_now(f"[Harvest] Updated paper {paper_id}: any_harvested_at={any_harvested_at}, total={total_harvested}")
 
 
 async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
@@ -227,7 +285,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     max_citations_per_edition = params.get("max_citations_per_edition", 1000)
     skip_threshold = params.get("skip_threshold", 5000)  # Skip editions with > this many citations
 
+    # Refresh mode params
+    is_refresh = params.get("is_refresh", False)
+    year_low_param = params.get("year_low")  # Year to start fetching from (for incremental refresh)
+    batch_id = params.get("batch_id")  # UUID for batch tracking
+
     log_now(f"[Worker] Parsed params: edition_ids={edition_ids}, max_citations={max_citations_per_edition}, skip_threshold={skip_threshold}")
+    if is_refresh:
+        log_now(f"[Worker] REFRESH MODE: year_low={year_low_param}, batch_id={batch_id}")
 
     # Get paper
     result = await db.execute(select(Paper).where(Paper.id == paper_id))
@@ -388,10 +453,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             if edition.citation_count and edition.citation_count > YEAR_BY_YEAR_THRESHOLD:
                 log_now(f"[EDITION {i+1}] 🗓️ YEAR-BY-YEAR MODE: {edition.citation_count} citations > {YEAR_BY_YEAR_THRESHOLD} threshold")
-                log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to 1990...")
+
+                # For refresh mode, use year_low_param or edition's last harvest year
+                # Otherwise, go back to 1990
+                if is_refresh and year_low_param:
+                    min_year = year_low_param
+                    log_now(f"[EDITION {i+1}] REFRESH: Will fetch from {current_year} backwards to {min_year} (from params)")
+                elif is_refresh and edition.last_harvest_year:
+                    min_year = edition.last_harvest_year
+                    log_now(f"[EDITION {i+1}] REFRESH: Will fetch from {current_year} backwards to {min_year} (from edition last harvest)")
+                else:
+                    min_year = 1990  # Full harvest - go back to 1990
+                    log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
                 # Fetch year by year from current year backwards
-                min_year = 1990  # Don't go further back than this
                 for year in range(current_year, min_year - 1, -1):
                     year_start_citations = total_new_citations
 
@@ -422,11 +497,22 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             else:
                 # Standard fetch for editions with <=1000 citations
-                log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by()...")
+                # For refresh mode, use year_low to only get newer citations
+                effective_year_low = None
+                if is_refresh:
+                    if year_low_param:
+                        effective_year_low = year_low_param
+                        log_now(f"[EDITION {i+1}] REFRESH: Using year_low={effective_year_low} from params")
+                    elif edition.last_harvest_year:
+                        effective_year_low = edition.last_harvest_year
+                        log_now(f"[EDITION {i+1}] REFRESH: Using year_low={effective_year_low} from edition last harvest")
+
+                log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by(year_low={effective_year_low})...")
 
                 result = await scholar_service.get_cited_by(
                     scholar_id=edition.scholar_id,
                     max_results=max_citations_per_edition,
+                    year_low=effective_year_low,  # Pass year_low for refresh filtering
                     on_page_complete=save_page_citations,
                     start_page=resume_page,
                 )
@@ -439,6 +525,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             edition_citations = total_new_citations - edition_start_citations
             log_now(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
+
+            # Update edition harvest stats (always, not just refresh mode)
+            await update_edition_harvest_stats(db, edition.id)
 
             # Rate limit between editions
             if i < total_editions - 1:
@@ -461,6 +550,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     log_now(f"║  Editions processed: {len(valid_editions)}")
     log_now(f"╚{'═'*70}╝")
 
+    # Update paper-level aggregate harvest stats
+    await update_paper_harvest_stats(db, paper_id)
+
     # Clear resume state on successful completion
     if params.get("resume_state"):
         params.pop("resume_state", None)
@@ -474,6 +566,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         "skipped_details": skipped_editions[:10],
         "new_citations_added": total_new_citations,
         "duplicates_skipped": total_updated_citations,
+        "is_refresh": is_refresh,
     }
 
 
@@ -646,19 +739,45 @@ async def create_extract_citations_job(
     edition_ids: list = None,
     max_citations_per_edition: int = 1000,
     skip_threshold: int = 10000,
+    # Refresh mode params
+    is_refresh: bool = False,
+    year_low: int = None,
+    batch_id: str = None,
 ) -> Job:
-    """Create an extract_citations job"""
+    """Create an extract_citations job
+
+    Args:
+        paper_id: Paper to extract citations for
+        edition_ids: Specific editions (empty = all selected)
+        max_citations_per_edition: Max citations to fetch per edition
+        skip_threshold: Skip editions with more citations than this
+        is_refresh: If True, this is a refresh job (updates harvest timestamps)
+        year_low: Only fetch citations from this year onwards (for incremental refresh)
+        batch_id: UUID to track collection/global refresh batches
+    """
+    params = {
+        "edition_ids": edition_ids or [],
+        "max_citations_per_edition": max_citations_per_edition,
+        "skip_threshold": skip_threshold,
+    }
+
+    # Add refresh params if this is a refresh job
+    if is_refresh:
+        params["is_refresh"] = True
+        if year_low:
+            params["year_low"] = year_low
+        if batch_id:
+            params["batch_id"] = batch_id
+
+    message = "Queued: Refresh citations" if is_refresh else "Queued: Extract citations"
+
     job = Job(
         paper_id=paper_id,
         job_type="extract_citations",
         status="pending",
-        params=json.dumps({
-            "edition_ids": edition_ids or [],
-            "max_citations_per_edition": max_citations_per_edition,
-            "skip_threshold": skip_threshold,
-        }),
+        params=json.dumps(params),
         progress=0,
-        progress_message="Queued: Extract citations",
+        progress_message=message,
     )
     db.add(job)
     await db.flush()
