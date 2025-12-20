@@ -489,6 +489,25 @@ export default function EditionDiscovery({ paper, onBack }) {
     }
   }, [paper.id, queryClient])
 
+  // Select editions AND start harvesting them immediately
+  const selectAndHarvest = useCallback(async (editionIds) => {
+    try {
+      // First mark them as selected
+      await api.selectEditions(editionIds, true)
+      queryClient.invalidateQueries(['editions', paper.id])
+
+      // Then start harvesting
+      const result = await api.extractCitations(paper.id, { editionIds })
+      // Track all of them as harvesting
+      const newHarvesting = {}
+      editionIds.forEach(id => { newHarvesting[id] = result.job_id })
+      setHarvestingEditions(prev => ({ ...prev, ...newHarvesting }))
+      queryClient.invalidateQueries(['jobs'])
+    } catch (error) {
+      console.error('Failed to select and harvest:', error)
+    }
+  }, [paper.id, queryClient])
+
   // Navigate to citations filtered by a specific edition
   const viewCitationsForEdition = useCallback((editionId) => {
     navigate(`/paper/${paper.id}/citations?edition=${editionId}`)
@@ -817,6 +836,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onSelectAndHarvest={selectAndHarvest}
             />
           )}
 
@@ -839,6 +859,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onSelectAndHarvest={selectAndHarvest}
             />
           )}
 
@@ -861,6 +882,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onSelectAndHarvest={selectAndHarvest}
             />
           )}
 
@@ -1044,6 +1066,7 @@ function EditionGroup({
   onExclude,
   onAddAsSeed,
   onInclude,
+  onSelectAndHarvest,
   isExcludedGroup = false
 }) {
   const selectedCount = editions.filter(e => e.selected).length
@@ -1120,13 +1143,18 @@ function EditionGroup({
               {!isExcludedGroup && onAddAsSeed && (
                 <button
                   className="btn-xs btn-seed-batch"
-                  onClick={() => {
-                    if (confirm(`Create ${selectedCount} new seed papers from selected editions?\n\nThese editions will be excluded from the current paper.`)) {
-                      selectedIds.forEach(id => onAddAsSeed(id))
-                    }
-                  }}
+                  onClick={() => selectedIds.forEach(id => onAddAsSeed(id))}
                 >
                   🌱 Add {selectedCount} as Seeds
+                </button>
+              )}
+              {/* Select & Harvest - mark as editions and start harvesting */}
+              {!isExcludedGroup && onSelectAndHarvest && (
+                <button
+                  className="btn-xs btn-harvest-batch"
+                  onClick={() => onSelectAndHarvest(selectedIds)}
+                >
+                  📥 Select & Harvest ({selectedCount})
                 </button>
               )}
             </div>
@@ -1289,11 +1317,7 @@ function EditionRow({
         {onAddAsSeed && !isExcludedGroup && (
           <button
             className="btn-icon btn-seed"
-            onClick={() => {
-              if (confirm(`Create new seed paper from "${edition.title.substring(0, 50)}..."?\n\nThis edition will be excluded from the current paper.`)) {
-                onAddAsSeed(edition.id)
-              }
-            }}
+            onClick={() => onAddAsSeed(edition.id)}
             title="Add as new seed paper"
           >
             🌱

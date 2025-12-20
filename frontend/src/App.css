@@ -2939,6 +2939,17 @@ button:disabled {
   color: white !important;
 }
 
+.edition-discovery.tufte .btn-harvest-batch {
+  background: rgba(99, 102, 241, 0.2) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.edition-discovery.tufte .btn-harvest-batch:hover {
+  background: var(--accent) !important;
+  color: white !important;
+}
+
 /* ============================================
    CITATIONS VIEW
    ============================================ */
