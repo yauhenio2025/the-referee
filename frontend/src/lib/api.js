@@ -95,6 +95,13 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}/resolve`, { method: 'POST' });
   }
 
+  async batchResolvePapers(paperIds = []) {
+    return this.request('/api/papers/batch-resolve', {
+      method: 'POST',
+      body: { paper_ids: paperIds },
+    });
+  }
+
   async confirmCandidate(paperId, candidateIndex) {
     return this.request(`/api/papers/${paperId}/confirm-candidate`, {
       method: 'POST',

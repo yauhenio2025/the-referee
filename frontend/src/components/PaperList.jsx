@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { useToast } from './Toast'
 
 export default function PaperList({ onSelectPaper }) {
   const queryClient = useQueryClient()
+  const toast = useToast()
   const [resolvingId, setResolvingId] = useState(null)
   const [expandedAbstracts, setExpandedAbstracts] = useState({})
   const [reconciliationPaper, setReconciliationPaper] = useState(null)
   const [editionCounts, setEditionCounts] = useState({})
   const [refreshingPapers, setRefreshingPapers] = useState({})
   const [quickHarvestingPapers, setQuickHarvestingPapers] = useState({})
+  const [batchResolving, setBatchResolving] = useState(false)
+  const [selectedPapers, setSelectedPapers] = useState(new Set())
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -131,6 +135,60 @@ export default function PaperList({ onSelectPaper }) {
     },
   })
 
+  const batchResolve = useMutation({
+    mutationFn: (paperIds) => api.batchResolvePapers(paperIds),
+    onMutate: () => {
+      setBatchResolving(true)
+    },
+    onSuccess: (data) => {
+      setBatchResolving(false)
+      setSelectedPapers(new Set())  // Clear selection after batch resolve
+      if (data.jobs_created > 0) {
+        toast.success(`🔍 Queued ${data.jobs_created} papers for resolution`)
+      } else {
+        toast.info('No pending papers to resolve')
+      }
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['jobs'])
+    },
+    onError: (error) => {
+      setBatchResolving(false)
+      toast.error(`Failed to queue resolution: ${error.message}`)
+    },
+  })
+
+  // Selection helpers
+  const togglePaperSelection = (paperId) => {
+    setSelectedPapers(prev => {
+      const next = new Set(prev)
+      if (next.has(paperId)) {
+        next.delete(paperId)
+      } else {
+        next.add(paperId)
+      }
+      return next
+    })
+  }
+
+  const selectAllPending = () => {
+    const pendingIds = papers?.filter(p => p.status === 'pending' || p.status === 'error').map(p => p.id) || []
+    setSelectedPapers(new Set(pendingIds))
+  }
+
+  const clearSelection = () => {
+    setSelectedPapers(new Set())
+  }
+
+  const handleBatchResolve = () => {
+    const paperIds = Array.from(selectedPapers)
+    if (paperIds.length > 0) {
+      batchResolve.mutate(paperIds)
+    } else {
+      // Resolve all pending
+      batchResolve.mutate([])
+    }
+  }
+
   const handleResolve = (paperId) => {
     setResolvingId(paperId)
     resolvePaper.mutate(paperId)
@@ -159,6 +217,8 @@ export default function PaperList({ onSelectPaper }) {
 
   // Check for papers needing reconciliation on load
   const papersNeedingReconciliation = papers?.filter(p => p.status === 'needs_reconciliation') || []
+  // Count pending papers for batch resolve
+  const pendingPapers = papers?.filter(p => p.status === 'pending') || []
 
   if (isLoading) return <div className="loading">Loading papers...</div>
   if (error) return <div className="error">Error loading papers: {error.message}</div>
@@ -187,9 +247,63 @@ export default function PaperList({ onSelectPaper }) {
     return authors.replace(/([a-z])([A-Z])/g, '$1 $2').trim()
   }
 
+  // Filter for selectable papers (pending or error)
+  const selectablePapers = papers?.filter(p => p.status === 'pending' || p.status === 'error') || []
+  const selectedCount = selectedPapers.size
+  const selectedResolvable = Array.from(selectedPapers).filter(id =>
+    selectablePapers.some(p => p.id === id)
+  ).length
+
   return (
     <div className="paper-list">
-      <h2>Papers ({papers.length})</h2>
+      <div className="paper-list-header">
+        <h2>Papers ({papers.length})</h2>
+        <div className="paper-list-actions">
+          {/* Selection controls - show when there are pending/error papers */}
+          {selectablePapers.length > 0 && (
+            <>
+              {selectedCount > 0 ? (
+                <>
+                  <span className="selection-count">{selectedCount} selected</span>
+                  <button
+                    onClick={clearSelection}
+                    className="btn-clear-selection"
+                    title="Clear selection"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={handleBatchResolve}
+                    disabled={batchResolving || selectedResolvable === 0}
+                    className="btn-batch-resolve"
+                    title={`Resolve ${selectedResolvable} selected papers on Google Scholar`}
+                  >
+                    {batchResolving ? '🔄 Queuing...' : `🔍 Resolve Selected (${selectedResolvable})`}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={selectAllPending}
+                    className="btn-select-all"
+                    title="Select all pending papers"
+                  >
+                    Select All Pending ({selectablePapers.length})
+                  </button>
+                  <button
+                    onClick={handleBatchResolve}
+                    disabled={batchResolving}
+                    className="btn-batch-resolve"
+                    title={`Resolve all ${pendingPapers.length} pending papers on Google Scholar in parallel`}
+                  >
+                    {batchResolving ? '🔄 Queuing...' : `🔍 Resolve All Pending (${pendingPapers.length})`}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Alert for papers needing reconciliation */}
       {papersNeedingReconciliation.length > 0 && (
@@ -206,8 +320,23 @@ export default function PaperList({ onSelectPaper }) {
           const isExpanded = expandedAbstracts[paper.id]
           const needsReconciliation = paper.status === 'needs_reconciliation'
 
+          const isSelectable = paper.status === 'pending' || paper.status === 'error'
+          const isSelected = selectedPapers.has(paper.id)
+
           return (
-            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''}`}>
+            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''} ${isSelected ? 'paper-card-selected' : ''}`}>
+              {/* Checkbox for selection (only for pending/error papers) */}
+              {isSelectable && (
+                <div className="paper-select-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => togglePaperSelection(paper.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    title={isSelected ? "Deselect paper" : "Select paper for batch resolve"}
+                  />
+                </div>
+              )}
               {/* Header with title and status */}
               <div className="paper-header">
                 {paper.link ? (

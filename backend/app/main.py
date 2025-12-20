@@ -1532,6 +1532,81 @@ async def resolve_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Resolution failed: {str(e)}")
 
 
+class BatchResolveRequest(BaseModel):
+    paper_ids: List[int] = []  # Empty = all pending papers
+
+
+class BatchResolveResponse(BaseModel):
+    jobs_created: int
+    paper_ids: List[int]
+    message: str
+
+
+@app.post("/api/papers/batch-resolve", response_model=BatchResolveResponse)
+async def batch_resolve_papers(request: BatchResolveRequest = None, db: AsyncSession = Depends(get_db)):
+    """Queue resolution jobs for multiple papers in parallel
+
+    If paper_ids is empty, resolves all papers with status='pending'
+    """
+    if request is None:
+        request = BatchResolveRequest()
+
+    # Get papers to resolve
+    if request.paper_ids:
+        # Specific papers
+        result = await db.execute(
+            select(Paper).where(
+                Paper.id.in_(request.paper_ids),
+                Paper.status.in_(["pending", "error"])  # Only pending or error status
+            )
+        )
+    else:
+        # All pending papers
+        result = await db.execute(
+            select(Paper).where(Paper.status == "pending")
+        )
+
+    papers = list(result.scalars().all())
+
+    if not papers:
+        return BatchResolveResponse(
+            jobs_created=0,
+            paper_ids=[],
+            message="No papers to resolve"
+        )
+
+    # Create resolution jobs for each paper
+    paper_ids = []
+    for paper in papers:
+        # Check if there's already a pending/running resolve job for this paper
+        existing_job = await db.execute(
+            select(Job).where(
+                Job.paper_id == paper.id,
+                Job.job_type == "resolve",
+                Job.status.in_(["pending", "running"])
+            )
+        )
+        if existing_job.scalar_one_or_none():
+            continue  # Skip, already has a job
+
+        job = Job(
+            paper_id=paper.id,
+            job_type="resolve",
+            status="pending",
+            progress_message="Queued for resolution",
+        )
+        db.add(job)
+        paper_ids.append(paper.id)
+
+    await db.commit()
+
+    return BatchResolveResponse(
+        jobs_created=len(paper_ids),
+        paper_ids=paper_ids,
+        message=f"Queued {len(paper_ids)} papers for resolution"
+    )
+
+
 class CandidateConfirmRequest(BaseModel):
     candidate_index: int
 

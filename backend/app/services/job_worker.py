@@ -705,6 +705,46 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     }
 
 
+async def process_resolve_job(job: Job, db: AsyncSession):
+    """Process a paper resolution job"""
+    from .paper_resolution import PaperResolutionService
+
+    paper_id = job.paper_id
+    log_now(f"[Resolve] Starting resolution for paper {paper_id}")
+
+    service = PaperResolutionService(db)
+
+    # Update progress
+    job.progress = 10
+    job.progress_message = "Searching Google Scholar..."
+    await db.commit()
+
+    try:
+        result = await service.resolve_paper(paper_id, job_id=job.id)
+
+        if result.get("success"):
+            if result.get("needs_reconciliation"):
+                job.progress_message = f"Multiple candidates found - user selection required"
+                return {
+                    "paper_id": paper_id,
+                    "needs_reconciliation": True,
+                    "candidates_count": len(result.get("candidates", [])),
+                }
+            else:
+                job.progress_message = f"Resolved: {result.get('citation_count', 0)} citations"
+                return {
+                    "paper_id": paper_id,
+                    "scholar_id": result.get("scholar_id"),
+                    "citation_count": result.get("citation_count", 0),
+                }
+        else:
+            raise ValueError(result.get("error", "Resolution failed"))
+
+    except Exception as e:
+        log_now(f"[Resolve] Error: {e}")
+        raise
+
+
 async def process_single_job(job_id: int):
     """Process a single job by ID with concurrency control"""
     global _job_semaphore, _running_jobs
@@ -746,6 +786,8 @@ async def process_single_job(job_id: int):
                         result = await process_fetch_more_job(job, db)
                     elif job.job_type == "extract_citations":
                         result = await process_extract_citations_job(job, db)
+                    elif job.job_type == "resolve":
+                        result = await process_resolve_job(job, db)
                     else:
                         raise ValueError(f"Unknown job type: {job.job_type}")
 

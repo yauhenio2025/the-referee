@@ -516,12 +516,13 @@ export default function EditionDiscovery({ paper, onBack }) {
 
       // Then start harvesting
       const result = await api.extractCitations(paper.id, { editionIds })
+
       // Track all of them as harvesting
       const newHarvesting = {}
       editionIds.forEach(id => { newHarvesting[id] = result.job_id })
       setHarvestingEditions(prev => ({ ...prev, ...newHarvesting }))
       queryClient.invalidateQueries(['jobs'])
-      toast.success(`📥 Started harvesting ${editionIds.length} edition${editionIds.length > 1 ? 's' : ''}`)
+      toast.success(`📥 Started harvesting ${editionIds.length} edition${editionIds.length > 1 ? 's' : ''} (Job #${result.job_id})`)
     } catch (error) {
       console.error('Failed to select and harvest:', error)
       toast.error(`Failed to start harvest: ${error.message}`)
