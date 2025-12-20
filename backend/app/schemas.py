@@ -108,6 +108,7 @@ class PaperResponse(PaperBase):
     total_harvested_citations: int = 0
     is_stale: bool = False  # Computed: null or >90 days since any edition harvest
     days_since_harvest: Optional[int] = None  # Computed
+    editions_finalized: bool = False  # User has finalized edition selection
 
     class Config:
         from_attributes = True
@@ -135,6 +136,7 @@ class EditionResponse(BaseModel):
     confidence: str
     auto_selected: bool
     selected: bool
+    excluded: bool = False
     is_supplementary: bool = False
     added_by_job_id: Optional[int] = None  # Non-null = NEW (from recent fetch job)
     # Harvest freshness tracking (auto-updater feature)
@@ -169,6 +171,24 @@ class EditionDiscoveryResponse(BaseModel):
 class EditionSelectRequest(BaseModel):
     edition_ids: List[int]
     selected: bool
+
+
+class EditionExcludeRequest(BaseModel):
+    """Exclude/unexclude editions from view"""
+    edition_ids: List[int]
+    excluded: bool  # True to exclude, False to un-exclude
+
+
+class EditionAddAsSeedRequest(BaseModel):
+    """Convert an edition into a new independent seed paper"""
+    exclude_from_current: bool = True  # Also exclude this edition from current paper
+
+
+class EditionAddAsSeedResponse(BaseModel):
+    """Response from adding edition as seed"""
+    new_paper_id: int
+    title: str
+    message: str
 
 
 class EditionUpdateConfidenceRequest(BaseModel):

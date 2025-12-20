@@ -4,6 +4,38 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Edition Management - Add as Seed, Exclude, Finalize
+
+**Commit:** `700fa60` on `main`
+
+**Description:** Three new capabilities for managing edition candidates on the EditionDiscovery page. Users can now: convert interesting candidates into independent seed papers, exclude irrelevant candidates from view, and finalize the edition selection to show only selected editions.
+
+**Key Changes:**
+- Backend: Added `excluded` field to Edition model
+- Backend: Added `editions_finalized` field to Paper model
+- Backend: `POST /api/editions/exclude` - Exclude/unexclude editions
+- Backend: `POST /api/editions/{id}/add-as-seed` - Convert edition to new seed paper
+- Backend: `POST /api/papers/{id}/finalize-editions` - Finalize edition view
+- Backend: `POST /api/papers/{id}/reopen-editions` - Reopen for editing
+- Frontend: Add as Seed button (🌱) on each edition row
+- Frontend: Exclude button (⊘) on each edition row
+- Frontend: "Finalize Editions" / "Reopen Editions" toggle in toolbar
+- Frontend: "Show/Hide Excluded" toggle for viewing excluded editions
+- Frontend: Finalized banner with status message
+- Frontend: Excluded editions group with strikethrough styling
+- CSS: Comprehensive styling for new states and buttons
+
+**Files Modified:**
+- `backend/app/models.py`
+- `backend/app/schemas.py`
+- `backend/app/database.py`
+- `backend/app/main.py`
+- `frontend/src/lib/api.js`
+- `frontend/src/components/EditionDiscovery.jsx`
+- `frontend/src/App.css`
+
+---
+
 ## 2025-12-20: Advanced Job Queue Monitor
 
 **Commit:** `d96ab70` on `main`

@@ -24,8 +24,9 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [isLoadingRecs, setIsLoadingRecs] = useState(false)
   const [recommendations, setRecommendations] = useState(null)
   const [discoveryProgress, setDiscoveryProgress] = useState(null)
-  const [expandedGroups, setExpandedGroups] = useState({ high: true, uncertain: true, rejected: false })
+  const [expandedGroups, setExpandedGroups] = useState({ high: true, uncertain: true, rejected: false, excluded: false })
   const [languageFilter, setLanguageFilter] = useState(null)
+  const [showExcluded, setShowExcluded] = useState(false) // Toggle to show excluded editions
   const queryClient = useQueryClient()
 
   const { data: editions, isLoading } = useQuery({
@@ -152,6 +153,60 @@ export default function EditionDiscovery({ paper, onBack }) {
     },
     onSettled: () => {
       queryClient.invalidateQueries(['editions', paper.id])
+    },
+  })
+
+  // Exclude editions
+  const excludeEditions = useMutation({
+    mutationFn: ({ ids, excluded }) => api.excludeEditions(ids, excluded),
+    onMutate: async ({ ids, excluded }) => {
+      await queryClient.cancelQueries(['editions', paper.id])
+      const previous = queryClient.getQueryData(['editions', paper.id])
+      updateEditionsOptimistically(ids, { excluded })
+      return { previous }
+    },
+    onError: (err, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['editions', paper.id], context.previous)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(['editions', paper.id])
+    },
+  })
+
+  // Add edition as new seed paper
+  const addAsSeed = useMutation({
+    mutationFn: (editionId) => api.addEditionAsSeed(editionId),
+    onSuccess: (result) => {
+      // Invalidate editions (source will be excluded)
+      queryClient.invalidateQueries(['editions', paper.id])
+      // Invalidate papers list (new paper added)
+      queryClient.invalidateQueries(['papers'])
+      // Show success with link to new paper
+      alert(`Created new seed: ${result.title}\n\nPaper ID: ${result.new_paper_id}`)
+    },
+    onError: (error) => {
+      alert(`Failed to create seed: ${error.message}`)
+    },
+  })
+
+  // Finalize editions
+  const finalizeEditions = useMutation({
+    mutationFn: () => api.finalizeEditions(paper.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['editions', paper.id])
+      queryClient.invalidateQueries(['papers', paper.id])
+    },
+  })
+
+  // Reopen editions
+  const reopenEditions = useMutation({
+    mutationFn: () => api.reopenEditions(paper.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['editions', paper.id])
+      queryClient.invalidateQueries(['papers', paper.id])
+      setShowExcluded(true) // Show excluded editions when reopening
     },
   })
 
@@ -440,24 +495,32 @@ export default function EditionDiscovery({ paper, onBack }) {
   }, [paper.id, navigate])
 
   // Computed data
-  const { highConfidence, uncertain, rejected, languageGroups, selectedCount, totalCitations } = useMemo(() => {
-    if (!editions) return { highConfidence: [], uncertain: [], rejected: [], languageGroups: {}, selectedCount: 0, totalCitations: 0 }
+  const { highConfidence, uncertain, rejected, excluded, languageGroups, selectedCount, totalCitations, excludedCount, isFinalized } = useMemo(() => {
+    if (!editions) return { highConfidence: [], uncertain: [], rejected: [], excluded: [], languageGroups: {}, selectedCount: 0, totalCitations: 0, excludedCount: 0, isFinalized: false }
 
+    // Filter by language first
     const filtered = languageFilter ? editions.filter(e => e.language === languageFilter) : editions
 
+    // Separate excluded from non-excluded
+    const nonExcluded = filtered.filter(e => !e.excluded)
+    const excludedEditions = filtered.filter(e => e.excluded)
+
     return {
-      highConfidence: filtered.filter(e => e.confidence === 'high'),
-      uncertain: filtered.filter(e => e.confidence === 'uncertain'),
-      rejected: filtered.filter(e => e.confidence === 'rejected'),
+      highConfidence: nonExcluded.filter(e => e.confidence === 'high'),
+      uncertain: nonExcluded.filter(e => e.confidence === 'uncertain'),
+      rejected: nonExcluded.filter(e => e.confidence === 'rejected'),
+      excluded: excludedEditions,
       languageGroups: editions.reduce((acc, e) => {
         const lang = e.language || 'Unknown'
         acc[lang] = (acc[lang] || 0) + 1
         return acc
       }, {}),
-      selectedCount: editions.filter(e => e.selected).length,
-      totalCitations: editions.filter(e => e.selected).reduce((sum, e) => sum + (e.citation_count || 0), 0),
+      selectedCount: editions.filter(e => e.selected && !e.excluded).length,
+      totalCitations: editions.filter(e => e.selected && !e.excluded).reduce((sum, e) => sum + (e.citation_count || 0), 0),
+      excludedCount: editions.filter(e => e.excluded).length,
+      isFinalized: paper.editions_finalized || false,
     }
-  }, [editions, languageFilter])
+  }, [editions, languageFilter, paper.editions_finalized])
 
   // Batch actions
   const selectByConfidence = (confidence) => {
@@ -612,6 +675,20 @@ export default function EditionDiscovery({ paper, onBack }) {
         </div>
       )}
 
+      {/* Finalized Banner */}
+      {isFinalized && (
+        <div className="finalized-banner">
+          <span>✓ Editions finalized - showing only selected editions</span>
+          <button
+            onClick={() => reopenEditions.mutate()}
+            disabled={reopenEditions.isPending}
+            className="btn-reopen-inline"
+          >
+            🔓 Reopen for Editing
+          </button>
+        </div>
+      )}
+
       {/* Stats + Batch Actions */}
       {editions?.length > 0 && (
         <div className="ed-toolbar">
@@ -636,6 +713,38 @@ export default function EditionDiscovery({ paper, onBack }) {
             <button onClick={deselectAll} className="btn-sm">Clear</button>
             <button onClick={() => selectByConfidence('high')} className="btn-sm btn-high">+ High</button>
             <button onClick={() => deselectByConfidence('uncertain')} className="btn-sm">− Uncertain</button>
+            <span className="action-sep">|</span>
+            {isFinalized ? (
+              <button
+                onClick={() => reopenEditions.mutate()}
+                disabled={reopenEditions.isPending}
+                className="btn-sm btn-reopen"
+                title="Show all candidates again for editing"
+              >
+                🔓 Reopen Editions
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (confirm('Finalize editions? This will hide all unselected candidates.')) {
+                    finalizeEditions.mutate()
+                  }
+                }}
+                disabled={finalizeEditions.isPending || selectedCount === 0}
+                className="btn-sm btn-finalize"
+                title="Hide unselected editions and show only final selection"
+              >
+                ✓ Finalize Editions
+              </button>
+            )}
+            {excludedCount > 0 && (
+              <button
+                onClick={() => setShowExcluded(!showExcluded)}
+                className={`btn-sm btn-excluded-toggle ${showExcluded ? 'active' : ''}`}
+              >
+                {showExcluded ? '👁️ Hide' : '👁️ Show'} Excluded ({excludedCount})
+              </button>
+            )}
           </div>
 
           {/* Language chips - click to filter, double-click to select */}
@@ -706,6 +815,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               className="group-high"
               showMarkAs="uncertain"
               onViewCitations={viewCitationsForEdition}
+              onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
+              onAddAsSeed={(id) => addAsSeed.mutate(id)}
             />
           )}
 
@@ -726,6 +837,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               className="group-uncertain"
               showMarkAs="both"
               onViewCitations={viewCitationsForEdition}
+              onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
+              onAddAsSeed={(id) => addAsSeed.mutate(id)}
             />
           )}
 
@@ -746,6 +859,30 @@ export default function EditionDiscovery({ paper, onBack }) {
               className="group-rejected"
               showMarkAs="restore"
               onViewCitations={viewCitationsForEdition}
+              onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
+              onAddAsSeed={(id) => addAsSeed.mutate(id)}
+            />
+          )}
+
+          {/* Excluded - only show when toggled */}
+          {showExcluded && excluded.length > 0 && (
+            <EditionGroup
+              title="Excluded"
+              editions={excluded}
+              expanded={expandedGroups.excluded}
+              onToggle={() => toggleGroup('excluded')}
+              onSelect={(id, selected) => selectEditions.mutate({ ids: [id], selected })}
+              onSelectAll={() => {}}
+              onDeselectAll={() => {}}
+              onMarkUncertain={(ids) => markAsUncertain(ids)}
+              onMarkHigh={(ids) => markAsHigh(ids)}
+              onHarvest={harvestEdition}
+              harvestingEditions={harvestingEditions}
+              className="group-excluded"
+              showMarkAs="restore-from-excluded"
+              onViewCitations={viewCitationsForEdition}
+              onInclude={(ids) => excludeEditions.mutate({ ids, excluded: false })}
+              isExcludedGroup={true}
             />
           )}
         </div>
@@ -903,7 +1040,11 @@ function EditionGroup({
   harvestingEditions,
   className,
   showMarkAs,
-  onViewCitations
+  onViewCitations,
+  onExclude,
+  onAddAsSeed,
+  onInclude,
+  isExcludedGroup = false
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
@@ -1000,6 +1141,10 @@ function EditionGroup({
                   isHarvesting={!!harvestingEditions[ed.id]}
                   showMarkAs={showMarkAs}
                   onViewCitations={onViewCitations}
+                  onExclude={onExclude}
+                  onAddAsSeed={onAddAsSeed}
+                  onInclude={onInclude}
+                  isExcludedGroup={isExcludedGroup}
                 />
               ))}
             </tbody>
@@ -1022,7 +1167,11 @@ function EditionRow({
   onHarvest,
   isHarvesting,
   showMarkAs,
-  onViewCitations
+  onViewCitations,
+  onExclude,
+  onAddAsSeed,
+  onInclude,
+  isExcludedGroup = false
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
@@ -1101,7 +1250,7 @@ function EditionRow({
       </td>
       <td className="col-actions">
         {/* Harvest button - only show if there are citations to harvest */}
-        {hasCitations && (
+        {hasCitations && !isExcludedGroup && (
           <button
             className={`btn-harvest ${isHarvesting ? 'harvesting' : ''}`}
             onClick={() => onHarvest(edition.id)}
@@ -1111,6 +1260,44 @@ function EditionRow({
             {isHarvesting ? '⏳' : '📥'}
           </button>
         )}
+
+        {/* Add as Seed button - for all groups except excluded */}
+        {onAddAsSeed && !isExcludedGroup && (
+          <button
+            className="btn-icon btn-seed"
+            onClick={() => {
+              if (confirm(`Create new seed paper from "${edition.title.substring(0, 50)}..."?\n\nThis edition will be excluded from the current paper.`)) {
+                onAddAsSeed(edition.id)
+              }
+            }}
+            title="Add as new seed paper"
+          >
+            🌱
+          </button>
+        )}
+
+        {/* Exclude button - for all groups except excluded */}
+        {onExclude && !isExcludedGroup && (
+          <button
+            className="btn-icon btn-exclude"
+            onClick={() => onExclude([edition.id])}
+            title="Exclude from view"
+          >
+            ⊘
+          </button>
+        )}
+
+        {/* Include button - only for excluded group */}
+        {isExcludedGroup && onInclude && (
+          <button
+            className="btn-icon btn-include"
+            onClick={() => onInclude([edition.id])}
+            title="Restore to candidates"
+          >
+            ↩
+          </button>
+        )}
+
         {showMarkAs === 'uncertain' && (
           <button
             className="btn-icon"

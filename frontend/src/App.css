@@ -2787,6 +2787,134 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
+/* Edition Management: Finalized, Excluded, Add as Seed */
+.edition-discovery.tufte .finalized-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(34, 197, 94, 0.08));
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  color: var(--success);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.edition-discovery.tufte .finalized-banner .btn-reopen-inline {
+  background: transparent;
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  color: var(--success);
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.edition-discovery.tufte .finalized-banner .btn-reopen-inline:hover {
+  background: var(--success);
+  color: white;
+}
+
+.edition-discovery.tufte .action-sep {
+  color: var(--text-secondary);
+  margin: 0 0.25rem;
+}
+
+.edition-discovery.tufte .btn-finalize {
+  background: rgba(34, 197, 94, 0.15) !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  color: var(--success) !important;
+}
+
+.edition-discovery.tufte .btn-finalize:hover:not(:disabled) {
+  background: var(--success) !important;
+  color: white !important;
+}
+
+.edition-discovery.tufte .btn-reopen {
+  background: rgba(99, 102, 241, 0.15) !important;
+  border: 1px solid rgba(99, 102, 241, 0.4) !important;
+  color: var(--accent) !important;
+}
+
+.edition-discovery.tufte .btn-reopen:hover {
+  background: var(--accent) !important;
+  color: white !important;
+}
+
+.edition-discovery.tufte .btn-excluded-toggle {
+  background: rgba(136, 136, 136, 0.15) !important;
+  border: 1px solid rgba(136, 136, 136, 0.4) !important;
+  color: var(--text-secondary) !important;
+}
+
+.edition-discovery.tufte .btn-excluded-toggle.active {
+  background: rgba(99, 102, 241, 0.15) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+/* Excluded group styling */
+.edition-discovery.tufte .group-excluded {
+  opacity: 0.7;
+  border-left: 3px solid var(--text-secondary);
+}
+
+.edition-discovery.tufte .group-excluded .group-title {
+  color: var(--text-secondary);
+}
+
+.edition-discovery.tufte .group-excluded .edition-table tr {
+  background: rgba(136, 136, 136, 0.05);
+}
+
+.edition-discovery.tufte .group-excluded .title-cell a,
+.edition-discovery.tufte .group-excluded .title-cell span {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+/* Add as Seed button */
+.edition-discovery.tufte .btn-seed {
+  color: var(--success) !important;
+  font-size: 1rem;
+}
+
+.edition-discovery.tufte .btn-seed:hover {
+  background: rgba(34, 197, 94, 0.15) !important;
+  color: var(--success) !important;
+}
+
+/* Exclude button */
+.edition-discovery.tufte .btn-exclude {
+  color: var(--text-secondary) !important;
+  font-size: 1rem;
+}
+
+.edition-discovery.tufte .btn-exclude:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--danger) !important;
+}
+
+/* Include/restore button for excluded editions */
+.edition-discovery.tufte .btn-include {
+  color: var(--accent) !important;
+}
+
+.edition-discovery.tufte .btn-include:hover {
+  background: rgba(99, 102, 241, 0.15) !important;
+  color: var(--accent) !important;
+}
+
+/* Make actions column wider to fit new buttons */
+.edition-discovery.tufte .col-actions {
+  width: 120px;
+  white-space: nowrap;
+}
+
 /* ============================================
    CITATIONS VIEW
    ============================================ */

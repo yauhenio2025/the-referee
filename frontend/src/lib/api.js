@@ -144,6 +144,37 @@ class RefereeAPI {
     });
   }
 
+  async excludeEditions(editionIds, excluded = true) {
+    return this.request('/api/editions/exclude', {
+      method: 'POST',
+      body: {
+        edition_ids: editionIds,
+        excluded,
+      },
+    });
+  }
+
+  async addEditionAsSeed(editionId, options = {}) {
+    return this.request(`/api/editions/${editionId}/add-as-seed`, {
+      method: 'POST',
+      body: {
+        exclude_from_current: options.excludeFromCurrent ?? true,
+      },
+    });
+  }
+
+  async finalizeEditions(paperId) {
+    return this.request(`/api/papers/${paperId}/finalize-editions`, {
+      method: 'POST',
+    });
+  }
+
+  async reopenEditions(paperId) {
+    return this.request(`/api/papers/${paperId}/reopen-editions`, {
+      method: 'POST',
+    });
+  }
+
   async fetchMoreInLanguage(paperId, language, maxResults = 50) {
     return this.request('/api/editions/fetch-more', {
       method: 'POST',

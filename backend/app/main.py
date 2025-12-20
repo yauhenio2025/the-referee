@@ -21,6 +21,7 @@ from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
     EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
+    EditionExcludeRequest, EditionAddAsSeedRequest, EditionAddAsSeedResponse,
     ManualEditionAddRequest, ManualEditionAddResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
@@ -679,6 +680,134 @@ async def clear_new_badges(paper_id: int, language: Optional[str] = None, db: As
     await db.commit()
 
     return {"cleared": result.rowcount, "paper_id": paper_id, "language": language}
+
+
+@app.post("/api/editions/exclude")
+async def exclude_editions(request: EditionExcludeRequest, db: AsyncSession = Depends(get_db)):
+    """Exclude/unexclude editions from view"""
+    result = await db.execute(
+        select(Edition).where(Edition.id.in_(request.edition_ids))
+    )
+    editions = result.scalars().all()
+
+    for edition in editions:
+        edition.excluded = request.excluded
+
+    await db.commit()
+    return {"updated": len(editions), "excluded": request.excluded}
+
+
+@app.post("/api/editions/{edition_id}/add-as-seed", response_model=EditionAddAsSeedResponse)
+async def add_edition_as_seed(
+    edition_id: int,
+    request: EditionAddAsSeedRequest = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Convert an edition into a new independent seed paper.
+
+    Creates a new Paper from the edition's data (title, authors, year, venue).
+    Optionally excludes the edition from the current paper.
+    """
+    if request is None:
+        request = EditionAddAsSeedRequest()
+
+    # Get the edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get the parent paper to get collection_id
+    parent_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
+    parent_paper = parent_result.scalar_one_or_none()
+
+    # Create new paper from edition data
+    new_paper = Paper(
+        title=edition.title,
+        authors=edition.authors,
+        year=edition.year,
+        venue=edition.venue,
+        abstract=edition.abstract,
+        link=edition.link,
+        collection_id=parent_paper.collection_id if parent_paper else None,
+        status="pending",  # Will need to be resolved
+    )
+    db.add(new_paper)
+    await db.flush()
+    await db.refresh(new_paper)
+
+    # Create resolution job for the new paper
+    job = Job(
+        paper_id=new_paper.id,
+        job_type="resolve",
+        status="pending",
+    )
+    db.add(job)
+
+    # Exclude the edition from current paper (per user decision: always exclude)
+    if request.exclude_from_current:
+        edition.excluded = True
+
+    await db.commit()
+
+    return EditionAddAsSeedResponse(
+        new_paper_id=new_paper.id,
+        title=new_paper.title,
+        message=f"Created new seed paper from edition: {new_paper.title[:50]}..."
+    )
+
+
+@app.post("/api/papers/{paper_id}/finalize-editions")
+async def finalize_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Finalize edition selection for a paper.
+
+    - Sets editions_finalized = True on the paper
+    - Bulk excludes all unselected editions
+    - Final view will show only selected editions
+    """
+    # Get paper
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Mark paper as finalized
+    paper.editions_finalized = True
+
+    # Exclude all unselected editions
+    from sqlalchemy import update
+    exclude_result = await db.execute(
+        update(Edition)
+        .where(Edition.paper_id == paper_id)
+        .where(Edition.selected == False)
+        .values(excluded=True)
+    )
+
+    await db.commit()
+
+    return {
+        "finalized": True,
+        "paper_id": paper_id,
+        "editions_excluded": exclude_result.rowcount,
+    }
+
+
+@app.post("/api/papers/{paper_id}/reopen-editions")
+async def reopen_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Reopen edition selection for a paper.
+
+    - Sets editions_finalized = False
+    - Does NOT un-exclude editions (user must do that manually)
+    """
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    paper.editions_finalized = False
+    await db.commit()
+
+    return {"reopened": True, "paper_id": paper_id}
 
 
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)

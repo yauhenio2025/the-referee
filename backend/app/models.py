@@ -60,6 +60,9 @@ class Paper(Base):
     any_edition_harvested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
     total_harvested_citations: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Edition management
+    editions_finalized: Mapped[bool] = mapped_column(Boolean, default=False)  # User finalized edition selection
+
     # Relationships
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     editions: Mapped[List["Edition"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
@@ -98,6 +101,7 @@ class Edition(Base):
 
     # Selection status
     selected: Mapped[bool] = mapped_column(Boolean, default=False)  # User selected for citation extraction
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False)  # User excluded from view
 
     # Supplementary flag - True if added via "Fetch more" button
     is_supplementary: Mapped[bool] = mapped_column(Boolean, default=False)
