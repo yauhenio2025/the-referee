@@ -65,16 +65,19 @@ class PaperSubmitBatch(BaseModel):
 
 class ScholarCandidate(BaseModel):
     """A candidate paper from Google Scholar"""
-    scholar_id: Optional[str] = None
-    cluster_id: Optional[str] = None
+    scholar_id: Optional[str] = Field(None, alias="scholarId")
+    cluster_id: Optional[str] = Field(None, alias="clusterId")
     title: str
     authors: Optional[str] = None
-    authors_raw: Optional[str] = None
+    authors_raw: Optional[str] = Field(None, alias="authorsRaw")
     year: Optional[int] = None
     venue: Optional[str] = None
     abstract: Optional[str] = None
     link: Optional[str] = None
-    citation_count: int = 0
+    citation_count: int = Field(0, alias="citationCount")
+
+    class Config:
+        populate_by_name = True  # Allow both snake_case and camelCase
 
 
 class CanonicalEditionSummary(BaseModel):
