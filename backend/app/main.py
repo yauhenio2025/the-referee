@@ -1000,22 +1000,30 @@ async def extract_citations(
     if not editions:
         raise HTTPException(status_code=400, detail="No editions selected for extraction")
 
-    # Check for existing pending/running job
-    existing = await db.execute(
+    # Check for existing pending/running job for the SAME editions
+    # Allow parallel jobs for different editions of the same paper
+    requested_edition_ids = set(request.edition_ids) if request.edition_ids else set(e.id for e in editions)
+
+    existing_jobs = await db.execute(
         select(Job).where(
             Job.paper_id == request.paper_id,
             Job.job_type == "extract_citations",
             Job.status.in_(["pending", "running"])
         )
     )
-    existing_job = existing.scalar_one_or_none()
-    if existing_job:
-        return CitationExtractionResponse(
-            job_id=existing_job.id,
-            paper_id=paper.id,
-            editions_to_process=len(editions),
-            estimated_time_minutes=0,
-        )
+    for existing_job in existing_jobs.scalars().all():
+        # Check if this job is for the same editions
+        job_params = json.loads(existing_job.params) if existing_job.params else {}
+        job_edition_ids = set(job_params.get("edition_ids", []))
+
+        # If job has no specific editions or there's overlap, return existing job
+        if not job_edition_ids or job_edition_ids & requested_edition_ids:
+            return CitationExtractionResponse(
+                job_id=existing_job.id,
+                paper_id=paper.id,
+                editions_to_process=len(editions),
+                estimated_time_minutes=0,
+            )
 
     # Create extraction job with proper params
     job = await create_extract_citations_job(
