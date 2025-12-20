@@ -68,7 +68,9 @@ export default function JobQueue() {
 
   const formatTime = (dateString) => {
     if (!dateString) return '-'
-    const date = new Date(dateString)
+    // Server returns UTC timestamps without 'Z' suffix - add it for correct parsing
+    const utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z'
+    const date = new Date(utcString)
     const now = new Date()
     const diffMs = now - date
     const diffMins = Math.floor(diffMs / 60000)
@@ -82,8 +84,10 @@ export default function JobQueue() {
 
   const formatDuration = (startDate, endDate) => {
     if (!startDate) return '-'
-    const start = new Date(startDate)
-    const end = endDate ? new Date(endDate) : new Date()
+    // Server returns UTC timestamps without 'Z' suffix - add it for correct parsing
+    const startUtc = startDate.endsWith('Z') ? startDate : startDate + 'Z'
+    const start = new Date(startUtc)
+    const end = endDate ? new Date(endDate.endsWith('Z') ? endDate : endDate + 'Z') : new Date()
     const diffMs = end - start
     const diffSecs = Math.floor(diffMs / 1000)
     const diffMins = Math.floor(diffMs / 60000)
