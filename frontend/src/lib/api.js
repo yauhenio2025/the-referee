@@ -276,6 +276,50 @@ class RefereeAPI {
       },
     });
   }
+
+  // ============== Refresh/Auto-Updater ==============
+
+  async refreshPaper(paperId, options = {}) {
+    return this.request(`/api/refresh/paper/${paperId}`, {
+      method: 'POST',
+      body: {
+        force_full_refresh: options.forceFullRefresh ?? false,
+        max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
+        skip_threshold: options.skipThreshold ?? 10000,
+      },
+    });
+  }
+
+  async refreshCollection(collectionId, options = {}) {
+    return this.request(`/api/refresh/collection/${collectionId}`, {
+      method: 'POST',
+      body: {
+        force_full_refresh: options.forceFullRefresh ?? false,
+        max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
+        skip_threshold: options.skipThreshold ?? 10000,
+      },
+    });
+  }
+
+  async refreshGlobal(options = {}) {
+    return this.request('/api/refresh/global', {
+      method: 'POST',
+      body: {
+        force_full_refresh: options.forceFullRefresh ?? false,
+        max_citations_per_edition: options.maxCitationsPerEdition ?? 1000,
+        skip_threshold: options.skipThreshold ?? 10000,
+      },
+    });
+  }
+
+  async getRefreshStatus(batchId) {
+    return this.request(`/api/refresh/status?batch_id=${batchId}`);
+  }
+
+  async getStalenessReport(collectionId = null) {
+    const query = collectionId ? `?collection_id=${collectionId}` : '';
+    return this.request(`/api/staleness${query}`);
+  }
 }
 
 export const api = new RefereeAPI();

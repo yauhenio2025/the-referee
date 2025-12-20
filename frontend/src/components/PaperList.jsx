@@ -8,6 +8,7 @@ export default function PaperList({ onSelectPaper }) {
   const [expandedAbstracts, setExpandedAbstracts] = useState({})
   const [reconciliationPaper, setReconciliationPaper] = useState(null)
   const [editionCounts, setEditionCounts] = useState({})
+  const [refreshingPapers, setRefreshingPapers] = useState({})
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -71,6 +72,35 @@ export default function PaperList({ onSelectPaper }) {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries(['papers'])
+    },
+  })
+
+  const refreshPaper = useMutation({
+    mutationFn: (paperId) => api.refreshPaper(paperId),
+    onMutate: (paperId) => {
+      setRefreshingPapers(prev => ({ ...prev, [paperId]: true }))
+    },
+    onSuccess: (data, paperId) => {
+      if (data.jobs_created > 0) {
+        // Start polling for refresh status
+        setRefreshingPapers(prev => ({ ...prev, [paperId]: data.batch_id }))
+      } else {
+        setRefreshingPapers(prev => {
+          const next = { ...prev }
+          delete next[paperId]
+          return next
+        })
+      }
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['jobs'])
+    },
+    onError: (error, paperId) => {
+      console.error('Refresh failed:', error)
+      setRefreshingPapers(prev => {
+        const next = { ...prev }
+        delete next[paperId]
+        return next
+      })
     },
   })
 
@@ -195,6 +225,27 @@ export default function PaperList({ onSelectPaper }) {
                       📚 {paper.citation_count.toLocaleString()} citations
                     </span>
                   )}
+                  {/* Harvest stats and staleness indicator */}
+                  {paper.total_harvested_citations > 0 && (
+                    <span className="paper-harvested">
+                      📥 {paper.total_harvested_citations.toLocaleString()} harvested
+                    </span>
+                  )}
+                  {paper.is_stale && (
+                    <span className="staleness-badge stale" title={`Last harvested ${paper.days_since_harvest} days ago`}>
+                      ⏰ Stale ({paper.days_since_harvest}d)
+                    </span>
+                  )}
+                  {paper.any_edition_harvested_at && !paper.is_stale && (
+                    <span className="staleness-badge fresh" title={`Last harvested ${paper.days_since_harvest} days ago`}>
+                      ✓ Fresh
+                    </span>
+                  )}
+                  {paper.total_harvested_citations > 0 && !paper.any_edition_harvested_at && (
+                    <span className="staleness-badge never" title="Never harvested - run citation extraction first">
+                      ⚠ Never harvested
+                    </span>
+                  )}
                   {paper.scholar_id && (
                     <span className="paper-scholar-id">
                       ID: {paper.scholar_id}
@@ -275,6 +326,19 @@ export default function PaperList({ onSelectPaper }) {
                     ? `📖 View ${editionCounts[paper.id]} Editions`
                     : '📖 Discover Editions'}
                 </button>
+                {/* Refresh button - show for papers with harvested citations */}
+                {paper.status === 'resolved' && paper.total_harvested_citations > 0 && (
+                  <button
+                    onClick={() => refreshPaper.mutate(paper.id)}
+                    disabled={!!refreshingPapers[paper.id] || refreshPaper.isPending}
+                    className={`btn-refresh ${paper.is_stale ? 'stale' : ''}`}
+                    title={paper.is_stale
+                      ? `Refresh citations (${paper.days_since_harvest} days since last harvest)`
+                      : 'Refresh citations to find new ones'}
+                  >
+                    {refreshingPapers[paper.id] ? '🔄 Refreshing...' : '🔄 Refresh'}
+                  </button>
+                )}
                 <button
                   onClick={() => deletePaper.mutate(paper.id)}
                   className="btn-danger"

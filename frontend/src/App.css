@@ -3072,3 +3072,193 @@ button:disabled {
   background: rgba(239, 68, 68, 0.2);
   color: var(--danger);
 }
+
+/* ============================================
+   STALENESS & REFRESH STYLES
+   ============================================ */
+
+/* Paper harvested count */
+.paper-harvested {
+  background: linear-gradient(135deg, #059669, #047857);
+  color: white;
+  padding: 0.35rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* Staleness badges - paper cards and edition rows */
+.staleness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.staleness-badge.fresh {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.staleness-badge.stale {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  animation: pulse-stale 2s ease-in-out infinite;
+}
+
+.staleness-badge.never {
+  background: rgba(107, 114, 128, 0.15);
+  color: var(--text-secondary);
+  border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+@keyframes pulse-stale {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Refresh button */
+.btn-refresh {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-refresh.stale {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  animation: pulse-stale 2s ease-in-out infinite;
+}
+
+.btn-refresh.stale:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706, #b45309);
+}
+
+/* Refresh progress bar */
+.ed-progress.refresh-progress {
+  background: #1e3a5f;
+}
+
+.ed-progress.refresh-progress .progress-bar {
+  background: linear-gradient(90deg, #3b82f6, #22c55e);
+}
+
+.ed-progress.refresh-progress.done {
+  background: #22543d;
+}
+
+.ed-progress.refresh-progress.done .progress-bar {
+  background: #22c55e;
+}
+
+.ed-progress.refresh-progress.error {
+  background: #7f1d1d;
+}
+
+/* Staleness column in edition table */
+.edition-discovery.tufte .col-staleness {
+  width: 60px;
+  text-align: center;
+}
+
+.edition-discovery.tufte .col-staleness .staleness-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.35rem;
+}
+
+/* Paper card with stale indicator */
+.paper-card.paper-stale {
+  border-left: 3px solid var(--warning);
+}
+
+/* Collection refresh button */
+.collection-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Collection refresh progress */
+.collection-refresh-progress {
+  background: var(--bg-dark);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.collection-refresh-progress .progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(59, 130, 246, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.collection-refresh-progress .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #22c55e);
+  transition: width 0.3s ease;
+}
+
+.collection-refresh-progress .progress-message {
+  position: relative;
+  z-index: 1;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.collection-refresh-progress.done {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.collection-refresh-progress.done .progress-message {
+  color: var(--success);
+}
+
+.collection-refresh-progress.error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.collection-refresh-progress.error .progress-message {
+  color: var(--danger);
+}
+
+/* Collection header layout with refresh button */
+.collection-detail-header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.collection-detail-header .btn-refresh {
+  margin-left: auto;
+  flex-shrink: 0;
+}

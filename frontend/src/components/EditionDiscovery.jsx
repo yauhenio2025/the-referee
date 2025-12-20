@@ -223,6 +223,8 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [fetchMoreProgress, setFetchMoreProgress] = useState(null)
   const [activeJobs, setActiveJobs] = useState({}) // { language: jobId }
   const [harvestingEditions, setHarvestingEditions] = useState({}) // { editionId: jobId }
+  const [refreshBatchId, setRefreshBatchId] = useState(null)
+  const [refreshProgress, setRefreshProgress] = useState(null)
 
   // Poll for job status updates
   useEffect(() => {
@@ -314,6 +316,75 @@ export default function EditionDiscovery({ paper, onBack }) {
       setManualEditionResult({ success: false, message: error.message })
     },
   })
+
+  // Refresh paper citations (auto-updater feature)
+  const refreshPaperMutation = useMutation({
+    mutationFn: () => api.refreshPaper(paper.id),
+    onSuccess: (result) => {
+      if (result.jobs_created > 0) {
+        setRefreshBatchId(result.batch_id)
+        setRefreshProgress({
+          total: result.editions_included,
+          completed: 0,
+          message: `Queued ${result.jobs_created} refresh jobs for ${result.editions_included} editions`,
+        })
+        queryClient.invalidateQueries(['jobs'])
+      } else {
+        setRefreshProgress({
+          total: 0,
+          completed: 0,
+          message: 'No editions need refreshing (all fresh or never harvested)',
+          done: true,
+        })
+        setTimeout(() => setRefreshProgress(null), 3000)
+      }
+    },
+    onError: (error) => {
+      setRefreshProgress({
+        message: `Refresh failed: ${error.message}`,
+        error: true,
+      })
+      setTimeout(() => setRefreshProgress(null), 5000)
+    },
+  })
+
+  // Poll for refresh batch status
+  useEffect(() => {
+    if (!refreshBatchId) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await api.getRefreshStatus(refreshBatchId)
+        setRefreshProgress({
+          total: status.total_jobs,
+          completed: status.completed_jobs,
+          failed: status.failed_jobs,
+          newCitations: status.new_citations_added,
+          message: `Refreshing: ${status.completed_jobs}/${status.total_jobs} done`,
+          done: status.is_complete,
+        })
+
+        if (status.is_complete) {
+          setRefreshBatchId(null)
+          queryClient.invalidateQueries(['editions', paper.id])
+          queryClient.invalidateQueries(['citations', paper.id])
+          queryClient.invalidateQueries(['papers'])
+          setRefreshProgress({
+            total: status.total_jobs,
+            completed: status.completed_jobs,
+            newCitations: status.new_citations_added,
+            message: `Done! ${status.new_citations_added} new citations found`,
+            done: true,
+          })
+          setTimeout(() => setRefreshProgress(null), 5000)
+        }
+      } catch (err) {
+        console.error('Refresh status poll error:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [refreshBatchId, paper.id, queryClient])
 
   // Poll for edition harvest jobs
   useEffect(() => {
@@ -489,7 +560,33 @@ export default function EditionDiscovery({ paper, onBack }) {
         >
           ➕ Add Edition
         </button>
+        {/* Refresh button - check for new citations since last harvest */}
+        {editions?.some(e => e.last_harvested_at) && (
+          <button
+            onClick={() => refreshPaperMutation.mutate()}
+            disabled={refreshPaperMutation.isPending || !!refreshBatchId}
+            className={`btn-refresh ${editions?.some(e => e.is_stale) ? 'stale' : ''}`}
+            title={editions?.some(e => e.is_stale)
+              ? 'Some editions are stale - click to refresh'
+              : 'Check for new citations since last harvest'}
+          >
+            {refreshBatchId ? '🔄 Refreshing...' : '🔄 Refresh Citations'}
+          </button>
+        )}
       </div>
+
+      {/* Refresh Progress */}
+      {refreshProgress && (
+        <div className={`ed-progress refresh-progress ${refreshProgress.done ? 'done' : ''} ${refreshProgress.error ? 'error' : ''}`}>
+          {refreshProgress.total > 0 && !refreshProgress.done && (
+            <div className="progress-bar" style={{ width: `${(refreshProgress.completed / refreshProgress.total) * 100}%` }} />
+          )}
+          <span>
+            {refreshProgress.message}
+            {refreshProgress.newCitations > 0 && ` (${refreshProgress.newCitations} new citations)`}
+          </span>
+        </div>
+      )}
 
       {/* Progress */}
       {discoveryProgress && (
@@ -886,6 +983,7 @@ function EditionGroup({
                 <th className="col-lang">Lang</th>
                 <th className="col-cites">Citations</th>
                 <th className="col-harvested">Harvested</th>
+                <th className="col-staleness">Status</th>
                 <th className="col-actions"></th>
               </tr>
             </thead>
@@ -977,6 +1075,21 @@ function EditionRow({
         ) : (
           <span className="not-harvested">–</span>
         )}
+      </td>
+      <td className="col-staleness">
+        {edition.is_stale ? (
+          <span className="staleness-badge stale" title={`Last harvested ${edition.days_since_harvest} days ago`}>
+            ⏰ {edition.days_since_harvest}d
+          </span>
+        ) : edition.last_harvested_at ? (
+          <span className="staleness-badge fresh" title={`Last harvested ${edition.days_since_harvest || 0} days ago`}>
+            ✓
+          </span>
+        ) : hasHarvested ? (
+          <span className="staleness-badge never" title="Never tracked - legacy harvest">
+            ?
+          </span>
+        ) : null}
       </td>
       <td className="col-actions">
         {/* Harvest button - only show if there are citations to harvest */}

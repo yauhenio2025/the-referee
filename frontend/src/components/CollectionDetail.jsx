@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -9,6 +9,8 @@ import { api } from '../lib/api'
 export default function CollectionDetail({ collectionId, onBack }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [refreshBatchId, setRefreshBatchId] = useState(null)
+  const [refreshProgress, setRefreshProgress] = useState(null)
 
   const { data: collection, isLoading } = useQuery({
     queryKey: ['collection', collectionId],
@@ -19,6 +21,75 @@ export default function CollectionDetail({ collectionId, onBack }) {
     mutationFn: (paperId) => api.assignPapersToCollection([paperId], null),
     onSuccess: () => queryClient.invalidateQueries(['collection', collectionId]),
   })
+
+  // Refresh all papers in collection
+  const refreshCollection = useMutation({
+    mutationFn: () => api.refreshCollection(collectionId),
+    onSuccess: (result) => {
+      if (result.jobs_created > 0) {
+        setRefreshBatchId(result.batch_id)
+        setRefreshProgress({
+          total: result.jobs_created,
+          completed: 0,
+          message: `Queued ${result.jobs_created} refresh jobs for ${result.papers_included} papers`,
+        })
+        queryClient.invalidateQueries(['jobs'])
+      } else {
+        setRefreshProgress({
+          message: 'No papers need refreshing',
+          done: true,
+        })
+        setTimeout(() => setRefreshProgress(null), 3000)
+      }
+    },
+    onError: (error) => {
+      setRefreshProgress({
+        message: `Refresh failed: ${error.message}`,
+        error: true,
+      })
+      setTimeout(() => setRefreshProgress(null), 5000)
+    },
+  })
+
+  // Poll for refresh batch status
+  useEffect(() => {
+    if (!refreshBatchId) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await api.getRefreshStatus(refreshBatchId)
+        setRefreshProgress({
+          total: status.total_jobs,
+          completed: status.completed_jobs,
+          newCitations: status.new_citations_added,
+          message: `Refreshing: ${status.completed_jobs}/${status.total_jobs} done`,
+          done: status.is_complete,
+        })
+
+        if (status.is_complete) {
+          setRefreshBatchId(null)
+          queryClient.invalidateQueries(['collection', collectionId])
+          queryClient.invalidateQueries(['papers'])
+          setRefreshProgress({
+            total: status.total_jobs,
+            completed: status.completed_jobs,
+            newCitations: status.new_citations_added,
+            message: `Done! Found ${status.new_citations_added} new citations`,
+            done: true,
+          })
+          setTimeout(() => setRefreshProgress(null), 5000)
+        }
+      } catch (err) {
+        console.error('Refresh status poll error:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [refreshBatchId, collectionId, queryClient])
+
+  // Check if any papers have stale citations
+  const hasStaleItems = collection?.papers?.some(p => p.is_stale)
+  const hasHarvestedItems = collection?.papers?.some(p => p.total_harvested_citations > 0)
 
   if (isLoading) {
     return <div className="loading">Loading collection...</div>
@@ -40,7 +111,35 @@ export default function CollectionDetail({ collectionId, onBack }) {
           <p className="description">{collection.description}</p>
           <span className="paper-count">{collection.paper_count} papers</span>
         </div>
+        {/* Refresh All button */}
+        {hasHarvestedItems && (
+          <button
+            onClick={() => refreshCollection.mutate()}
+            disabled={refreshCollection.isPending || !!refreshBatchId}
+            className={`btn-refresh ${hasStaleItems ? 'stale' : ''}`}
+            title={hasStaleItems
+              ? 'Some papers have stale citations - click to refresh all'
+              : 'Check for new citations across all papers'}
+          >
+            {refreshBatchId ? '🔄 Refreshing...' : '🔄 Refresh All'}
+          </button>
+        )}
       </header>
+
+      {/* Refresh Progress */}
+      {refreshProgress && (
+        <div className={`collection-refresh-progress ${refreshProgress.done ? 'done' : ''} ${refreshProgress.error ? 'error' : ''}`}>
+          {refreshProgress.total > 0 && !refreshProgress.done && (
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${(refreshProgress.completed / refreshProgress.total) * 100}%` }} />
+            </div>
+          )}
+          <span className="progress-message">
+            {refreshProgress.message}
+            {refreshProgress.newCitations > 0 && ` (${refreshProgress.newCitations} new)`}
+          </span>
+        </div>
+      )}
 
       {collection.papers?.length === 0 ? (
         <div className="empty">
