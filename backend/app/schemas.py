@@ -96,6 +96,7 @@ class PaperResponse(PaperBase):
     language: Optional[str] = None
     status: str
     abstract: Optional[str] = None
+    abstract_source: Optional[str] = None  # 'scholar_search', 'allintitle_scrape', 'manual'
     link: Optional[str] = None
     created_at: datetime
     candidates: Optional[List[Any]] = None  # For reconciliation (raw JSON from Scholar)

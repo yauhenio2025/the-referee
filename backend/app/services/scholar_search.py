@@ -679,6 +679,120 @@ class ScholarSearchService:
 
         return None
 
+    async def scrape_abstract_via_allintitle(
+        self,
+        title: str,
+    ) -> Dict[str, Any]:
+        """
+        Scrape full abstract from Google Scholar using allintitle search.
+
+        This uses the allintitle:"paper title" query which shows expanded abstracts
+        for papers from major publishers (Taylor & Francis, Elsevier, etc.).
+
+        The abstract is in the .gs_fma_abs selector when the search returns
+        exactly one result and the publisher provides abstract data.
+
+        Args:
+            title: The exact paper title to search for
+
+        Returns:
+            Dict with:
+                - abstract: The full abstract text (or None if not found)
+                - success: Boolean indicating if abstract was found
+                - source: 'allintitle_scrape' if successful
+        """
+        log_now(f"[ALLINTITLE ABSTRACT] Searching for: \"{title[:60]}...\"")
+
+        try:
+            # Build the allintitle query with quoted title
+            query = f'allintitle:"{title}"'
+
+            # Build URL - don't filter by language for abstract scraping
+            params = {
+                "q": query,
+                "hl": "en",
+                "as_sdt": "0,5",
+            }
+            url = f"https://scholar.google.com/scholar?{urlencode(params)}"
+
+            log_now(f"[ALLINTITLE ABSTRACT] URL: {url}")
+
+            # Fetch the page
+            html = await self._fetch_with_retry(url)
+
+            # Parse the HTML
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Check result count - this works best with single results
+            result_count_el = soup.select_one("#gs_ab_md")
+            result_text = result_count_el.get_text() if result_count_el else ""
+
+            # Look for the expanded abstract in .gs_fma_abs
+            # This is shown when Scholar has full abstract data from publishers
+            abstract_el = soup.select_one(".gs_fma_abs")
+
+            if abstract_el:
+                # Get all text from the abstract div, including nested elements
+                abstract = abstract_el.get_text(separator=' ', strip=True)
+                # Clean up whitespace
+                abstract = re.sub(r'\s+', ' ', abstract).strip()
+
+                if abstract and len(abstract) > 50:  # Reasonable abstract length
+                    log_now(f"[ALLINTITLE ABSTRACT] ✓ Found abstract ({len(abstract)} chars): {abstract[:100]}...")
+                    return {
+                        "abstract": abstract,
+                        "success": True,
+                        "source": "allintitle_scrape",
+                    }
+
+            # Fallback: try .gs_rs (standard abstract snippet) - less complete but sometimes available
+            snippet_el = soup.select_one(".gs_rs.gs_fma_s")
+            if snippet_el:
+                snippet = snippet_el.get_text(separator=' ', strip=True)
+                snippet = re.sub(r'\s+', ' ', snippet).strip()
+                # Remove trailing "..." and common truncation markers
+                snippet = re.sub(r'\s*…\s*$', '', snippet)
+                snippet = re.sub(r'\s*\.\.\.\s*$', '', snippet)
+
+                if snippet and len(snippet) > 50:
+                    log_now(f"[ALLINTITLE ABSTRACT] ✓ Found snippet ({len(snippet)} chars): {snippet[:100]}...")
+                    return {
+                        "abstract": snippet,
+                        "success": True,
+                        "source": "allintitle_scrape",
+                        "is_snippet": True,  # Indicate it might be truncated
+                    }
+
+            # Also try the standard .gs_rs selector
+            standard_snippet = soup.select_one(".gs_rs")
+            if standard_snippet:
+                snippet = standard_snippet.get_text(separator=' ', strip=True)
+                snippet = re.sub(r'\s+', ' ', snippet).strip()
+
+                if snippet and len(snippet) > 50:
+                    log_now(f"[ALLINTITLE ABSTRACT] ✓ Found standard snippet ({len(snippet)} chars)")
+                    return {
+                        "abstract": snippet,
+                        "success": True,
+                        "source": "allintitle_scrape",
+                        "is_snippet": True,
+                    }
+
+            log_now("[ALLINTITLE ABSTRACT] ✗ No abstract found on page")
+            return {
+                "abstract": None,
+                "success": False,
+                "source": None,
+            }
+
+        except Exception as e:
+            log_now(f"[ALLINTITLE ABSTRACT] Error: {e}")
+            return {
+                "abstract": None,
+                "success": False,
+                "error": str(e),
+            }
+
     async def search_and_verify_match(
         self,
         title: str,

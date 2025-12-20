@@ -128,7 +128,13 @@ class PaperResolutionService:
             paper.cluster_id = matched_paper.get("clusterId")
             paper.citation_count = matched_paper.get("citationCount", 0)
             paper.link = matched_paper.get("link")
-            paper.abstract = matched_paper.get("abstract")
+
+            # Get abstract from search results first
+            search_abstract = matched_paper.get("abstract")
+            if search_abstract:
+                paper.abstract = search_abstract
+                paper.abstract_source = "scholar_search"
+
             paper.status = "resolved"
             paper.resolved_at = datetime.utcnow()
 
@@ -151,6 +157,41 @@ class PaperResolutionService:
                 paper.year = matched_paper["year"]
             if matched_paper.get("venue"):
                 paper.venue = matched_paper["venue"]
+
+            # Try to get full abstract via allintitle search
+            # This works best for papers from major publishers (Taylor & Francis, Elsevier, etc.)
+            # Only try if we don't have an abstract yet, or if it seems truncated
+            should_try_allintitle = (
+                not paper.abstract or
+                len(paper.abstract or "") < 200 or  # Likely truncated
+                paper.abstract.endswith("…") or
+                paper.abstract.endswith("...")
+            )
+
+            if should_try_allintitle:
+                logger.info(f"[RESOLUTION] Attempting allintitle abstract scrape for: \"{paper.title[:50]}...\"")
+
+                if job_id:
+                    await self._update_job(job_id, progress=0.8, message="Searching for full abstract...")
+
+                try:
+                    abstract_result = await self.scholar.scrape_abstract_via_allintitle(paper.title)
+
+                    if abstract_result.get("success") and abstract_result.get("abstract"):
+                        new_abstract = abstract_result["abstract"]
+                        # Only use if it's longer/better than what we have
+                        if not paper.abstract or len(new_abstract) > len(paper.abstract or ""):
+                            paper.abstract = new_abstract
+                            paper.abstract_source = abstract_result.get("source", "allintitle_scrape")
+                            logger.info(f"[RESOLUTION] ✓ Got fuller abstract via allintitle ({len(new_abstract)} chars)")
+                        else:
+                            logger.info(f"[RESOLUTION] Allintitle abstract not longer than existing ({len(new_abstract)} vs {len(paper.abstract or '')})")
+                    else:
+                        logger.info("[RESOLUTION] No abstract found via allintitle search")
+
+                except Exception as e:
+                    logger.warning(f"[RESOLUTION] Allintitle abstract scrape failed (non-fatal): {e}")
+                    # Don't fail resolution just because abstract scraping failed
 
             await self.db.flush()
 
@@ -365,7 +406,12 @@ class PaperResolutionService:
         paper.cluster_id = selected.get("clusterId")
         paper.citation_count = selected.get("citationCount", 0)
         paper.link = selected.get("link")
-        paper.abstract = selected.get("abstract")
+
+        # Set abstract and track source
+        if selected.get("abstract"):
+            paper.abstract = selected["abstract"]
+            paper.abstract_source = "scholar_search"
+
         paper.status = "resolved"
         paper.resolved_at = datetime.utcnow()
         paper.candidates = None  # Clear candidates
@@ -389,6 +435,29 @@ class PaperResolutionService:
             paper.year = selected["year"]
         if selected.get("venue"):
             paper.venue = selected["venue"]
+
+        # Try to get full abstract via allintitle search after confirmation
+        should_try_allintitle = (
+            not paper.abstract or
+            len(paper.abstract or "") < 200 or
+            paper.abstract.endswith("…") or
+            paper.abstract.endswith("...")
+        )
+
+        if should_try_allintitle:
+            logger.info(f"[RESOLUTION] Attempting allintitle abstract scrape for confirmed paper: \"{paper.title[:50]}...\"")
+            try:
+                abstract_result = await self.scholar.scrape_abstract_via_allintitle(paper.title)
+
+                if abstract_result.get("success") and abstract_result.get("abstract"):
+                    new_abstract = abstract_result["abstract"]
+                    if not paper.abstract or len(new_abstract) > len(paper.abstract or ""):
+                        paper.abstract = new_abstract
+                        paper.abstract_source = abstract_result.get("source", "allintitle_scrape")
+                        logger.info(f"[RESOLUTION] ✓ Got fuller abstract via allintitle ({len(new_abstract)} chars)")
+
+            except Exception as e:
+                logger.warning(f"[RESOLUTION] Allintitle abstract scrape failed (non-fatal): {e}")
 
         await self.db.flush()
 

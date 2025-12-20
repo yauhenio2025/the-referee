@@ -41,6 +41,7 @@ class Paper(Base):
     year: Mapped[Optional[int]] = mapped_column(Integer)
     venue: Mapped[Optional[str]] = mapped_column(String(500))
     abstract: Mapped[Optional[str]] = mapped_column(Text)
+    abstract_source: Mapped[Optional[str]] = mapped_column(String(50))  # 'scholar_search', 'allintitle_scrape', 'manual'
     link: Mapped[Optional[str]] = mapped_column(Text)
 
     citation_count: Mapped[int] = mapped_column(Integer, default=0)
