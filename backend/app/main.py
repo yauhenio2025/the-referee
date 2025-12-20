@@ -1419,6 +1419,122 @@ async def confirm_candidate(paper_id: int, request: CandidateConfirmRequest, db:
         raise HTTPException(status_code=500, detail=f"Confirmation failed: {str(e)}")
 
 
+class QuickHarvestResponse(BaseModel):
+    """Response from quick harvest endpoint"""
+    job_id: int
+    paper_id: int
+    edition_id: int
+    edition_created: bool  # True if new edition was created
+    estimated_citations: int
+    message: str
+
+
+@app.post("/api/papers/{paper_id}/quick-harvest", response_model=QuickHarvestResponse)
+async def quick_harvest_paper(
+    paper_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Quick harvest citations directly from a resolved paper, skipping edition discovery.
+
+    This creates an edition from the paper's Scholar data (if one doesn't exist) and
+    immediately queues a citation extraction job. Useful when you just want to harvest
+    citations from the main English edition without discovering translations.
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    # Get the paper
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if paper.status != "resolved":
+        raise HTTPException(status_code=400, detail="Paper must be resolved first")
+
+    if not paper.scholar_id:
+        raise HTTPException(status_code=400, detail="Paper has no Scholar ID - cannot harvest")
+
+    # Check if an edition already exists for this paper's scholar_id
+    edition_result = await db.execute(
+        select(Edition).where(
+            Edition.paper_id == paper_id,
+            Edition.scholar_id == paper.scholar_id
+        )
+    )
+    existing_edition = edition_result.scalar_one_or_none()
+    edition_created = False
+
+    if existing_edition:
+        edition = existing_edition
+        # Make sure it's selected
+        if not edition.selected:
+            edition.selected = True
+    else:
+        # Create a new edition from the paper data
+        edition = Edition(
+            paper_id=paper_id,
+            scholar_id=paper.scholar_id,
+            cluster_id=paper.cluster_id,
+            title=paper.title,
+            authors=paper.authors,
+            year=paper.year,
+            venue=paper.venue,
+            abstract=paper.abstract,
+            link=paper.link,
+            citation_count=paper.citation_count,
+            language=paper.language or "English",
+            confidence="high",
+            auto_selected=True,
+            selected=True,
+            is_supplementary=False,
+            found_by_query="Quick harvest from resolved paper",
+        )
+        db.add(edition)
+        edition_created = True
+
+    await db.commit()
+    await db.refresh(edition)
+
+    # Check for existing pending/running job for this edition
+    existing_job_result = await db.execute(
+        select(Job).where(
+            Job.paper_id == paper_id,
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    existing_job = existing_job_result.scalar_one_or_none()
+
+    if existing_job:
+        return QuickHarvestResponse(
+            job_id=existing_job.id,
+            paper_id=paper_id,
+            edition_id=edition.id,
+            edition_created=edition_created,
+            estimated_citations=edition.citation_count,
+            message=f"Citation extraction already in progress (job {existing_job.id})"
+        )
+
+    # Queue citation extraction job
+    job_id = await create_extract_citations_job(
+        db=db,
+        paper_id=paper_id,
+        edition_ids=[edition.id],
+        max_citations_per_edition=1000,
+        skip_threshold=10000,
+    )
+
+    return QuickHarvestResponse(
+        job_id=job_id,
+        paper_id=paper_id,
+        edition_id=edition.id,
+        edition_created=edition_created,
+        estimated_citations=edition.citation_count,
+        message=f"Queued citation extraction for {edition.citation_count:,} citations"
+    )
+
+
 @app.post("/api/jobs/process")
 async def process_pending_jobs_endpoint(
     max_jobs: int = 5,

@@ -320,6 +320,14 @@ class RefereeAPI {
     const query = collectionId ? `?collection_id=${collectionId}` : '';
     return this.request(`/api/staleness${query}`);
   }
+
+  // ============== Quick Harvest ==============
+
+  async quickHarvest(paperId) {
+    return this.request(`/api/papers/${paperId}/quick-harvest`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new RefereeAPI();

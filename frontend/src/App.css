@@ -3155,6 +3155,30 @@ button:disabled {
   background: linear-gradient(135deg, #d97706, #b45309);
 }
 
+/* Quick Harvest button */
+.btn-quick-harvest {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-quick-harvest:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.btn-quick-harvest:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Refresh progress bar */
 .ed-progress.refresh-progress {
   background: #1e3a5f;

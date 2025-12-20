@@ -9,6 +9,7 @@ export default function PaperList({ onSelectPaper }) {
   const [reconciliationPaper, setReconciliationPaper] = useState(null)
   const [editionCounts, setEditionCounts] = useState({})
   const [refreshingPapers, setRefreshingPapers] = useState({})
+  const [quickHarvestingPapers, setQuickHarvestingPapers] = useState({})
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -97,6 +98,32 @@ export default function PaperList({ onSelectPaper }) {
     onError: (error, paperId) => {
       console.error('Refresh failed:', error)
       setRefreshingPapers(prev => {
+        const next = { ...prev }
+        delete next[paperId]
+        return next
+      })
+    },
+  })
+
+  const quickHarvest = useMutation({
+    mutationFn: (paperId) => api.quickHarvest(paperId),
+    onMutate: (paperId) => {
+      setQuickHarvestingPapers(prev => ({ ...prev, [paperId]: true }))
+    },
+    onSuccess: (data, paperId) => {
+      setQuickHarvestingPapers(prev => {
+        const next = { ...prev }
+        delete next[paperId]
+        return next
+      })
+      // Update edition count since we just created one
+      setEditionCounts(prev => ({ ...prev, [paperId]: (prev[paperId] || 0) + (data.edition_created ? 1 : 0) }))
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['jobs'])
+    },
+    onError: (error, paperId) => {
+      console.error('Quick harvest failed:', error)
+      setQuickHarvestingPapers(prev => {
         const next = { ...prev }
         delete next[paperId]
         return next
@@ -326,6 +353,17 @@ export default function PaperList({ onSelectPaper }) {
                     ? `📖 View ${editionCounts[paper.id]} Editions`
                     : '📖 Discover Editions'}
                 </button>
+                {/* Quick Harvest - skip edition discovery and harvest directly */}
+                {paper.status === 'resolved' && !editionCounts[paper.id] && paper.total_harvested_citations === 0 && (
+                  <button
+                    onClick={() => quickHarvest.mutate(paper.id)}
+                    disabled={!!quickHarvestingPapers[paper.id]}
+                    className="btn-quick-harvest"
+                    title="Skip edition discovery and harvest citations directly from this paper's Scholar entry"
+                  >
+                    {quickHarvestingPapers[paper.id] ? '⚡ Harvesting...' : '⚡ Quick Harvest'}
+                  </button>
+                )}
                 {/* Refresh button - show for papers with harvested citations */}
                 {paper.status === 'resolved' && paper.total_harvested_citations > 0 && (
                   <button
