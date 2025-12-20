@@ -19,6 +19,28 @@ export default function JobQueue() {
     },
   })
 
+  // Fetch papers to get titles for jobs
+  const { data: papers } = useQuery({
+    queryKey: ['papers'],
+    queryFn: () => api.listPapers(),
+    staleTime: 30000, // Cache for 30s
+  })
+
+  // Create paper lookup map
+  const paperLookup = papers?.reduce((acc, p) => {
+    acc[p.id] = p
+    return acc
+  }, {}) || {}
+
+  const getPaperTitle = (paperId) => {
+    if (!paperId) return null
+    const paper = paperLookup[paperId]
+    if (!paper) return `Paper #${paperId}`
+    // Truncate long titles
+    const title = paper.title
+    return title.length > 60 ? title.substring(0, 57) + '...' : title
+  }
+
   const cancelJob = useMutation({
     mutationFn: (jobId) => api.cancelJob(jobId),
     onSuccess: () => {
@@ -134,6 +156,13 @@ export default function JobQueue() {
                       </div>
                     </div>
 
+                    {/* Paper Title */}
+                    {job.paper_id && (
+                      <div className="job-paper-title">
+                        📄 {getPaperTitle(job.paper_id)}
+                      </div>
+                    )}
+
                     {/* Progress Bar */}
                     <div className="job-progress-section">
                       <div className="progress-bar-large">
@@ -223,6 +252,7 @@ export default function JobQueue() {
                   <tr>
                     <th>Status</th>
                     <th>Type</th>
+                    <th>Paper</th>
                     <th>Result</th>
                     <th>Duration</th>
                   </tr>
@@ -242,6 +272,9 @@ export default function JobQueue() {
                             {getJobTypeIcon(job.job_type)} {getJobTypeLabel(job.job_type)}
                             {params.language && ` (${params.language})`}
                           </span>
+                        </td>
+                        <td className="job-paper-cell">
+                          {job.paper_id ? getPaperTitle(job.paper_id) : '-'}
                         </td>
                         <td>
                           {job.status === 'completed' && details.citations_saved ? (
