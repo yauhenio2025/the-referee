@@ -592,7 +592,7 @@ async def get_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
     )
     harvested_map = {row.edition_id: row.count for row in citation_counts}
 
-    # Build response with harvested counts and staleness
+    # Build response with harvested counts, staleness, and incompleteness
     responses = []
     for ed in editions:
         ed_dict = {k: v for k, v in ed.__dict__.items() if not k.startswith('_')}
@@ -604,6 +604,13 @@ async def get_paper_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
         else:
             ed_dict['days_since_harvest'] = (datetime.utcnow() - ed.last_harvested_at).days
             ed_dict['is_stale'] = ed_dict['days_since_harvest'] > 90
+        # Compute incompleteness (significant gap between total and harvested)
+        total = ed.citation_count or 0
+        harvested = ed.harvested_citation_count or 0
+        missing = max(0, total - harvested)
+        ed_dict['missing_citations'] = missing
+        # Incomplete if missing at least 100 citations OR at least 10% of total
+        ed_dict['is_incomplete'] = missing >= 100 or (total > 0 and missing / total >= 0.10)
         responses.append(EditionResponse(**ed_dict))
 
     return responses

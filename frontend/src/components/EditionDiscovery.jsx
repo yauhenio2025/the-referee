@@ -1077,7 +1077,15 @@ function EditionRow({
         )}
       </td>
       <td className="col-staleness">
-        {edition.is_stale ? (
+        {/* Incomplete harvest indicator (takes priority) */}
+        {edition.is_incomplete ? (
+          <span
+            className="staleness-badge incomplete"
+            title={`Incomplete harvest: ${edition.missing_citations?.toLocaleString() || '?'} citations remaining. Will auto-resume.`}
+          >
+            ⚠️ {edition.missing_citations?.toLocaleString()}
+          </span>
+        ) : edition.is_stale ? (
           <span className="staleness-badge stale" title={`Last harvested ${edition.days_since_harvest} days ago`}>
             ⏰ {edition.days_since_harvest}d
           </span>

@@ -121,6 +121,103 @@ async def update_paper_harvest_stats(db: AsyncSession, paper_id: int):
     log_now(f"[Harvest] Updated paper {paper_id}: any_harvested_at={any_harvested_at}, total={total_harvested}")
 
 
+# Auto-resume settings
+AUTO_RESUME_MIN_MISSING = 100  # Only resume if at least this many citations missing
+AUTO_RESUME_MIN_PERCENT = 0.10  # Or at least 10% missing
+AUTO_RESUME_CHECK_INTERVAL = 60  # Seconds between auto-resume checks
+_last_auto_resume_check = None
+
+
+async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
+    """Find editions with incomplete harvests that should be resumed.
+
+    Returns editions where:
+    - selected = True (we want their citations)
+    - harvested_citation_count < citation_count (incomplete)
+    - Gap is significant (at least AUTO_RESUME_MIN_MISSING or AUTO_RESUME_MIN_PERCENT)
+    - No pending/running extract_citations job for that paper
+    """
+    from sqlalchemy import and_, or_, not_, exists
+
+    # Subquery: papers with pending/running extract_citations jobs
+    papers_with_jobs = (
+        select(Job.paper_id)
+        .where(
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+
+    # Find incomplete editions
+    result = await db.execute(
+        select(Edition)
+        .where(
+            Edition.selected == True,
+            Edition.citation_count.isnot(None),
+            Edition.citation_count > 0,
+            Edition.harvested_citation_count < Edition.citation_count,
+            # Gap must be significant
+            or_(
+                Edition.citation_count - Edition.harvested_citation_count >= AUTO_RESUME_MIN_MISSING,
+                (Edition.citation_count - Edition.harvested_citation_count) * 1.0 / Edition.citation_count >= AUTO_RESUME_MIN_PERCENT
+            ),
+            # No active job for this paper
+            Edition.paper_id.notin_(papers_with_jobs)
+        )
+        .order_by(
+            # Prioritize: larger gaps first
+            (Edition.citation_count - Edition.harvested_citation_count).desc()
+        )
+        .limit(MAX_CONCURRENT_JOBS)  # Don't queue more than we can process
+    )
+
+    return list(result.scalars().all())
+
+
+async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
+    """Find and queue jobs for incomplete harvests. Returns number of jobs queued."""
+    global _last_auto_resume_check
+
+    # Rate limit checks
+    now = datetime.utcnow()
+    if _last_auto_resume_check and (now - _last_auto_resume_check).total_seconds() < AUTO_RESUME_CHECK_INTERVAL:
+        return 0
+    _last_auto_resume_check = now
+
+    incomplete = await find_incomplete_harvests(db)
+    if not incomplete:
+        return 0
+
+    jobs_queued = 0
+    for edition in incomplete:
+        missing = edition.citation_count - edition.harvested_citation_count
+        log_now(f"[AutoResume] Edition {edition.id} (paper {edition.paper_id}): {edition.harvested_citation_count}/{edition.citation_count} harvested, missing {missing}")
+
+        # Create resume job - will continue from where we left off
+        job = Job(
+            paper_id=edition.paper_id,
+            job_type="extract_citations",
+            status="pending",
+            params=json.dumps({
+                "edition_ids": [edition.id],
+                "max_citations_per_edition": 1000,
+                "skip_threshold": 10000,
+                "is_resume": True,  # Flag for logging
+            }),
+            progress=0,
+            progress_message=f"Auto-resume: {missing:,} citations remaining",
+        )
+        db.add(job)
+        jobs_queued += 1
+        log_now(f"[AutoResume] Queued resume job for edition {edition.id}")
+
+    if jobs_queued > 0:
+        await db.commit()
+        log_now(f"[AutoResume] Queued {jobs_queued} auto-resume jobs")
+
+    return jobs_queued
+
+
 async def process_fetch_more_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
     """Process a fetch_more_editions job"""
     params = json.loads(job.params) if job.params else {}
@@ -677,7 +774,15 @@ async def worker_loop():
 
                         await asyncio.sleep(2)  # Brief pause before checking for more
                     else:
-                        # No pending jobs, wait before checking again
+                        # No pending jobs - check for incomplete harvests to auto-resume
+                        try:
+                            resumed = await auto_resume_incomplete_harvests(db)
+                            if resumed > 0:
+                                continue  # Immediately process the new jobs
+                        except Exception as e:
+                            log_now(f"[Worker] Auto-resume check failed: {e}")
+
+                        # Still no jobs, wait before checking again
                         await asyncio.sleep(5)
             else:
                 # All slots full, wait for one to free up

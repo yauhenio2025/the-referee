@@ -143,6 +143,8 @@ class EditionResponse(BaseModel):
     harvested_citation_count: int = 0
     is_stale: bool = False  # Computed: null or >90 days since harvest
     days_since_harvest: Optional[int] = None  # Computed
+    is_incomplete: bool = False  # Computed: harvested < total AND gap is significant
+    missing_citations: int = 0  # Computed: citation_count - harvested_citation_count
 
     class Config:
         from_attributes = True
