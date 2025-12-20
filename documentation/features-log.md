@@ -4,6 +4,27 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-20: Quick Harvest
+
+**Commit:** `174a67d` on `main`
+
+**Description:** Quick Harvest allows users to skip the edition discovery workflow and immediately start harvesting citations for a resolved paper. The button appears on paper cards that have been resolved but don't yet have any editions or harvested citations.
+
+**Key Changes:**
+- Backend: `POST /api/papers/{paper_id}/quick-harvest` endpoint
+- Creates an edition from the paper's Scholar data if one doesn't exist
+- Marks edition as selected and queues citation extraction job
+- Frontend: Purple ⚡ Quick Harvest button on paper cards
+- CSS: Quick harvest button styling with hover effects
+
+**Files Modified:**
+- `backend/app/main.py`
+- `frontend/src/lib/api.js`
+- `frontend/src/components/PaperList.jsx`
+- `frontend/src/App.css`
+
+---
+
 ## 2025-12-20: Citation Auto-Updater (Frontend)
 
 **Commit:** `e89061b` on `main`
