@@ -1105,6 +1105,30 @@ function EditionGroup({
                   </button>
                 </>
               )}
+              {showMarkAs === 'restore-from-excluded' && onInclude && (
+                <button className="btn-xs btn-success" onClick={() => onInclude(selectedIds)}>
+                  ↩ Restore Selected
+                </button>
+              )}
+              {/* Batch exclude - available for non-excluded groups */}
+              {!isExcludedGroup && onExclude && (
+                <button className="btn-xs btn-exclude-batch" onClick={() => onExclude(selectedIds)}>
+                  ⊘ Exclude Selected
+                </button>
+              )}
+              {/* Batch add as seed - available for non-excluded groups */}
+              {!isExcludedGroup && onAddAsSeed && (
+                <button
+                  className="btn-xs btn-seed-batch"
+                  onClick={() => {
+                    if (confirm(`Create ${selectedCount} new seed papers from selected editions?\n\nThese editions will be excluded from the current paper.`)) {
+                      selectedIds.forEach(id => onAddAsSeed(id))
+                    }
+                  }}
+                >
+                  🌱 Add {selectedCount} as Seeds
+                </button>
+              )}
             </div>
           )}
 

@@ -2915,6 +2915,30 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* Batch action buttons in batch bar */
+.edition-discovery.tufte .btn-exclude-batch {
+  background: rgba(136, 136, 136, 0.2) !important;
+  border: 1px solid rgba(136, 136, 136, 0.4) !important;
+  color: var(--text-secondary) !important;
+}
+
+.edition-discovery.tufte .btn-exclude-batch:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
+}
+
+.edition-discovery.tufte .btn-seed-batch {
+  background: rgba(34, 197, 94, 0.15) !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  color: var(--success) !important;
+}
+
+.edition-discovery.tufte .btn-seed-batch:hover {
+  background: var(--success) !important;
+  color: white !important;
+}
+
 /* ============================================
    CITATIONS VIEW
    ============================================ */
