@@ -146,6 +146,8 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
 
     Returns editions where:
     - selected = True (we want their citations)
+    - scholar_id is set (can actually be harvested)
+    - citation_count <= skip_threshold (not too large to process)
     - harvested_citation_count < citation_count (incomplete)
     - Gap is significant (at least AUTO_RESUME_MIN_MISSING or AUTO_RESUME_MIN_PERCENT)
     - No pending/running extract_citations job for that paper
@@ -166,8 +168,10 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
         select(Edition)
         .where(
             Edition.selected == True,
+            Edition.scholar_id.isnot(None),  # Must have scholar_id to harvest
             Edition.citation_count.isnot(None),
             Edition.citation_count > 0,
+            Edition.citation_count <= 10000,  # Skip very large editions (matches skip_threshold)
             Edition.harvested_citation_count < Edition.citation_count,
             # Gap must be significant
             or_(
