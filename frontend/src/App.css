@@ -1650,6 +1650,36 @@ button:disabled {
   background: var(--accent-hover);
 }
 
+.candidate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.btn-add-seed {
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.btn-add-seed:hover {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.btn-add-seed:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Discovery Progress Indicator */
 .discovery-progress {
   background: var(--bg-dark);

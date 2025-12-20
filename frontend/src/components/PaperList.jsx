@@ -62,6 +62,18 @@ export default function PaperList({ onSelectPaper }) {
     },
   })
 
+  const addAsSeed = useMutation({
+    mutationFn: (candidate) => api.createPaper({
+      title: candidate.title,
+      authors: candidate.authorsRaw || candidate.authors,
+      year: candidate.year,
+      venue: candidate.venue,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['papers'])
+    },
+  })
+
   const handleResolve = (paperId) => {
     setResolvingId(paperId)
     resolvePaper.mutate(paperId)
@@ -74,6 +86,11 @@ export default function PaperList({ onSelectPaper }) {
         candidateIndex,
       })
     }
+  }
+
+  const handleAddAsSeed = (candidate, e) => {
+    e.stopPropagation() // Don't trigger the card click
+    addAsSeed.mutate(candidate)
   }
 
   const toggleAbstract = (paperId) => {
@@ -322,9 +339,19 @@ export default function PaperList({ onSelectPaper }) {
                       </p>
                     )}
                   </div>
-                  <button className="btn-select-candidate">
-                    Select
-                  </button>
+                  <div className="candidate-actions">
+                    <button className="btn-select-candidate">
+                      Select
+                    </button>
+                    <button
+                      className="btn-add-seed"
+                      onClick={(e) => handleAddAsSeed(candidate, e)}
+                      disabled={addAsSeed.isPending}
+                      title="Add this paper as a new seed to harvest"
+                    >
+                      {addAsSeed.isPending ? '➕ Adding...' : '➕ Add as Seed'}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
