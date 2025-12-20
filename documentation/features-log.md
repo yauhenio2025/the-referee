@@ -6,6 +6,8 @@ A chronological log of major features introduced to the project.
 
 ## 2025-12-20: Advanced Job Queue Monitor
 
+**Commit:** `d96ab70` on `main`
+
 **Description:** Complete overhaul of the Job Queue UI to provide real-time detailed progress tracking for running jobs. Users can now see exactly what's happening during citation harvesting including edition details, citation counts, current page, and year-by-year mode status.
 
 **Key Changes:**
