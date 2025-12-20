@@ -37,6 +37,11 @@ HEARTBEAT_INTERVAL = 60  # Seconds between heartbeat updates
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
 
+# Parallel processing settings
+MAX_CONCURRENT_JOBS = 5  # How many jobs can run simultaneously
+_job_semaphore: Optional[asyncio.Semaphore] = None
+_running_jobs: set = set()  # Track currently running job IDs
+
 
 async def update_job_progress(
     db: AsyncSession,
@@ -473,87 +478,121 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
 
 async def process_single_job(job_id: int):
-    """Process a single job by ID"""
-    async with async_session() as db:
+    """Process a single job by ID with concurrency control"""
+    global _job_semaphore, _running_jobs
+
+    # Acquire semaphore to limit concurrent jobs
+    if _job_semaphore is None:
+        _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+    async with _job_semaphore:
+        # Track this job as running
+        _running_jobs.add(job_id)
+        log_now(f"[Worker] Job {job_id} acquired slot ({len(_running_jobs)}/{MAX_CONCURRENT_JOBS} running)")
+
         try:
-            # Get job
-            result = await db.execute(select(Job).where(Job.id == job_id))
-            job = result.scalar_one_or_none()
-            if not job:
-                log_now(f"[Worker] Job {job_id} not found")
-                return
+            async with async_session() as db:
+                try:
+                    # Get job
+                    result = await db.execute(select(Job).where(Job.id == job_id))
+                    job = result.scalar_one_or_none()
+                    if not job:
+                        log_now(f"[Worker] Job {job_id} not found")
+                        return
 
-            if job.status != "pending":
-                log_now(f"[Worker] Job {job_id} status is {job.status}, skipping")
-                return
+                    if job.status != "pending":
+                        log_now(f"[Worker] Job {job_id} status is {job.status}, skipping")
+                        return
 
-            # Mark as running
-            job.status = "running"
-            job.started_at = datetime.utcnow()
-            job.progress = 0
-            job.progress_message = "Starting..."
-            await db.commit()
+                    # Mark as running
+                    job.status = "running"
+                    job.started_at = datetime.utcnow()
+                    job.progress = 0
+                    job.progress_message = "Starting..."
+                    await db.commit()
 
-            log_now(f"[Worker] Starting job {job_id} ({job.job_type})")
+                    log_now(f"[Worker] Starting job {job_id} ({job.job_type})")
 
-            # Process based on job type
-            if job.job_type == "fetch_more_editions":
-                result = await process_fetch_more_job(job, db)
-            elif job.job_type == "extract_citations":
-                result = await process_extract_citations_job(job, db)
-            else:
-                raise ValueError(f"Unknown job type: {job.job_type}")
+                    # Process based on job type
+                    if job.job_type == "fetch_more_editions":
+                        result = await process_fetch_more_job(job, db)
+                    elif job.job_type == "extract_citations":
+                        result = await process_extract_citations_job(job, db)
+                    else:
+                        raise ValueError(f"Unknown job type: {job.job_type}")
 
-            # Mark as completed
-            job.status = "completed"
-            job.progress = 100
-            job.progress_message = "Completed"
-            job.result = json.dumps(result)
-            job.completed_at = datetime.utcnow()
-            await db.commit()
+                    # Mark as completed
+                    job.status = "completed"
+                    job.progress = 100
+                    job.progress_message = "Completed"
+                    job.result = json.dumps(result)
+                    job.completed_at = datetime.utcnow()
+                    await db.commit()
 
-            log_now(f"[Worker] Completed job {job_id}")
+                    log_now(f"[Worker] Completed job {job_id}")
 
-        except Exception as e:
-            log_now(f"[Worker] Job {job_id} failed: {e}")
-            # Mark as failed
-            try:
-                job.status = "failed"
-                job.error = str(e)
-                job.completed_at = datetime.utcnow()
-                await db.commit()
-            except:
-                pass
+                except Exception as e:
+                    log_now(f"[Worker] Job {job_id} failed: {e}")
+                    log_now(f"[Worker] Traceback: {traceback.format_exc()}")
+                    # Mark as failed
+                    try:
+                        job.status = "failed"
+                        job.error = str(e)
+                        job.completed_at = datetime.utcnow()
+                        await db.commit()
+                    except:
+                        pass
+        finally:
+            # Always remove from running set
+            _running_jobs.discard(job_id)
+            log_now(f"[Worker] Job {job_id} released slot ({len(_running_jobs)}/{MAX_CONCURRENT_JOBS} running)")
 
 
 async def worker_loop():
-    """Main worker loop - processes pending jobs"""
-    global _worker_running
+    """Main worker loop - processes pending jobs with parallel execution"""
+    global _worker_running, _job_semaphore, _running_jobs
     _worker_running = True
-    log_now("[Worker] Starting job worker loop")
+    _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    _running_jobs = set()
+
+    log_now(f"[Worker] Starting parallel job worker (max {MAX_CONCURRENT_JOBS} concurrent jobs)")
 
     while _worker_running:
         try:
-            async with async_session() as db:
-                # Get next pending job (oldest first, respecting priority)
-                result = await db.execute(
-                    select(Job)
-                    .where(Job.status == "pending")
-                    .order_by(Job.priority.desc(), Job.created_at.asc())
-                    .limit(1)
-                )
-                job = result.scalar_one_or_none()
+            # Calculate how many slots are available
+            available_slots = MAX_CONCURRENT_JOBS - len(_running_jobs)
 
-                if job:
-                    # Process in separate task (allows concurrent processing)
-                    asyncio.create_task(process_single_job(job.id))
-                    await asyncio.sleep(1)  # Small delay before checking for more
-                else:
-                    # No pending jobs, wait before checking again
-                    await asyncio.sleep(5)
+            if available_slots > 0:
+                async with async_session() as db:
+                    # Get multiple pending jobs (up to available slots)
+                    result = await db.execute(
+                        select(Job)
+                        .where(Job.status == "pending")
+                        .order_by(Job.priority.desc(), Job.created_at.asc())
+                        .limit(available_slots)
+                    )
+                    pending_jobs = result.scalars().all()
+
+                    if pending_jobs:
+                        log_now(f"[Worker] Found {len(pending_jobs)} pending jobs, {available_slots} slots available")
+
+                        # Start all pending jobs in parallel
+                        for job in pending_jobs:
+                            if job.id not in _running_jobs:
+                                asyncio.create_task(process_single_job(job.id))
+                                await asyncio.sleep(0.5)  # Small stagger to avoid race conditions
+
+                        await asyncio.sleep(2)  # Brief pause before checking for more
+                    else:
+                        # No pending jobs, wait before checking again
+                        await asyncio.sleep(5)
+            else:
+                # All slots full, wait for one to free up
+                await asyncio.sleep(3)
 
         except Exception as e:
             log_now(f"[Worker] Loop error: {e}")
+            log_now(f"[Worker] Traceback: {traceback.format_exc()}")
             await asyncio.sleep(10)
 
     log_now("[Worker] Worker loop stopped")
