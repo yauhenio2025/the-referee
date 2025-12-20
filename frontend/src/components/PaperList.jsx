@@ -225,8 +225,13 @@ export default function PaperList({ onSelectPaper }) {
                 {paper.status === 'needs_reconciliation' && (
                   <button
                     onClick={() => {
-                      // Parse candidates from paper if available
-                      const candidates = paper.candidates ? JSON.parse(paper.candidates) : []
+                      // Handle candidates - could be array (already parsed) or string (legacy)
+                      let candidates = []
+                      if (paper.candidates) {
+                        candidates = typeof paper.candidates === 'string'
+                          ? JSON.parse(paper.candidates)
+                          : paper.candidates
+                      }
                       setReconciliationPaper({ ...paper, candidates })
                     }}
                     className="btn-reconcile"
