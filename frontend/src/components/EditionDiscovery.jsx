@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import { useToast } from './Toast'
 
 /**
  * Edition Discovery - Tufte-inspired compact data view
@@ -14,6 +15,7 @@ import { api } from '../lib/api'
  */
 export default function EditionDiscovery({ paper, onBack }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const [languageStrategy, setLanguageStrategy] = useState('recommended')
   const [customLanguages, setCustomLanguages] = useState([])
   const [showLanguageModal, setShowLanguageModal] = useState(false)
@@ -163,12 +165,20 @@ export default function EditionDiscovery({ paper, onBack }) {
       await queryClient.cancelQueries(['editions', paper.id])
       const previous = queryClient.getQueryData(['editions', paper.id])
       updateEditionsOptimistically(ids, { excluded })
-      return { previous }
+      return { previous, ids, excluded }
+    },
+    onSuccess: (data, { ids, excluded }) => {
+      if (excluded) {
+        toast.info(`⊘ Excluded ${ids.length} edition${ids.length > 1 ? 's' : ''}`)
+      } else {
+        toast.success(`↩ Restored ${ids.length} edition${ids.length > 1 ? 's' : ''}`)
+      }
     },
     onError: (err, variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['editions', paper.id], context.previous)
       }
+      toast.error(`Failed to update editions: ${err.message}`)
     },
     onSettled: () => {
       queryClient.invalidateQueries(['editions', paper.id])
@@ -183,20 +193,24 @@ export default function EditionDiscovery({ paper, onBack }) {
       queryClient.invalidateQueries(['editions', paper.id])
       // Invalidate papers list (new paper added)
       queryClient.invalidateQueries(['papers'])
-      // Show success with link to new paper
-      alert(`Created new seed: ${result.title}\n\nPaper ID: ${result.new_paper_id}`)
+      // Show success toast
+      toast.success(`🌱 Created new seed: ${result.title.substring(0, 50)}...`)
     },
     onError: (error) => {
-      alert(`Failed to create seed: ${error.message}`)
+      toast.error(`Failed to create seed: ${error.message}`)
     },
   })
 
   // Finalize editions
   const finalizeEditions = useMutation({
     mutationFn: () => api.finalizeEditions(paper.id),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries(['editions', paper.id])
       queryClient.invalidateQueries(['papers', paper.id])
+      toast.success(`✓ Editions finalized (${result.editions_excluded} candidates hidden)`)
+    },
+    onError: (error) => {
+      toast.error(`Failed to finalize: ${error.message}`)
     },
   })
 
@@ -207,6 +221,10 @@ export default function EditionDiscovery({ paper, onBack }) {
       queryClient.invalidateQueries(['editions', paper.id])
       queryClient.invalidateQueries(['papers', paper.id])
       setShowExcluded(true) // Show excluded editions when reopening
+      toast.info('🔓 Editions reopened for editing')
+    },
+    onError: (error) => {
+      toast.error(`Failed to reopen: ${error.message}`)
     },
   })
 
@@ -503,10 +521,12 @@ export default function EditionDiscovery({ paper, onBack }) {
       editionIds.forEach(id => { newHarvesting[id] = result.job_id })
       setHarvestingEditions(prev => ({ ...prev, ...newHarvesting }))
       queryClient.invalidateQueries(['jobs'])
+      toast.success(`📥 Started harvesting ${editionIds.length} edition${editionIds.length > 1 ? 's' : ''}`)
     } catch (error) {
       console.error('Failed to select and harvest:', error)
+      toast.error(`Failed to start harvest: ${error.message}`)
     }
-  }, [paper.id, queryClient])
+  }, [paper.id, queryClient, toast])
 
   // Navigate to citations filtered by a specific edition
   const viewCitationsForEdition = useCallback((editionId) => {

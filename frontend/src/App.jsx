@@ -13,6 +13,7 @@ import Collections from './components/Collections'
 import CollectionDetail from './components/CollectionDetail'
 import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
+import { ToastProvider } from './components/Toast'
 
 const queryClient = new QueryClient()
 
@@ -239,7 +240,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppContent />
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>
   )
