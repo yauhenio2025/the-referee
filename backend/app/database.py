@@ -60,6 +60,8 @@ async def run_migrations():
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS editions_finalized BOOLEAN DEFAULT FALSE",
         # Year-by-year harvest resume state for proper resume without re-fetching
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_resume_state TEXT NULL",
+        # Pause auto-resume for specific papers
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS harvest_paused BOOLEAN DEFAULT FALSE",
     ]
 
     async with engine.begin() as conn:

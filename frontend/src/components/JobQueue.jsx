@@ -48,6 +48,28 @@ export default function JobQueue() {
     },
   })
 
+  const pauseHarvest = useMutation({
+    mutationFn: (paperId) => api.pauseHarvest(paperId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries(['papers'])
+      alert(`Paused harvest for: ${data.title}\n\nAuto-resume will skip this paper. Use Papers tab to unpause.`)
+    },
+  })
+
+  const cancelAndPause = useMutation({
+    mutationFn: async ({ jobId, paperId }) => {
+      // Cancel the job first
+      await api.cancelJob(jobId)
+      // Then pause the paper to prevent auto-resume
+      return api.pauseHarvest(paperId)
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries(['jobs'])
+      queryClient.invalidateQueries(['papers'])
+      alert(`Stopped and paused: ${data.title}\n\nAuto-resume disabled. Use Papers tab to unpause later.`)
+    },
+  })
+
   const getStatusIcon = (status) => {
     const icons = {
       pending: '⏳',
@@ -226,11 +248,22 @@ export default function JobQueue() {
                         <span className="timing-item">Duration: {formatDuration(job.started_at)}</span>
                       </div>
                       <div className="job-actions">
+                        {(job.status === 'pending' || job.status === 'running') && job.paper_id && (
+                          <button
+                            onClick={() => cancelAndPause.mutate({ jobId: job.id, paperId: job.paper_id })}
+                            className="btn-pause"
+                            disabled={cancelAndPause.isPending}
+                            title="Cancel this job AND prevent auto-resume from restarting it"
+                          >
+                            ⏸️ Stop & Pause
+                          </button>
+                        )}
                         {(job.status === 'pending' || job.status === 'running') && (
                           <button
                             onClick={() => cancelJob.mutate(job.id)}
                             className="btn-cancel"
                             disabled={cancelJob.isPending}
+                            title="Cancel this job (auto-resume may restart it)"
                           >
                             Cancel
                           </button>

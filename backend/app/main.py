@@ -810,6 +810,43 @@ async def reopen_editions(paper_id: int, db: AsyncSession = Depends(get_db)):
     return {"reopened": True, "paper_id": paper_id}
 
 
+@app.post("/api/papers/{paper_id}/pause-harvest")
+async def pause_harvest(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Pause auto-resume harvesting for a paper.
+
+    - Sets harvest_paused = True
+    - Does NOT cancel running jobs (user can do that separately)
+    - Auto-resume will skip this paper until unpaused
+    """
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    paper.harvest_paused = True
+    await db.commit()
+
+    return {"paused": True, "paper_id": paper_id, "title": paper.title}
+
+
+@app.post("/api/papers/{paper_id}/unpause-harvest")
+async def unpause_harvest(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Unpause auto-resume harvesting for a paper.
+
+    - Sets harvest_paused = False
+    - Auto-resume will resume queueing jobs for this paper
+    """
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    paper.harvest_paused = False
+    await db.commit()
+
+    return {"paused": False, "paper_id": paper_id, "title": paper.title}
+
+
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)
 async def fetch_more_editions(
     request: EditionFetchMoreRequest,

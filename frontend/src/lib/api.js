@@ -366,6 +366,20 @@ class RefereeAPI {
       method: 'POST',
     });
   }
+
+  // ============== Pause/Unpause Harvest ==============
+
+  async pauseHarvest(paperId) {
+    return this.request(`/api/papers/${paperId}/pause-harvest`, {
+      method: 'POST',
+    });
+  }
+
+  async unpauseHarvest(paperId) {
+    return this.request(`/api/papers/${paperId}/unpause-harvest`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new RefereeAPI();

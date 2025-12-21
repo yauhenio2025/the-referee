@@ -151,8 +151,10 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     - harvested_citation_count < citation_count (incomplete)
     - Gap is significant (at least AUTO_RESUME_MIN_MISSING or AUTO_RESUME_MIN_PERCENT)
     - No pending/running extract_citations job for that paper
+    - Paper is not paused (harvest_paused = False)
     """
     from sqlalchemy import and_, or_, not_, exists
+    from sqlalchemy.orm import joinedload
 
     # Subquery: papers with pending/running extract_citations jobs
     papers_with_jobs = (
@@ -161,6 +163,12 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
             Job.job_type == "extract_citations",
             Job.status.in_(["pending", "running"])
         )
+    )
+
+    # Subquery: paused papers
+    paused_papers = (
+        select(Paper.id)
+        .where(Paper.harvest_paused == True)
     )
 
     # Find incomplete editions
@@ -179,7 +187,9 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
                 (Edition.citation_count - Edition.harvested_citation_count) * 1.0 / Edition.citation_count >= AUTO_RESUME_MIN_PERCENT
             ),
             # No active job for this paper
-            Edition.paper_id.notin_(papers_with_jobs)
+            Edition.paper_id.notin_(papers_with_jobs),
+            # Paper is not paused
+            Edition.paper_id.notin_(paused_papers)
         )
         .order_by(
             # Prioritize: larger gaps first

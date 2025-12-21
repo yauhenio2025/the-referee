@@ -64,6 +64,9 @@ class Paper(Base):
     # Edition management
     editions_finalized: Mapped[bool] = mapped_column(Boolean, default=False)  # User finalized edition selection
 
+    # Job control
+    harvest_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # Pause auto-resume for this paper
+
     # Relationships
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     editions: Mapped[List["Edition"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
