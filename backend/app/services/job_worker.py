@@ -208,9 +208,12 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
     jobs_queued = 0
     for edition in incomplete:
         missing = edition.citation_count - edition.harvested_citation_count
-        log_now(f"[AutoResume] Edition {edition.id} (paper {edition.paper_id}): {edition.harvested_citation_count}/{edition.citation_count} harvested, missing {missing}")
+        # Calculate resume page: Google Scholar shows 10 results per page
+        # If we have 643 citations, we've fetched ~64 pages, resume from page 64
+        resume_page = edition.harvested_citation_count // 10
+        log_now(f"[AutoResume] Edition {edition.id} (paper {edition.paper_id}): {edition.harvested_citation_count}/{edition.citation_count} harvested, missing {missing}, resume from page {resume_page}")
 
-        # Create resume job - will continue from where we left off
+        # Create resume job with proper resume_state to skip already-fetched pages
         job = Job(
             paper_id=edition.paper_id,
             job_type="extract_citations",
@@ -219,14 +222,19 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
                 "edition_ids": [edition.id],
                 "max_citations_per_edition": 1000,
                 "skip_threshold": 50000,
-                "is_resume": True,  # Flag for logging
+                "is_resume": True,
+                "resume_state": {
+                    "edition_id": edition.id,
+                    "last_page": resume_page,
+                    "total_citations": edition.harvested_citation_count,
+                },
             }),
             progress=0,
-            progress_message=f"Auto-resume: {missing:,} citations remaining",
+            progress_message=f"Auto-resume from page {resume_page}: {missing:,} citations remaining",
         )
         db.add(job)
         jobs_queued += 1
-        log_now(f"[AutoResume] Queued resume job for edition {edition.id}")
+        log_now(f"[AutoResume] Queued resume job for edition {edition.id} starting at page {resume_page}")
 
     if jobs_queued > 0:
         await db.commit()
@@ -471,13 +479,22 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         # Track current year for year-by-year mode (accessible in callback)
         current_harvest_year = {"year": None, "mode": "standard"}
 
-        # Check for resume state from previous run
+        # First, update harvest stats to capture any zombie job progress (citations saved but stats not updated)
+        await update_edition_harvest_stats(db, edition.id)
+        await db.refresh(edition)
+
+        # Check for resume state from previous run OR calculate from harvested count
         resume_page = 0
         if params.get("resume_state"):
             resume_state = params["resume_state"]
             if resume_state.get("edition_id") == edition.id:
                 resume_page = resume_state.get("last_page", 0)
-                log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page}")
+                log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page} (from job params)")
+        elif edition.harvested_citation_count and edition.harvested_citation_count > 0:
+            # No explicit resume_state, but edition has previous harvested citations
+            # Calculate resume page from harvested count (10 results per page)
+            resume_page = edition.harvested_citation_count // 10
+            log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page} (calculated from {edition.harvested_citation_count} harvested citations)")
 
         # Callback to save citations IMMEDIATELY after each page
         async def save_page_citations(page_num: int, papers: List[Dict]):
@@ -578,6 +595,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[EDITION {i+1}] Citation count (Scholar): {edition.citation_count}")
             log_now(f"[EDITION {i+1}] max_results: {max_citations_per_edition}")
             log_now(f"[EDITION {i+1}] start_page: {resume_page}")
+            log_now(f"[EDITION {i+1}] Previously harvested: {edition.harvested_citation_count}")
 
             # For editions with >1000 citations, use year-by-year fetching
             # Google Scholar limits ~1000 results per query
@@ -675,6 +693,12 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[EDITION {i+1}] Error message: {e}")
             log_now(f"[EDITION {i+1}] Traceback: {traceback.format_exc()}")
             log_now(f"[EDITION {i+1}] Continuing with next edition. {total_new_citations} citations saved so far.")
+            # Still update harvest stats for partial progress - citations already saved to DB
+            try:
+                await update_edition_harvest_stats(db, edition.id)
+                log_now(f"[EDITION {i+1}] Updated harvest stats for partial progress")
+            except Exception as stats_err:
+                log_now(f"[EDITION {i+1}] Failed to update harvest stats: {stats_err}")
             # Continue with other editions - we've already saved what we got
 
     log_now(f"╔{'═'*70}╗")
