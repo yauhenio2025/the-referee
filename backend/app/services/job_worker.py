@@ -563,7 +563,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
             # Update job progress with current state for resume
-            progress_pct = 10 + ((i + (page_num / 20)) / total_editions) * 70
+            # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
+            raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
+            progress_pct = min(raw_progress, 90)
             year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
             await update_job_progress(
                 db, job.id, progress_pct,
