@@ -637,37 +637,12 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     min_year = 1990  # Full harvest - go back to 1990
                     log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
-                # SMART RESUME: Query existing citations to find where previous harvest stopped
-                # This avoids re-scanning years we already have citations for
-                from sqlalchemy import func as sql_func
-                oldest_citation_year = None
-                existing_years = set()
-
-                if edition.harvested_citation_count and edition.harvested_citation_count > 0:
-                    # Get the oldest year we have citations for (that's where we stopped going backwards)
-                    oldest_result = await db.execute(
-                        select(sql_func.min(Citation.year))
-                        .where(Citation.edition_id == edition.id)
-                        .where(Citation.year.isnot(None))
-                    )
-                    oldest_citation_year = oldest_result.scalar()
-
-                    # Also get all years we have citations for (to mark as completed)
-                    years_result = await db.execute(
-                        select(Citation.year)
-                        .where(Citation.edition_id == edition.id)
-                        .where(Citation.year.isnot(None))
-                        .distinct()
-                    )
-                    existing_years = {row[0] for row in years_result.fetchall()}
-
-                    if oldest_citation_year:
-                        log_now(f"[EDITION {i+1}] 📊 SMART RESUME: Found citations from years {max(existing_years)} down to {oldest_citation_year}")
-                        log_now(f"[EDITION {i+1}] 📊 Will skip years {current_year} to {oldest_citation_year + 1}, start from {oldest_citation_year}")
-
                 # Check for existing resume state (year-by-year progress tracking)
+                # IMPORTANT: Only trust completed_years if we have saved state from year-by-year mode
+                # If previous harvest was non-year-by-year, existing citations are scattered across years
+                # and we need to re-scan all years to get complete coverage
                 resume_state_json = edition.harvest_resume_state
-                completed_years = set(existing_years)  # Start with years we already have citations for
+                completed_years = set()  # Start empty - only trust saved state
                 resume_year = None
                 resume_page_for_year = 0
 
@@ -675,20 +650,17 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     try:
                         resume_state = json.loads(resume_state_json)
                         if resume_state.get("mode") == "year_by_year":
-                            # Merge saved completed years with derived ones
-                            saved_completed = set(resume_state.get("completed_years", []))
-                            completed_years = completed_years.union(saved_completed)
+                            # Only trust completed_years from saved year-by-year state
+                            completed_years = set(resume_state.get("completed_years", []))
                             resume_year = resume_state.get("current_year")
                             resume_page_for_year = resume_state.get("current_page", 0)
-                            log_now(f"[EDITION {i+1}] 🔄 RESUMING: completed years={sorted(completed_years, reverse=True)[:5]}..., resume from year {resume_year} page {resume_page_for_year}")
+                            log_now(f"[EDITION {i+1}] 🔄 RESUMING from saved state: completed years={sorted(completed_years, reverse=True)[:5]}..., resume from year {resume_year} page {resume_page_for_year}")
                     except json.JSONDecodeError:
-                        log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state")
-
-                # If we have existing citations but no saved state, smart-skip to oldest year
-                if oldest_citation_year and not resume_year:
-                    # Start from the oldest year we have (may be incomplete) rather than re-doing newer years
-                    resume_year = oldest_citation_year
-                    log_now(f"[EDITION {i+1}] 📊 SMART SKIP: Starting from year {resume_year} (oldest with citations)")
+                        log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state, starting fresh")
+                else:
+                    # No saved state - previous harvest may have been non-year-by-year
+                    # We need to scan all years to ensure complete coverage
+                    log_now(f"[EDITION {i+1}] ℹ️ No saved year-by-year state - will scan all years (existing citations may be incomplete per year)")
 
                 # Helper to save year-by-year resume state to edition
                 async def save_year_resume_state(year: int, page: int, completed: set):
