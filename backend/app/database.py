@@ -58,6 +58,8 @@ async def run_migrations():
         # Edition management feature: exclude editions and finalize view
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS excluded BOOLEAN DEFAULT FALSE",
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS editions_finalized BOOLEAN DEFAULT FALSE",
+        # Year-by-year harvest resume state for proper resume without re-fetching
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_resume_state TEXT NULL",
     ]
 
     async with engine.begin() as conn:

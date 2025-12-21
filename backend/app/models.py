@@ -115,6 +115,10 @@ class Edition(Base):
     last_harvest_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
     harvested_citation_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Year-by-year harvest resume state (JSON: {mode, current_year, current_page, completed_years})
+    # Allows proper resume without re-fetching already-processed years
+    harvest_resume_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships

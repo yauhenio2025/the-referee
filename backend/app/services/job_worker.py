@@ -625,36 +625,108 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     min_year = 1990  # Full harvest - go back to 1990
                     log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
+                # Check for existing resume state (year-by-year progress tracking)
+                resume_state_json = edition.harvest_resume_state
+                completed_years = set()
+                resume_year = None
+                resume_page_for_year = 0
+
+                if resume_state_json:
+                    try:
+                        resume_state = json.loads(resume_state_json)
+                        if resume_state.get("mode") == "year_by_year":
+                            completed_years = set(resume_state.get("completed_years", []))
+                            resume_year = resume_state.get("current_year")
+                            resume_page_for_year = resume_state.get("current_page", 0)
+                            log_now(f"[EDITION {i+1}] 🔄 RESUMING: completed years={sorted(completed_years, reverse=True)[:5]}..., resume from year {resume_year} page {resume_page_for_year}")
+                    except json.JSONDecodeError:
+                        log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state, starting fresh")
+
+                # Helper to save year-by-year resume state to edition
+                async def save_year_resume_state(year: int, page: int, completed: set):
+                    """Save current progress to edition.harvest_resume_state"""
+                    state = {
+                        "mode": "year_by_year",
+                        "current_year": year,
+                        "current_page": page,
+                        "completed_years": sorted(list(completed), reverse=True),
+                    }
+                    await db.execute(
+                        update(Edition)
+                        .where(Edition.id == edition.id)
+                        .values(harvest_resume_state=json.dumps(state))
+                    )
+                    await db.commit()
+
+                # Modify save_page_citations to also save year state
+                original_save_page_citations = save_page_citations
+
+                async def save_page_citations_with_year_state(page_num: int, papers: List[Dict]):
+                    """Extended callback that also saves year-by-year state"""
+                    await original_save_page_citations(page_num, papers)
+                    # Save resume state after each page
+                    current_yr = current_harvest_year.get("year")
+                    if current_yr:
+                        await save_year_resume_state(current_yr, page_num + 1, completed_years)
+
                 # Fetch year by year from current year backwards
                 current_harvest_year["mode"] = "year_by_year"
+                consecutive_empty_years = 0
+
                 for year in range(current_year, min_year - 1, -1):
+                    # SKIP completed years entirely
+                    if year in completed_years:
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: SKIPPING (already completed)")
+                        continue
+
                     year_start_citations = total_new_citations
                     current_harvest_year["year"] = year
 
-                    log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
+                    # Determine start page for this year
+                    start_page_for_this_year = 0
+                    if resume_year == year and resume_page_for_year > 0:
+                        start_page_for_this_year = resume_page_for_year
+                        log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from page {start_page_for_this_year})...")
+                    else:
+                        log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
 
                     result = await scholar_service.get_cited_by(
                         scholar_id=edition.scholar_id,
                         max_results=1000,  # Max per year
                         year_low=year,
                         year_high=year,
-                        on_page_complete=save_page_citations,
-                        start_page=0,  # Always start from 0 for each year
+                        on_page_complete=save_page_citations_with_year_state,
+                        start_page=start_page_for_this_year,
                     )
+
+                    # Mark this year as completed
+                    completed_years.add(year)
+                    await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
 
                     year_citations = total_new_citations - year_start_citations
                     total_this_year = result.get('totalResults', 0) if isinstance(result, dict) else 0
                     log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total for year)")
 
-                    # If no results for this year and previous few years, we're likely done
+                    # Track consecutive empty years for early termination
                     if year_citations == 0 and total_this_year == 0:
-                        # Check if we've had 3 consecutive empty years
-                        if year < current_year - 2:  # Give some buffer for recent years
-                            log_now(f"[EDITION {i+1}] 📅 No citations found for {year}, stopping year-by-year fetch")
+                        consecutive_empty_years += 1
+                        if consecutive_empty_years >= 3 and year < current_year - 5:
+                            log_now(f"[EDITION {i+1}] 📅 {consecutive_empty_years} consecutive empty years, stopping year-by-year fetch")
                             break
+                    else:
+                        consecutive_empty_years = 0
 
                     # Small delay between year queries
                     await asyncio.sleep(2)
+
+                # Clear resume state on successful completion of all years
+                await db.execute(
+                    update(Edition)
+                    .where(Edition.id == edition.id)
+                    .values(harvest_resume_state=None)
+                )
+                await db.commit()
+                log_now(f"[EDITION {i+1}] ✓ Year-by-year harvest complete, cleared resume state")
 
             else:
                 # Standard fetch for editions with <=1000 citations
