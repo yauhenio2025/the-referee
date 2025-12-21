@@ -496,16 +496,18 @@ export default function EditionDiscovery({ paper, onBack }) {
     return () => clearInterval(pollInterval)
   }, [harvestingEditions, queryClient, paper.id])
 
-  // Harvest citations from a single edition
+  // Harvest citations from a single edition (uses dedicated endpoint)
   const harvestEdition = useCallback(async (editionId) => {
     try {
-      const result = await api.extractCitations(paper.id, { editionIds: [editionId] })
+      const result = await api.harvestEdition(editionId)
       setHarvestingEditions(prev => ({ ...prev, [editionId]: result.job_id }))
       queryClient.invalidateQueries(['jobs'])
+      toast.success(`📥 Started harvest for edition (Job #${result.job_id})`)
     } catch (error) {
       console.error('Failed to start harvest:', error)
+      toast.error(`Failed to start harvest: ${error.message}`)
     }
-  }, [paper.id, queryClient])
+  }, [queryClient, toast])
 
   // Select editions AND start harvesting them immediately
   const selectAndHarvest = useCallback(async (editionIds) => {

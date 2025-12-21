@@ -380,6 +380,14 @@ class RefereeAPI {
       method: 'POST',
     });
   }
+
+  // ============== Edition Harvest ==============
+
+  async harvestEdition(editionId) {
+    return this.request(`/api/editions/${editionId}/harvest`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new RefereeAPI();
