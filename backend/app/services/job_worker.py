@@ -483,18 +483,26 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         await update_edition_harvest_stats(db, edition.id)
         await db.refresh(edition)
 
-        # Check for resume state from previous run OR calculate from harvested count
-        resume_page = 0
+        # Calculate resume page from ACTUAL harvested count (updated by update_edition_harvest_stats above)
+        # This handles zombie jobs where server died but citations were saved
+        calculated_resume_page = 0
+        if edition.harvested_citation_count and edition.harvested_citation_count > 0:
+            # 10 results per page in Google Scholar
+            calculated_resume_page = edition.harvested_citation_count // 10
+            log_now(f"[Worker] Edition {edition.id} has {edition.harvested_citation_count} harvested citations -> calculated page {calculated_resume_page}")
+
+        # Also check resume_state from job params (may be stale if created before stats updated)
+        params_resume_page = 0
         if params.get("resume_state"):
             resume_state = params["resume_state"]
             if resume_state.get("edition_id") == edition.id:
-                resume_page = resume_state.get("last_page", 0)
-                log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page} (from job params)")
-        elif edition.harvested_citation_count and edition.harvested_citation_count > 0:
-            # No explicit resume_state, but edition has previous harvested citations
-            # Calculate resume page from harvested count (10 results per page)
-            resume_page = edition.harvested_citation_count // 10
-            log_now(f"[Worker] Resuming edition {edition.id} from page {resume_page} (calculated from {edition.harvested_citation_count} harvested citations)")
+                params_resume_page = resume_state.get("last_page", 0)
+                log_now(f"[Worker] Job params specify resume from page {params_resume_page}")
+
+        # Use the HIGHER of the two to ensure we never go backwards
+        resume_page = max(calculated_resume_page, params_resume_page)
+        if resume_page > 0:
+            log_now(f"[Worker] ✓ Resuming edition {edition.id} from page {resume_page}")
 
         # Callback to save citations IMMEDIATELY after each page
         async def save_page_citations(page_num: int, papers: List[Dict]):
