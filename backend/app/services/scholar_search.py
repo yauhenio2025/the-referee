@@ -189,6 +189,7 @@ class ScholarSearchService:
         year_high: Optional[int] = None,
         on_page_complete: Optional[callable] = None,
         start_page: int = 0,
+        additional_query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get papers that cite a given paper - WITH PAGE-BY-PAGE CALLBACK
@@ -199,6 +200,7 @@ class ScholarSearchService:
             year_low/high: Year filters
             on_page_complete: Callback(page_num, papers) called after each page - SAVE TO DB HERE
             start_page: Resume from this page (0-indexed)
+            additional_query: Additional query terms to append (e.g., exclusions like -author:"Smith")
 
         Returns:
             Dict with 'papers' list, 'totalResults' count, 'last_page' for resume
@@ -210,12 +212,13 @@ class ScholarSearchService:
         log_now(f"║  max_results: {max_results}")
         log_now(f"║  year_low: {year_low}, year_high: {year_high}")
         log_now(f"║  start_page: {start_page}")
+        log_now(f"║  additional_query: {additional_query}")
         log_now(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
         log_now(f"╚{'═'*60}╝")
 
         # No timeout wrapper - let it run, save pages as we go
         return await self._get_cited_by_impl(
-            scholar_id, max_results, year_low, year_high, on_page_complete, start_page
+            scholar_id, max_results, year_low, year_high, on_page_complete, start_page, additional_query
         )
 
     async def _get_cited_by_impl(
@@ -226,6 +229,7 @@ class ScholarSearchService:
         year_high: Optional[int],
         on_page_complete: Optional[callable] = None,
         start_page: int = 0,
+        additional_query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Internal cited-by implementation with page-by-page callback for immediate DB saves"""
         # Build URL exactly like gs-harvester JS version
@@ -239,6 +243,13 @@ class ScholarSearchService:
             base_url += f"&as_ylo={year_low}"
         if year_high:
             base_url += f"&as_yhi={year_high}"
+
+        # Add exclusion/additional query terms (for overflow harvesting)
+        if additional_query:
+            # URL encode the additional query and append with &q=
+            encoded_query = quote_plus(additional_query)
+            base_url += f"&q={encoded_query}"
+            log_now(f"[CITED_BY_IMPL] Additional query: {additional_query}")
 
         log_now(f"[CITED_BY_IMPL] FINAL BASE URL: {base_url}")
 

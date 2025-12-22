@@ -16,7 +16,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -581,6 +581,77 @@ async def assign_papers_to_dossier(
         "updated": len(papers),
         "dossier_id": assignment.dossier_id,
         "paper_ids": [p.id for p in papers],
+    }
+
+
+class MultiDossierAssignment(BaseModel):
+    """Request to add a paper to multiple dossiers"""
+    dossier_ids: List[int]  # List of dossier IDs (first one becomes primary)
+
+
+@app.post("/api/papers/{paper_id}/add-to-dossiers")
+async def add_paper_to_multiple_dossiers(
+    paper_id: int,
+    request: MultiDossierAssignment,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add a paper to multiple dossiers.
+
+    - First dossier becomes the primary (stored in Paper.dossier_id)
+    - Additional dossiers are stored in paper_additional_dossiers junction table
+    """
+    from sqlalchemy import delete
+
+    dossier_ids = request.dossier_ids
+
+    # Verify paper exists
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if not dossier_ids:
+        return {"paper_id": paper_id, "primary_dossier_id": None, "additional_dossier_ids": []}
+
+    # Verify all dossiers exist
+    result = await db.execute(select(Dossier).where(Dossier.id.in_(dossier_ids)))
+    dossiers = {d.id: d for d in result.scalars().all()}
+
+    valid_dossier_ids = [did for did in dossier_ids if did in dossiers]
+    if not valid_dossier_ids:
+        raise HTTPException(status_code=404, detail="No valid dossiers found")
+
+    # First dossier is primary
+    primary_dossier_id = valid_dossier_ids[0]
+    additional_dossier_ids = valid_dossier_ids[1:]
+
+    # Update paper's primary dossier
+    paper.dossier_id = primary_dossier_id
+    paper.collection_id = dossiers[primary_dossier_id].collection_id
+
+    # Delete existing additional dossier associations
+    await db.execute(
+        delete(PaperAdditionalDossier).where(PaperAdditionalDossier.paper_id == paper_id)
+    )
+
+    # Add new additional dossiers
+    for dossier_id in additional_dossier_ids:
+        # Don't duplicate the primary dossier
+        if dossier_id != primary_dossier_id:
+            additional = PaperAdditionalDossier(
+                paper_id=paper_id,
+                dossier_id=dossier_id
+            )
+            db.add(additional)
+
+    await db.commit()
+
+    return {
+        "paper_id": paper_id,
+        "primary_dossier_id": primary_dossier_id,
+        "additional_dossier_ids": additional_dossier_ids,
+        "total_dossiers": 1 + len(additional_dossier_ids),
     }
 
 
@@ -2687,3 +2758,184 @@ async def get_staleness_report(
         oldest_harvest_date=oldest_harvest,
         staleness_threshold_days=threshold_days,
     )
+
+
+# ============== TEST: Single-Year Partition Harvest ==============
+
+class PartitionTestRequest(BaseModel):
+    """Request to test partition harvest on a single year"""
+    edition_id: int
+    year: int
+
+
+@app.post("/api/test/partition-harvest")
+async def test_partition_harvest(
+    request: PartitionTestRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    TEST ENDPOINT: Trigger partition harvest for a single year.
+
+    This is for testing the overflow partition strategy.
+    The harvest runs in the background.
+    """
+    from .services.overflow_harvester import harvest_partition
+    from .services.scholar_search import get_scholar_service
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == request.edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    if not edition.scholar_id:
+        raise HTTPException(status_code=400, detail="Edition has no scholar_id")
+
+    # Get paper for the edition
+    paper_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
+    paper = paper_result.scalar_one_or_none()
+
+    # Check count for this year first
+    scholar_service = get_scholar_service()
+    count_result = await scholar_service.get_cited_by(
+        scholar_id=edition.scholar_id,
+        max_results=10,
+        year_low=request.year,
+        year_high=request.year,
+    )
+    total_count = count_result.get('totalResults', 0)
+
+    if total_count <= 1000:
+        return {
+            "status": "skipped",
+            "reason": f"Year {request.year} only has {total_count} citations (<=1000), no partition needed",
+            "edition_id": request.edition_id,
+            "year": request.year,
+            "total_count": total_count
+        }
+
+    # Create a job to track this
+    job = Job(
+        paper_id=edition.paper_id,
+        job_type="partition_harvest_test",
+        status="pending",
+        params=json.dumps({
+            "edition_id": request.edition_id,
+            "year": request.year,
+            "total_count": total_count,
+        }),
+        progress=0,
+        progress_message=f"Test partition harvest for year {request.year} ({total_count} citations)",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    # Run the harvest in background
+    async def run_partition_harvest():
+        from .database import async_session
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            # Get existing citations to avoid duplicates
+            existing_result = await session.execute(
+                select(Citation.scholar_id).where(Citation.paper_id == edition.paper_id)
+            )
+            existing_scholar_ids = {r[0] for r in existing_result.fetchall() if r[0]}
+
+            # Callback to save citations
+            total_new = {"count": 0}
+
+            async def save_callback(page_num, papers):
+                nonlocal total_new
+                for paper_data in papers:
+                    scholar_id = paper_data.get("scholarId")
+                    if not scholar_id or scholar_id in existing_scholar_ids:
+                        continue
+
+                    citation = Citation(
+                        paper_id=edition.paper_id,
+                        edition_id=edition.id,
+                        scholar_id=scholar_id,
+                        title=paper_data.get("title", "Unknown"),
+                        authors=paper_data.get("authorsRaw"),
+                        year=paper_data.get("year"),
+                        venue=paper_data.get("venue"),
+                        abstract=paper_data.get("abstract"),
+                        link=paper_data.get("link"),
+                        citation_count=paper_data.get("citationCount", 0),
+                    )
+                    session.add(citation)
+                    existing_scholar_ids.add(scholar_id)
+                    total_new["count"] += 1
+
+                await session.commit()
+
+                # Update job progress
+                await session.execute(
+                    update(Job).where(Job.id == job.id).values(
+                        progress=min(90, 10 + page_num * 2),
+                        progress_message=f"Page {page_num + 1}: {total_new['count']} new citations"
+                    )
+                )
+                await session.commit()
+
+            try:
+                # Mark job as running
+                await session.execute(
+                    update(Job).where(Job.id == job.id).values(
+                        status="running",
+                        started_at=datetime.utcnow()
+                    )
+                )
+                await session.commit()
+
+                # Run partition harvest
+                stats = await harvest_partition(
+                    scholar_service=get_scholar_service(),
+                    db=session,
+                    edition_id=edition.id,
+                    scholar_id=edition.scholar_id,
+                    year=request.year,
+                    edition_title=edition.title,
+                    paper_id=edition.paper_id,
+                    existing_scholar_ids=existing_scholar_ids,
+                    on_page_complete=save_callback,
+                    total_for_year=total_count,
+                )
+
+                # Mark job as complete
+                await session.execute(
+                    update(Job).where(Job.id == job.id).values(
+                        status="completed",
+                        progress=100,
+                        progress_message=f"Complete: {total_new['count']} new citations",
+                        result=json.dumps(stats),
+                        completed_at=datetime.utcnow()
+                    )
+                )
+                await session.commit()
+
+            except Exception as e:
+                import traceback
+                await session.execute(
+                    update(Job).where(Job.id == job.id).values(
+                        status="failed",
+                        error=f"{str(e)}\n{traceback.format_exc()}",
+                        completed_at=datetime.utcnow()
+                    )
+                )
+                await session.commit()
+
+    # Start background task
+    background_tasks.add_task(run_partition_harvest)
+
+    return {
+        "status": "started",
+        "job_id": job.id,
+        "edition_id": request.edition_id,
+        "year": request.year,
+        "total_count": total_count,
+        "message": f"Partition harvest started for year {request.year} with {total_count} citations"
+    }

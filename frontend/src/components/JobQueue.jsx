@@ -20,10 +20,11 @@ export default function JobQueue() {
   })
 
   // Fetch papers to get titles for jobs
-  const { data: papers } = useQuery({
-    queryKey: ['papers'],
+  // Use distinct queryKey to avoid conflict with PaperList's complex queryFn
+  const { data: papers, isLoading: papersLoading } = useQuery({
+    queryKey: ['papers-for-jobs'],
     queryFn: () => api.listPapers(),
-    staleTime: 30000, // Cache for 30s
+    staleTime: 60000, // Cache for 60s - paper titles rarely change
   })
 
   // Create paper lookup map
@@ -34,6 +35,8 @@ export default function JobQueue() {
 
   const getPaperTitle = (paperId) => {
     if (!paperId) return null
+    // Show loading state while papers are being fetched
+    if (papersLoading) return 'Loading...'
     const paper = paperLookup[paperId]
     if (!paper) return `Paper #${paperId}`
     // Truncate long titles
@@ -52,6 +55,7 @@ export default function JobQueue() {
     mutationFn: (paperId) => api.pauseHarvest(paperId),
     onSuccess: (data) => {
       queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['papers-for-jobs'])
       alert(`Paused harvest for: ${data.title}\n\nAuto-resume will skip this paper. Use Papers tab to unpause.`)
     },
   })
@@ -66,6 +70,7 @@ export default function JobQueue() {
     onSuccess: (data) => {
       queryClient.invalidateQueries(['jobs'])
       queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['papers-for-jobs'])
       alert(`Stopped and paused: ${data.title}\n\nAuto-resume disabled. Use Papers tab to unpause later.`)
     },
   })

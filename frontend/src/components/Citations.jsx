@@ -46,36 +46,61 @@ export default function Citations({ paper, onBack }) {
     queryFn: () => api.getPaperCitations(paper.id),
   })
 
-  // Create seed paper from citation
+  // Create seed paper from citation - supports multiple dossiers
   const createSeedFromCitation = useMutation({
-    mutationFn: async ({ citation, dossierOptions }) => {
-      let dossierId = dossierOptions.dossierId || null
-      const collectionId = dossierOptions.collectionId || paper.collection_id || null
+    mutationFn: async ({ citation, selections }) => {
+      // selections is an array of dossier options from the multi-dossier modal
+      // Each selection can be: { dossierId, collectionId } or { createNewDossier, newDossierName, collectionId }
 
-      // If user wants to create a new dossier, do that first
-      if (dossierOptions.createNewDossier && dossierOptions.newDossierName && collectionId) {
-        const newDossier = await api.createDossier({
-          name: dossierOptions.newDossierName,
-          collection_id: collectionId,
-        })
-        dossierId = newDossier.id
+      if (!selections || selections.length === 0) {
+        throw new Error('No dossier selections provided')
       }
 
-      // Create a paper from the citation data
+      // Resolve all dossier IDs (create new ones if needed)
+      const resolvedDossierIds = []
+      for (const sel of selections) {
+        if (sel.createNewDossier && sel.newDossierName && sel.collectionId) {
+          // Create the new dossier
+          const newDossier = await api.createDossier({
+            name: sel.newDossierName,
+            collection_id: sel.collectionId,
+          })
+          resolvedDossierIds.push(newDossier.id)
+        } else if (sel.dossierId) {
+          resolvedDossierIds.push(sel.dossierId)
+        }
+      }
+
+      if (resolvedDossierIds.length === 0) {
+        throw new Error('No valid dossiers resolved')
+      }
+
+      // Create the paper with the first (primary) dossier
+      const primaryDossierId = resolvedDossierIds[0]
+      const primarySelection = selections[0]
+      const collectionId = primarySelection.collectionId || paper.collection_id || null
+
       const newPaper = await api.createPaper({
         title: citation.title,
         authors: citation.authors,
         year: citation.year,
         venue: citation.venue,
-        dossier_id: dossierId,
+        dossier_id: primaryDossierId,
         collection_id: collectionId,
       })
-      return { newPaper, dossierOptions }
+
+      // If there are additional dossiers, add the paper to them
+      if (resolvedDossierIds.length > 1) {
+        await api.addPaperToDossiers(newPaper.id, resolvedDossierIds)
+      }
+
+      return { newPaper, dossierCount: resolvedDossierIds.length }
     },
-    onSuccess: ({ newPaper, dossierOptions }) => {
+    onSuccess: ({ newPaper, dossierCount }) => {
       queryClient.invalidateQueries(['papers'])
       queryClient.invalidateQueries(['dossiers'])
-      toast.success(`🌱 Now tracking: ${newPaper.title.substring(0, 50)}...`)
+      const suffix = dossierCount > 1 ? ` (${dossierCount} dossiers)` : ''
+      toast.success(`🌱 Now tracking: ${newPaper.title.substring(0, 50)}...${suffix}`)
     },
     onError: (error) => {
       toast.error(`Failed to create seed: ${error.message}`)
@@ -88,11 +113,12 @@ export default function Citations({ paper, onBack }) {
     setShowDossierModal(true)
   }, [])
 
-  const handleDossierSelected = useCallback((dossierOptions) => {
-    if (pendingCitationSeed) {
+  // Handle dossier selection from modal (now receives array of selections)
+  const handleDossierSelected = useCallback((selections) => {
+    if (pendingCitationSeed && selections && selections.length > 0) {
       createSeedFromCitation.mutate({
         citation: pendingCitationSeed,
-        dossierOptions,
+        selections,
       })
     }
     setPendingCitationSeed(null)

@@ -352,6 +352,8 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [harvestingEditions, setHarvestingEditions] = useState({}) // { editionId: jobId }
   const [refreshBatchId, setRefreshBatchId] = useState(null)
   const [refreshProgress, setRefreshProgress] = useState(null)
+  const [partitionTestJob, setPartitionTestJob] = useState(null) // TEST: Partition harvest job tracking
+  const [partitionTestProgress, setPartitionTestProgress] = useState(null)
 
   // Poll for job status updates
   useEffect(() => {
@@ -513,6 +515,46 @@ export default function EditionDiscovery({ paper, onBack }) {
     return () => clearInterval(pollInterval)
   }, [refreshBatchId, paper.id, queryClient])
 
+  // Poll for partition test job
+  useEffect(() => {
+    if (!partitionTestJob) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const job = await api.getJob(partitionTestJob)
+
+        if (job.status === 'running') {
+          setPartitionTestProgress({
+            message: job.progress_message || 'Partition harvest running...',
+            progress: job.progress,
+          })
+        } else if (job.status === 'completed') {
+          const result = job.result || {}
+          setPartitionTestProgress({
+            message: `Done! Total: ${result.total_citations_harvested || 0}, Exclusion: ${result.exclusion_harvested || 0}, Inclusion: ${result.inclusion_harvested || 0}`,
+            progress: 100,
+            done: true,
+          })
+          setPartitionTestJob(null)
+          queryClient.invalidateQueries(['citations', paper.id])
+          queryClient.invalidateQueries(['stats'])
+          setTimeout(() => setPartitionTestProgress(null), 30000)
+        } else if (job.status === 'failed') {
+          setPartitionTestProgress({
+            message: `Failed: ${job.error || 'Unknown error'}`,
+            error: true,
+          })
+          setPartitionTestJob(null)
+          setTimeout(() => setPartitionTestProgress(null), 30000)
+        }
+      } catch (err) {
+        console.error('Partition test job poll error:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [partitionTestJob, queryClient, paper.id])
+
   // Poll for edition harvest jobs
   useEffect(() => {
     const activeHarvestIds = Object.entries(harvestingEditions).filter(([_, jobId]) => jobId)
@@ -562,6 +604,26 @@ export default function EditionDiscovery({ paper, onBack }) {
       toast.error(`Failed to start harvest: ${error.message}`)
     }
   }, [queryClient, toast])
+
+  // TEST: Run partition harvest for a single year
+  const testPartitionHarvest = useCallback(async (editionId, year) => {
+    try {
+      const result = await api.testPartitionHarvest(editionId, year)
+      if (result.job_id) {
+        setPartitionTestJob(result.job_id)
+        setPartitionTestProgress({
+          message: result.message || `Started partition harvest for year ${year}`,
+          progress: 5,
+        })
+        toast.success(`🧪 Started partition test for year ${year} (Job #${result.job_id})`)
+      } else if (result.skipped) {
+        toast.info(`Skipped: ${result.message}`)
+      }
+    } catch (error) {
+      console.error('Failed to start partition test:', error)
+      toast.error(`Partition test failed: ${error.message}`)
+    }
+  }, [toast])
 
   // Select editions AND start harvesting them immediately
   const selectAndHarvest = useCallback(async (editionIds) => {
@@ -740,6 +802,26 @@ export default function EditionDiscovery({ paper, onBack }) {
         >
           📁 Add to Collection
         </button>
+        {/* TEST: Partition harvest button for year 2011 */}
+        {editions?.some(e => e.scholar_id) && (
+          <button
+            onClick={() => {
+              const edition = editions.find(e => e.scholar_id && e.selected)
+                || editions.find(e => e.scholar_id)
+              if (edition) {
+                testPartitionHarvest(edition.id, 2011)
+              } else {
+                toast.error('No edition with Scholar ID found')
+              }
+            }}
+            disabled={!!partitionTestJob}
+            className="btn-test"
+            style={{ backgroundColor: '#ff6b00', color: 'white' }}
+            title="TEST: Run partition harvest strategy for year 2011 only"
+          >
+            🧪 Test Partition (2011)
+          </button>
+        )}
       </div>
 
       {/* Refresh Progress */}
@@ -752,6 +834,17 @@ export default function EditionDiscovery({ paper, onBack }) {
             {refreshProgress.message}
             {refreshProgress.newCitations > 0 && ` (${refreshProgress.newCitations} new citations)`}
           </span>
+        </div>
+      )}
+
+      {/* TEST: Partition Harvest Progress */}
+      {partitionTestProgress && (
+        <div className={`ed-progress partition-progress ${partitionTestProgress.done ? 'done' : ''} ${partitionTestProgress.error ? 'error' : ''}`}
+             style={{ backgroundColor: partitionTestProgress.error ? '#fee' : partitionTestProgress.done ? '#efe' : '#fff8e0' }}>
+          {!partitionTestProgress.done && !partitionTestProgress.error && (
+            <div className="progress-bar" style={{ width: `${partitionTestProgress.progress || 0}%`, backgroundColor: '#ff6b00' }} />
+          )}
+          <span>🧪 PARTITION TEST: {partitionTestProgress.message}</span>
         </div>
       )}
 

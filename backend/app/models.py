@@ -51,6 +51,27 @@ class Dossier(Base):
     )
 
 
+class PaperAdditionalDossier(Base):
+    """Junction table for papers that belong to multiple dossiers.
+
+    Papers have a primary dossier (Paper.dossier_id) and can additionally
+    belong to other dossiers through this junction table.
+    """
+    __tablename__ = "paper_additional_dossiers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="CASCADE"), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_paper_additional_dossiers_paper", "paper_id"),
+        Index("ix_paper_additional_dossiers_dossier", "dossier_id"),
+        Index("ix_paper_additional_dossiers_unique", "paper_id", "dossier_id", unique=True),
+    )
+
+
 class Paper(Base):
     """A seed paper to analyze for citations"""
     __tablename__ = "papers"
@@ -102,6 +123,8 @@ class Paper(Base):
     editions: Mapped[List["Edition"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
     citations: Mapped[List["Citation"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
     jobs: Mapped[List["Job"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
+    # Additional dossiers (many-to-many via junction table)
+    additional_dossiers: Mapped[List["PaperAdditionalDossier"]] = relationship(cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_papers_title", "title"),  # Regular index for title lookups

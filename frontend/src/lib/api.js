@@ -437,6 +437,32 @@ class RefereeAPI {
       method: 'POST',
     });
   }
+
+  // Test partition harvest for a single year (temporary test endpoint)
+  async testPartitionHarvest(editionId, year) {
+    return this.request('/api/test/partition-harvest', {
+      method: 'POST',
+      body: {
+        edition_id: editionId,
+        year: year,
+      },
+    });
+  }
+
+  // ============== Multi-Dossier Support ==============
+
+  /**
+   * Add a paper to multiple dossiers.
+   * First dossier becomes primary, rest are additional.
+   * @param {number} paperId - Paper ID
+   * @param {number[]} dossierIds - Array of dossier IDs
+   */
+  async addPaperToDossiers(paperId, dossierIds) {
+    return this.request(`/api/papers/${paperId}/add-to-dossiers`, {
+      method: 'POST',
+      body: { dossier_ids: dossierIds },
+    });
+  }
 }
 
 export const api = new RefereeAPI();

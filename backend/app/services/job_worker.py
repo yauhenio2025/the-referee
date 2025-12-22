@@ -669,9 +669,50 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     except json.JSONDecodeError:
                         log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state, starting fresh")
                 else:
-                    # No saved state - previous harvest may have been non-year-by-year
-                    # We need to scan all years to ensure complete coverage
-                    log_now(f"[EDITION {i+1}] ℹ️ No saved year-by-year state - will scan all years (existing citations may be incomplete per year)")
+                    # No saved state - RECONSTRUCT completed_years from existing citations in DB
+                    # This prevents re-scanning years that are already fully harvested
+                    if edition.harvested_citation_count and edition.harvested_citation_count > 100:
+                        log_now(f"[EDITION {i+1}] 🔧 No saved state but {edition.harvested_citation_count:,} citations exist - reconstructing completed years from DB...")
+
+                        # Query citations grouped by year to find which years have data
+                        year_counts_result = await db.execute(
+                            select(Citation.year, func.count(Citation.id).label('count'))
+                            .where(Citation.edition_id == edition.id)
+                            .where(Citation.year.isnot(None))
+                            .group_by(Citation.year)
+                            .order_by(Citation.year.desc())
+                        )
+                        year_counts = {row.year: row.count for row in year_counts_result.fetchall()}
+
+                        if year_counts:
+                            # Years with significant citations (>50) are likely complete
+                            # Mark them as completed so we skip them
+                            for year, count in year_counts.items():
+                                if count >= 50:  # Threshold: year with 50+ citations is probably complete
+                                    completed_years.add(year)
+
+                            log_now(f"[EDITION {i+1}] 🔧 Reconstructed {len(completed_years)} completed years from DB: {sorted(completed_years, reverse=True)[:10]}...")
+                            log_now(f"[EDITION {i+1}] 🔧 Year counts sample: {dict(list(year_counts.items())[:5])}")
+
+                            # Save this reconstructed state so future resumes are faster
+                            reconstructed_state = {
+                                "mode": "year_by_year",
+                                "current_year": None,  # Start fresh from current year
+                                "current_page": 0,
+                                "completed_years": sorted(list(completed_years), reverse=True),
+                                "reconstructed": True,  # Mark as reconstructed
+                            }
+                            await db.execute(
+                                update(Edition)
+                                .where(Edition.id == edition.id)
+                                .values(harvest_resume_state=json.dumps(reconstructed_state))
+                            )
+                            await db.commit()
+                            log_now(f"[EDITION {i+1}] ✓ Saved reconstructed resume state")
+                        else:
+                            log_now(f"[EDITION {i+1}] ℹ️ No year data found in citations - will scan all years")
+                    else:
+                        log_now(f"[EDITION {i+1}] ℹ️ No saved year-by-year state - will scan all years")
 
                 # Helper to save year-by-year resume state to edition
                 async def save_year_resume_state(year: int, page: int, completed: set):
@@ -704,6 +745,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 current_harvest_year["mode"] = "year_by_year"
                 consecutive_empty_years = 0
 
+                # Import harvest_partition for overflow years
+                from .overflow_harvester import harvest_partition
+
                 for year in range(current_year, min_year - 1, -1):
                     # SKIP completed years entirely
                     if year in completed_years:
@@ -721,22 +765,67 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     else:
                         log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
 
-                    result = await scholar_service.get_cited_by(
+                    # STEP 1: Quick count check - fetch just first page to see total
+                    count_result = await scholar_service.get_cited_by(
                         scholar_id=edition.scholar_id,
-                        max_results=1000,  # Max per year
+                        max_results=10,  # Just first page for count
                         year_low=year,
                         year_high=year,
-                        on_page_complete=save_page_citations_with_year_state,
-                        start_page=start_page_for_this_year,
                     )
+                    total_this_year = count_result.get('totalResults', 0) if isinstance(count_result, dict) else 0
+
+                    # STEP 2: Decide harvest strategy based on count
+                    if total_this_year > 1000:
+                        # OVERFLOW: Use partition strategy from the start
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: {total_this_year} citations - USING PARTITION STRATEGY")
+
+                        try:
+                            partition_stats = await harvest_partition(
+                                scholar_service=scholar_service,
+                                db=db,
+                                edition_id=edition.id,
+                                scholar_id=edition.scholar_id,
+                                year=year,
+                                edition_title=edition.title,
+                                paper_id=paper_id,
+                                existing_scholar_ids=existing_scholar_ids,
+                                on_page_complete=save_page_citations_with_year_state,
+                                total_for_year=total_this_year,
+                            )
+
+                            year_citations = partition_stats.get("total_new", 0)
+                            total_new_citations += year_citations
+                            log_now(f"[EDITION {i+1}] 📅 Year {year}: ✓ Partition harvest complete - {year_citations} new citations")
+
+                        except Exception as partition_err:
+                            log_now(f"[EDITION {i+1}] ⚠️ Partition harvest failed: {partition_err}", "warning")
+                            # Fallback to normal harvest (will only get ~1000)
+                            result = await scholar_service.get_cited_by(
+                                scholar_id=edition.scholar_id,
+                                max_results=1000,
+                                year_low=year,
+                                year_high=year,
+                                on_page_complete=save_page_citations_with_year_state,
+                            )
+                            year_citations = total_new_citations - year_start_citations
+
+                    else:
+                        # Normal case: <= 1000 citations, standard harvest
+                        result = await scholar_service.get_cited_by(
+                            scholar_id=edition.scholar_id,
+                            max_results=1000,  # Max per year
+                            year_low=year,
+                            year_high=year,
+                            on_page_complete=save_page_citations_with_year_state,
+                            start_page=start_page_for_this_year,
+                        )
+
+                        year_citations = total_new_citations - year_start_citations
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total)")
 
                     # Mark this year as completed
                     completed_years.add(year)
                     await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
-
-                    year_citations = total_new_citations - year_start_citations
-                    total_this_year = result.get('totalResults', 0) if isinstance(result, dict) else 0
-                    log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total for year)")
 
                     # Track consecutive empty years for early termination
                     if year_citations == 0 and total_this_year == 0:
