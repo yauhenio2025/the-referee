@@ -5,10 +5,36 @@
  * - Select an existing dossier from a dropdown
  * - Create a new dossier on the fly
  * - See the collection hierarchy
+ * - Remember last selection via localStorage
  */
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
+
+// localStorage key for remembering last selection
+const LAST_SELECTION_KEY = 'referee_last_dossier_selection'
+
+// Get last selection from localStorage
+function getLastSelection() {
+  try {
+    const saved = localStorage.getItem(LAST_SELECTION_KEY)
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (e) {
+    console.warn('Failed to load last dossier selection:', e)
+  }
+  return { collectionId: null, dossierId: null }
+}
+
+// Save selection to localStorage
+function saveLastSelection(collectionId, dossierId) {
+  try {
+    localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify({ collectionId, dossierId }))
+  } catch (e) {
+    console.warn('Failed to save dossier selection:', e)
+  }
+}
 
 export default function DossierSelectModal({
   isOpen,
@@ -47,6 +73,8 @@ export default function DossierSelectModal({
       setSelectedDossierId(newDossier.id)
       setIsCreatingDossier(false)
       setNewDossierName('')
+      // Save new dossier as last selection
+      saveLastSelection(selectedCollectionId, newDossier.id)
     },
   })
 
@@ -57,17 +85,29 @@ export default function DossierSelectModal({
     }
   }, [selectedCollectionId, defaultCollectionId])
 
-  // Initialize with defaults when modal opens
+  // Initialize with defaults or last selection when modal opens
   useEffect(() => {
     if (isOpen) {
-      setSelectedCollectionId(defaultCollectionId)
-      setSelectedDossierId(defaultDossierId)
+      // Use provided defaults first, otherwise fall back to last selection from localStorage
+      if (defaultCollectionId) {
+        setSelectedCollectionId(defaultCollectionId)
+        setSelectedDossierId(defaultDossierId)
+      } else {
+        const lastSelection = getLastSelection()
+        setSelectedCollectionId(lastSelection.collectionId)
+        setSelectedDossierId(lastSelection.dossierId)
+      }
     }
   }, [isOpen, defaultCollectionId, defaultDossierId])
 
   if (!isOpen) return null
 
   const handleConfirm = () => {
+    // Save selection to localStorage for next time
+    if (selectedCollectionId) {
+      saveLastSelection(selectedCollectionId, selectedDossierId)
+    }
+
     if (isCreatingDossier && newDossierName.trim() && selectedCollectionId) {
       // Create new dossier, then select
       onSelect({
