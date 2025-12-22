@@ -969,6 +969,116 @@ async def process_resolve_job(job: Job, db: AsyncSession):
         raise
 
 
+async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str, Any]:
+    """Process a partition harvest test job for a single year"""
+    from .overflow_harvester import harvest_partition
+
+    params = json.loads(job.params) if job.params else {}
+    edition_id = params.get("edition_id")
+    year = params.get("year")
+    total_count = params.get("total_count", 0)
+
+    log_now(f"[PartitionTest] Starting partition harvest for edition {edition_id}, year {year} ({total_count} citations)")
+
+    # Get the edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+
+    if not edition:
+        raise ValueError(f"Edition {edition_id} not found")
+
+    if not edition.scholar_id:
+        raise ValueError(f"Edition {edition_id} has no scholar_id")
+
+    # Update progress
+    job.progress = 5
+    job.progress_message = f"Starting partition harvest for year {year}..."
+    await db.commit()
+
+    # Get scholar service
+    scholar_service = await get_scholar_service()
+
+    # Get existing citation scholar IDs to avoid duplicates
+    existing_result = await db.execute(
+        select(Citation.scholar_id).where(Citation.paper_id == edition.paper_id)
+    )
+    existing_scholar_ids = {r[0] for r in existing_result.fetchall() if r[0]}
+    log_now(f"[PartitionTest] Found {len(existing_scholar_ids)} existing citations to skip")
+
+    # Track new citations for this job
+    new_citations_count = {"total": 0}
+
+    # Define save callback for citations (matches harvest_partition's on_page_complete signature)
+    async def on_page_complete(page_num: int, papers: List[Dict]):
+        """Save citations from each page"""
+        new_count = 0
+        for paper in papers:
+            scholar_id = paper.get("scholarId") or paper.get("id")
+            if not scholar_id or scholar_id in existing_scholar_ids:
+                continue
+
+            # Create citation
+            citation = Citation(
+                edition_id=edition_id,
+                paper_id=edition.paper_id,
+                scholar_id=scholar_id,
+                title=paper.get("title", ""),
+                authors=paper.get("authorsRaw") or ", ".join(paper.get("authors", [])),
+                year=paper.get("year"),
+                venue=paper.get("venue", ""),
+                abstract=paper.get("abstract", ""),
+                citation_count=paper.get("citationCount", 0),
+                link=paper.get("link", ""),
+            )
+            db.add(citation)
+            existing_scholar_ids.add(scholar_id)
+            new_count += 1
+
+        await db.commit()
+        new_citations_count["total"] += new_count
+
+        # Update job progress
+        job.progress = min(90, 10 + page_num * 2)
+        job.progress_message = f"Page {page_num + 1}: {new_citations_count['total']} new citations"
+        await db.commit()
+
+        log_now(f"[PartitionTest] Page {page_num + 1}: saved {new_count} new citations (total: {new_citations_count['total']})")
+
+    try:
+        # Run the partition harvest
+        partition_result = await harvest_partition(
+            scholar_service=scholar_service,
+            db=db,
+            edition_id=edition_id,
+            scholar_id=edition.scholar_id,
+            year=year,
+            edition_title=edition.title,
+            paper_id=edition.paper_id,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            total_for_year=total_count,
+        )
+
+        # Update edition harvest stats
+        await update_edition_harvest_stats(db, edition_id)
+
+        log_now(f"[PartitionTest] Completed: {partition_result}")
+
+        return {
+            "edition_id": edition_id,
+            "year": year,
+            "success": True,
+            "total_citations_harvested": partition_result.get("total_new", 0),
+            "exclusion_harvested": partition_result.get("exclusion_harvested", 0),
+            "inclusion_harvested": partition_result.get("inclusion_harvested", 0),
+            "excluded_terms": partition_result.get("excluded_terms", []),
+        }
+
+    except Exception as e:
+        log_now(f"[PartitionTest] Error: {e}")
+        raise
+
+
 async def process_single_job(job_id: int):
     """Process a single job by ID with concurrency control"""
     global _job_semaphore, _running_jobs
@@ -1012,6 +1122,8 @@ async def process_single_job(job_id: int):
                         result = await process_extract_citations_job(job, db)
                     elif job.job_type == "resolve":
                         result = await process_resolve_job(job, db)
+                    elif job.job_type == "partition_harvest_test":
+                        result = await process_partition_harvest_test(job, db)
                     else:
                         raise ValueError(f"Unknown job type: {job.job_type}")
 

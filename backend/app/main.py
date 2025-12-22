@@ -2771,7 +2771,6 @@ class PartitionTestRequest(BaseModel):
 @app.post("/api/test/partition-harvest")
 async def test_partition_harvest(
     request: PartitionTestRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -2815,7 +2814,7 @@ async def test_partition_harvest(
             "total_count": total_count
         }
 
-    # Create a job to track this
+    # Create a job to track this - job worker will pick it up
     job = Job(
         paper_id=edition.paper_id,
         job_type="partition_harvest_test",
@@ -2826,116 +2825,18 @@ async def test_partition_harvest(
             "total_count": total_count,
         }),
         progress=0,
-        progress_message=f"Test partition harvest for year {request.year} ({total_count} citations)",
+        progress_message=f"Queued: partition harvest for year {request.year} ({total_count} citations)",
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    # Run the harvest in background
-    async def run_partition_harvest():
-        from .database import async_session
-        from sqlalchemy import select
-
-        async with async_session() as session:
-            # Get existing citations to avoid duplicates
-            existing_result = await session.execute(
-                select(Citation.scholar_id).where(Citation.paper_id == edition.paper_id)
-            )
-            existing_scholar_ids = {r[0] for r in existing_result.fetchall() if r[0]}
-
-            # Callback to save citations
-            total_new = {"count": 0}
-
-            async def save_callback(page_num, papers):
-                nonlocal total_new
-                for paper_data in papers:
-                    scholar_id = paper_data.get("scholarId")
-                    if not scholar_id or scholar_id in existing_scholar_ids:
-                        continue
-
-                    citation = Citation(
-                        paper_id=edition.paper_id,
-                        edition_id=edition.id,
-                        scholar_id=scholar_id,
-                        title=paper_data.get("title", "Unknown"),
-                        authors=paper_data.get("authorsRaw"),
-                        year=paper_data.get("year"),
-                        venue=paper_data.get("venue"),
-                        abstract=paper_data.get("abstract"),
-                        link=paper_data.get("link"),
-                        citation_count=paper_data.get("citationCount", 0),
-                    )
-                    session.add(citation)
-                    existing_scholar_ids.add(scholar_id)
-                    total_new["count"] += 1
-
-                await session.commit()
-
-                # Update job progress
-                await session.execute(
-                    update(Job).where(Job.id == job.id).values(
-                        progress=min(90, 10 + page_num * 2),
-                        progress_message=f"Page {page_num + 1}: {total_new['count']} new citations"
-                    )
-                )
-                await session.commit()
-
-            try:
-                # Mark job as running
-                await session.execute(
-                    update(Job).where(Job.id == job.id).values(
-                        status="running",
-                        started_at=datetime.utcnow()
-                    )
-                )
-                await session.commit()
-
-                # Run partition harvest
-                stats = await harvest_partition(
-                    scholar_service=get_scholar_service(),
-                    db=session,
-                    edition_id=edition.id,
-                    scholar_id=edition.scholar_id,
-                    year=request.year,
-                    edition_title=edition.title,
-                    paper_id=edition.paper_id,
-                    existing_scholar_ids=existing_scholar_ids,
-                    on_page_complete=save_callback,
-                    total_for_year=total_count,
-                )
-
-                # Mark job as complete
-                await session.execute(
-                    update(Job).where(Job.id == job.id).values(
-                        status="completed",
-                        progress=100,
-                        progress_message=f"Complete: {total_new['count']} new citations",
-                        result=json.dumps(stats),
-                        completed_at=datetime.utcnow()
-                    )
-                )
-                await session.commit()
-
-            except Exception as e:
-                import traceback
-                await session.execute(
-                    update(Job).where(Job.id == job.id).values(
-                        status="failed",
-                        error=f"{str(e)}\n{traceback.format_exc()}",
-                        completed_at=datetime.utcnow()
-                    )
-                )
-                await session.commit()
-
-    # Start background task
-    background_tasks.add_task(run_partition_harvest)
-
+    # Job worker will automatically pick this up - no need for background task
     return {
         "status": "started",
         "job_id": job.id,
         "edition_id": request.edition_id,
         "year": request.year,
         "total_count": total_count,
-        "message": f"Partition harvest started for year {request.year} with {total_count} citations"
+        "message": f"Partition harvest queued for year {request.year} with {total_count} citations"
     }
