@@ -23,7 +23,7 @@ from .schemas import (
     EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
     EditionExcludeRequest, EditionAddAsSeedRequest, EditionAddAsSeedResponse,
     ManualEditionAddRequest, ManualEditionAddResponse,
-    CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult,
+    CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult, CitationMarkReviewedRequest,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
     CollectionCreate, CollectionUpdate, CollectionResponse, CollectionDetail,
@@ -1686,6 +1686,26 @@ async def get_paper_citations(
         citations.append(CitationResponse(**citation_dict))
 
     return citations
+
+
+@app.post("/api/citations/mark-reviewed")
+async def mark_citations_reviewed(
+    request: CitationMarkReviewedRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Bulk mark citations as reviewed/unseen"""
+    if not request.citation_ids:
+        return {"updated": 0}
+
+    stmt = (
+        update(Citation)
+        .where(Citation.id.in_(request.citation_ids))
+        .values(reviewed=request.reviewed)
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+
+    return {"updated": result.rowcount, "reviewed": request.reviewed}
 
 
 @app.get("/api/papers/{paper_id}/cross-citations", response_model=CrossCitationResult)

@@ -205,6 +205,9 @@ class Citation(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # User review tracking
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Relationships
     paper: Mapped["Paper"] = relationship(back_populates="citations")
 

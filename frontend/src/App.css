@@ -3660,6 +3660,40 @@ button:disabled {
   border-radius: 4px;
 }
 
+.reviewed-toggle {
+  margin-left: auto;
+}
+
+.reviewed-toggle .btn-toggle {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.15s;
+}
+
+.reviewed-toggle .btn-toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.reviewed-toggle .btn-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.reviewed-toggle .reviewed-count {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
 .results-count {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -3694,6 +3728,42 @@ button:disabled {
 
 .citations-table tr.multi-cross {
   background: rgba(99, 102, 241, 0.1);
+}
+
+.citations-table tr.reviewed {
+  opacity: 0.5;
+}
+
+.citations-table tr.reviewed:hover {
+  opacity: 0.8;
+}
+
+.citations-table .col-actions {
+  width: 80px;
+  text-align: center;
+}
+
+.citations-table .col-actions .btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 1rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.citations-table .col-actions .btn-icon:hover {
+  opacity: 1;
+}
+
+.citations-table .btn-reviewed {
+  color: var(--text-secondary);
+}
+
+.citations-table .btn-reviewed.checked {
+  color: var(--success);
+  opacity: 1;
 }
 
 .citations-table .col-cross {

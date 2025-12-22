@@ -293,9 +293,16 @@ class CitationResponse(BaseModel):
     edition_id: Optional[int] = None
     edition_language: Optional[str] = None
     edition_title: Optional[str] = None  # For edition-specific filtering
+    reviewed: bool = False  # User has reviewed/seen this citation
 
     class Config:
         from_attributes = True
+
+
+class CitationMarkReviewedRequest(BaseModel):
+    """Request to mark citations as reviewed/seen"""
+    citation_ids: List[int]
+    reviewed: bool = True
 
 
 class CitationExtractionRequest(BaseModel):

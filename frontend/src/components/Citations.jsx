@@ -22,6 +22,7 @@ export default function Citations({ paper, onBack }) {
   const [selectedVenue, setSelectedVenue] = useState(null) // Filter by venue facet
   const [showAllAuthors, setShowAllAuthors] = useState(false) // Expand authors list
   const [showAllVenues, setShowAllVenues] = useState(false) // Expand venues list
+  const [hideReviewed, setHideReviewed] = useState(false) // Hide reviewed/seen citations
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -106,6 +107,35 @@ export default function Citations({ paper, onBack }) {
       toast.error(`Failed to create seed: ${error.message}`)
     },
   })
+
+  // Mark citation as reviewed/unseen
+  const markReviewed = useMutation({
+    mutationFn: ({ citationIds, reviewed }) => api.markCitationsReviewed(citationIds, reviewed),
+    onSuccess: (data, { reviewed }) => {
+      // Optimistically update the cache
+      queryClient.setQueryData(['citations', paper.id], (old) => {
+        if (!old) return old
+        const idSet = new Set(data.citation_ids || [])
+        return old.map(c =>
+          data.updated > 0 && (idSet.size === 0 || idSet.has(c.id))
+            ? { ...c, reviewed }
+            : c
+        )
+      })
+      queryClient.invalidateQueries(['citations', paper.id])
+    },
+    onError: (error) => {
+      toast.error(`Failed to update: ${error.message}`)
+    },
+  })
+
+  // Toggle single citation reviewed status
+  const handleToggleReviewed = useCallback((citation) => {
+    markReviewed.mutate({
+      citationIds: [citation.id],
+      reviewed: !citation.reviewed,
+    })
+  }, [markReviewed])
 
   // Handle adding citation as seed
   const handleAddAsSeed = useCallback((citation) => {
@@ -235,13 +265,18 @@ export default function Citations({ paper, onBack }) {
         if (!selectedVenue) return true
         return (c.venue || '').toLowerCase() === selectedVenue.toLowerCase()
       })
+      // Hide reviewed filter
+      .filter(c => {
+        if (!hideReviewed) return true
+        return !c.reviewed
+      })
       .sort((a, b) => {
         if (sortBy === 'intersection') return b.intersection_count - a.intersection_count
         if (sortBy === 'citations') return (b.citation_count || 0) - (a.citation_count || 0)
         if (sortBy === 'year') return (b.year || 0) - (a.year || 0)
         return 0
       })
-  }, [citations, minIntersection, selectedEdition, sortBy, searchTitle, searchAuthor, searchVenue, selectedAuthor, selectedVenue])
+  }, [citations, minIntersection, selectedEdition, sortBy, searchTitle, searchAuthor, searchVenue, selectedAuthor, selectedVenue, hideReviewed])
 
   // Group by intersection count for summary
   const intersectionGroups = useMemo(() => {
@@ -254,6 +289,12 @@ export default function Citations({ paper, onBack }) {
   }, [citations])
 
   const maxIntersection = Math.max(...Object.keys(intersectionGroups).map(Number), 1)
+
+  // Count reviewed citations
+  const reviewedCount = useMemo(() => {
+    if (!citations) return 0
+    return citations.filter(c => c.reviewed).length
+  }, [citations])
 
   // Get selected edition info for display
   const selectedEditionInfo = editionGroups.find(e => e.id === selectedEdition)
@@ -448,6 +489,17 @@ export default function Citations({ paper, onBack }) {
                 <option value="year">Year (newest first)</option>
               </select>
             </div>
+
+            <div className="reviewed-toggle">
+              <button
+                className={`btn-toggle ${hideReviewed ? 'active' : ''}`}
+                onClick={() => setHideReviewed(!hideReviewed)}
+                title={hideReviewed ? 'Show all citations' : 'Hide reviewed citations'}
+              >
+                {hideReviewed ? '👁️ Show reviewed' : '👁️‍🗨️ Hide reviewed'}
+                {reviewedCount > 0 && <span className="reviewed-count">({reviewedCount})</span>}
+              </button>
+            </div>
           </div>
 
           {/* Results count */}
@@ -482,6 +534,7 @@ export default function Citations({ paper, onBack }) {
                   citation={citation}
                   maxIntersection={maxIntersection}
                   onAddAsSeed={handleAddAsSeed}
+                  onToggleReviewed={handleToggleReviewed}
                 />
               ))}
             </tbody>
@@ -533,11 +586,11 @@ function getLangEmoji(lang) {
   return flags[lang] || '🌐'
 }
 
-function CitationRow({ citation, maxIntersection, onAddAsSeed }) {
+function CitationRow({ citation, maxIntersection, onAddAsSeed, onToggleReviewed }) {
   const crossWidth = (citation.intersection_count / maxIntersection) * 100
 
   return (
-    <tr className={citation.intersection_count > 1 ? 'multi-cross' : ''}>
+    <tr className={`${citation.intersection_count > 1 ? 'multi-cross' : ''} ${citation.reviewed ? 'reviewed' : ''}`}>
       <td className="col-cross">
         <div className="cross-indicator">
           <span className="cross-num">{citation.intersection_count}</span>
@@ -574,6 +627,13 @@ function CitationRow({ citation, maxIntersection, onAddAsSeed }) {
       </td>
       <td className="col-cites">{citation.citation_count?.toLocaleString() || 0}</td>
       <td className="col-actions">
+        <button
+          className={`btn-icon btn-reviewed ${citation.reviewed ? 'checked' : ''}`}
+          onClick={() => onToggleReviewed(citation)}
+          title={citation.reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
+        >
+          {citation.reviewed ? '✓' : '○'}
+        </button>
         <button
           className="btn-icon btn-seed"
           onClick={() => onAddAsSeed(citation)}

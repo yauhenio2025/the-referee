@@ -246,6 +246,16 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}/cross-citations?min_intersection=${minIntersection}`);
   }
 
+  async markCitationsReviewed(citationIds, reviewed = true) {
+    return this.request('/api/citations/mark-reviewed', {
+      method: 'POST',
+      body: {
+        citation_ids: citationIds,
+        reviewed,
+      },
+    });
+  }
+
   // Jobs
   async listJobs(params = {}) {
     const query = new URLSearchParams(params).toString();
