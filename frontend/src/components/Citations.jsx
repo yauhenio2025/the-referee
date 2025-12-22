@@ -42,14 +42,26 @@ export default function Citations({ paper, onBack }) {
   // Create seed paper from citation
   const createSeedFromCitation = useMutation({
     mutationFn: async ({ citation, dossierOptions }) => {
+      let dossierId = dossierOptions.dossierId || null
+      const collectionId = dossierOptions.collectionId || paper.collection_id || null
+
+      // If user wants to create a new dossier, do that first
+      if (dossierOptions.createNewDossier && dossierOptions.newDossierName && collectionId) {
+        const newDossier = await api.createDossier({
+          name: dossierOptions.newDossierName,
+          collection_id: collectionId,
+        })
+        dossierId = newDossier.id
+      }
+
       // Create a paper from the citation data
       const newPaper = await api.createPaper({
         title: citation.title,
         authors: citation.authors,
         year: citation.year,
         venue: citation.venue,
-        dossier_id: dossierOptions.dossierId || null,
-        collection_id: dossierOptions.collectionId || paper.collection_id || null,
+        dossier_id: dossierId,
+        collection_id: collectionId,
       })
       return { newPaper, dossierOptions }
     },

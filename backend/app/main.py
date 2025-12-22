@@ -594,6 +594,7 @@ async def create_paper(
         year=paper.year,
         venue=paper.venue,
         collection_id=paper.collection_id,
+        dossier_id=paper.dossier_id,
         status="pending",
     )
     db.add(db_paper)
