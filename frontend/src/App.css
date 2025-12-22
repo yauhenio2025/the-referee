@@ -4516,3 +4516,81 @@ button:disabled {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
 }
+
+/* ============================================
+   Paper List - Processed Filter & Collection Badge
+   ============================================ */
+
+/* Toggle for showing/hiding processed papers */
+.toggle-processed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-processed:hover {
+  background: var(--bg-tertiary);
+}
+
+.toggle-processed input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* Paper badges container */
+.paper-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Collection badge */
+.badge-collection {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-left-width: 3px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Processed paper card styling */
+.paper-card-processed {
+  opacity: 0.7;
+  border-left-color: #22c55e;
+}
+
+.paper-card-processed:hover {
+  opacity: 1;
+}
+
+/* Empty state when all papers are processed */
+.papers-all-processed {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: var(--text-secondary);
+}
+
+.papers-all-processed h3 {
+  color: var(--success);
+  margin-bottom: 0.5rem;
+}
+
+.papers-all-processed p {
+  margin-bottom: 1rem;
+}

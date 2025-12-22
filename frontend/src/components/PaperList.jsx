@@ -16,6 +16,19 @@ export default function PaperList({ onSelectPaper }) {
   const [batchResolving, setBatchResolving] = useState(false)
   const [selectedPapers, setSelectedPapers] = useState(new Set())
   const [addToCollectionPaper, setAddToCollectionPaper] = useState(null)
+  const [showProcessed, setShowProcessed] = useState(false) // Hide processed papers by default
+
+  // Fetch collections for badge display
+  const { data: collections = [] } = useQuery({
+    queryKey: ['collections'],
+    queryFn: () => api.getCollections(),
+  })
+
+  // Fetch dossiers for badge display
+  const { data: allDossiers = [] } = useQuery({
+    queryKey: ['all-dossiers'],
+    queryFn: () => api.getDossiers(),
+  })
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -292,18 +305,46 @@ export default function PaperList({ onSelectPaper }) {
     return authors.replace(/([a-z])([A-Z])/g, '$1 $2').trim()
   }
 
+  // Helper to check if a paper is "processed" (in collection + has harvested citations)
+  const isProcessed = (paper) => {
+    return paper.collection_id && paper.total_harvested_citations > 0
+  }
+
+  // Filter papers based on showProcessed toggle
+  const visiblePapers = papers?.filter(p => showProcessed || !isProcessed(p)) || []
+  const processedCount = papers?.filter(isProcessed).length || 0
+
   // Filter for selectable papers (pending or error)
-  const selectablePapers = papers?.filter(p => p.status === 'pending' || p.status === 'error') || []
+  const selectablePapers = visiblePapers?.filter(p => p.status === 'pending' || p.status === 'error') || []
   const selectedCount = selectedPapers.size
   const selectedResolvable = Array.from(selectedPapers).filter(id =>
     selectablePapers.some(p => p.id === id)
   ).length
 
+  // Helper to get collection/dossier info for a paper
+  const getCollectionInfo = (paper) => {
+    if (!paper.collection_id) return null
+    const collection = collections.find(c => c.id === paper.collection_id)
+    const dossier = paper.dossier_id ? allDossiers.find(d => d.id === paper.dossier_id) : null
+    return { collection, dossier }
+  }
+
   return (
     <div className="paper-list">
       <div className="paper-list-header">
-        <h2>Papers ({papers.length})</h2>
+        <h2>Papers ({visiblePapers.length}{processedCount > 0 && !showProcessed ? ` of ${papers.length}` : ''})</h2>
         <div className="paper-list-actions">
+          {/* Toggle for processed papers */}
+          {processedCount > 0 && (
+            <label className="toggle-processed">
+              <input
+                type="checkbox"
+                checked={showProcessed}
+                onChange={e => setShowProcessed(e.target.checked)}
+              />
+              <span>Show processed ({processedCount})</span>
+            </label>
+          )}
           {/* Selection controls - show when there are pending/error papers */}
           {selectablePapers.length > 0 && (
             <>
@@ -359,17 +400,18 @@ export default function PaperList({ onSelectPaper }) {
       )}
 
       <div className="papers">
-        {papers.map((paper) => {
+        {visiblePapers.map((paper) => {
           const badge = getStatusBadge(paper.status)
           const isResolving = resolvingId === paper.id
           const isExpanded = expandedAbstracts[paper.id]
           const needsReconciliation = paper.status === 'needs_reconciliation'
+          const collectionInfo = getCollectionInfo(paper)
 
           const isSelectable = paper.status === 'pending' || paper.status === 'error'
           const isSelected = selectedPapers.has(paper.id)
 
           return (
-            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''} ${isSelected ? 'paper-card-selected' : ''}`}>
+            <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''} ${isSelected ? 'paper-card-selected' : ''} ${isProcessed(paper) ? 'paper-card-processed' : ''}`}>
               {/* Checkbox for selection (only for pending/error papers) */}
               {isSelectable && (
                 <div className="paper-select-checkbox">
@@ -396,9 +438,24 @@ export default function PaperList({ onSelectPaper }) {
                 ) : (
                   <h3 className="paper-title">{paper.title}</h3>
                 )}
-                <span className={`badge ${badge.class}`}>
-                  {isResolving ? '🔄 Resolving...' : badge.label}
-                </span>
+                <div className="paper-badges">
+                  <span className={`badge ${badge.class}`}>
+                    {isResolving ? '🔄 Resolving...' : badge.label}
+                  </span>
+                  {/* Collection/Dossier badge */}
+                  {collectionInfo && (
+                    <span
+                      className="badge badge-collection"
+                      style={{ borderColor: collectionInfo.collection?.color || '#3182CE' }}
+                      title={collectionInfo.dossier
+                        ? `${collectionInfo.collection?.name} › ${collectionInfo.dossier.name}`
+                        : collectionInfo.collection?.name}
+                    >
+                      📁 {collectionInfo.collection?.name?.substring(0, 15) || '...'}
+                      {collectionInfo.dossier && ` › ${collectionInfo.dossier.name?.substring(0, 10)}`}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Metadata row: authors, year, venue */}
