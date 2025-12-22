@@ -4,6 +4,24 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Bug Fix - Dossier Creation When Adding Seeds
+
+**Commit:** `b8ba68b` on `main`
+
+**Description:** Fixed two bugs that prevented dossiers from being created when adding seeds from the Citations page.
+
+**Bugs Fixed:**
+1. **Backend**: `create_paper` endpoint ignored `dossier_id` from request (line was missing)
+2. **Frontend**: `Citations.jsx` didn't create new dossiers before creating papers
+
+**Root Cause:** When user selected "Create new dossier" in the modal, the dossier was never actually created. Papers were added with `dossier_id: null`.
+
+**Files Modified:**
+- `backend/app/main.py` - Added `dossier_id=paper.dossier_id` to create_paper
+- `frontend/src/components/Citations.jsx` - Added dossier creation before paper creation
+
+---
+
 ## 2025-12-22: Dossiers & Terminology Cleanup
 
 **Commit:** `9be6494` on `main`
