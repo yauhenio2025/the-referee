@@ -3176,6 +3176,50 @@ button:disabled {
   color: var(--accent);
 }
 
+/* Toast with action button */
+.toast-with-action {
+  cursor: default;
+  padding-right: 0.5rem;
+}
+
+.toast-with-action:hover {
+  transform: none;
+}
+
+.toast-action {
+  margin-left: auto;
+  padding: 0.4rem 0.8rem;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.toast-action:hover {
+  background: var(--accent-hover);
+  transform: scale(1.05);
+}
+
+.toast-close {
+  padding: 0.2rem 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
 /* ============================================
    CITATIONS VIEW
    ============================================ */
@@ -3758,6 +3802,307 @@ button:disabled {
 .status-badge.status-error {
   background: rgba(239, 68, 68, 0.2);
   color: var(--danger);
+}
+
+/* ============================================
+   DOSSIER MANAGEMENT
+   ============================================ */
+
+.collection-detail.with-dossiers {
+  padding: 0;
+}
+
+.collection-detail.with-dossiers .collection-detail-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+
+.collection-detail.with-dossiers .header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.collection-body {
+  display: flex;
+  height: calc(100vh - 160px);
+}
+
+/* Dossier Sidebar */
+.dossier-sidebar {
+  width: 240px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.dossier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dossier-header h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.dossier-header .btn-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.dossier-header .btn-icon:hover {
+  transform: scale(1.1);
+}
+
+/* Dossier create form */
+.dossier-create-form {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+
+.dossier-create-form input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.dossier-create-form .form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dossier-create-form .btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+/* Dossier list */
+.dossier-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+.dossier-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+  gap: 0.5rem;
+}
+
+.dossier-item:hover {
+  background: var(--bg-hover);
+}
+
+.dossier-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-left: 3px solid var(--accent);
+}
+
+.dossier-item.unassigned {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.dossier-name {
+  flex: 1;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dossier-count {
+  font-size: 0.75rem;
+  background: var(--bg);
+  padding: 0.15rem 0.4rem;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  min-width: 24px;
+  text-align: center;
+}
+
+.dossier-item input {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.dossier-item .btn-xs {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.dossier-item:hover .btn-xs {
+  opacity: 1;
+}
+
+/* Keyboard hints */
+.keyboard-hints {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.keyboard-hints span {
+  background: var(--bg);
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* Papers Panel */
+.papers-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.papers-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.papers-toolbar .search-input {
+  flex: 1;
+  max-width: 300px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.papers-toolbar .search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.selection-count {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.selection-actions select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* Papers table in dossier view */
+.papers-panel .papers-table {
+  overflow-y: auto;
+}
+
+.papers-table.compact th,
+.papers-table.compact td {
+  padding: 0.5rem 0.75rem;
+}
+
+.papers-table .col-select {
+  width: 40px;
+  text-align: center;
+}
+
+.papers-table tr.selected {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.papers-table tr.selected:hover {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.papers-table tr[draggable] {
+  cursor: grab;
+}
+
+.papers-table tr[draggable]:active {
+  cursor: grabbing;
+}
+
+.papers-table .authors-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.dossier-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.unassigned-tag {
+  color: var(--text-muted);
 }
 
 /* ============================================

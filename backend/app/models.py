@@ -93,6 +93,9 @@ class Paper(Base):
     # Job control
     harvest_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # Pause auto-resume for this paper
 
+    # Soft delete
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+
     # Relationships
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     dossier: Mapped[Optional["Dossier"]] = relationship(back_populates="papers")

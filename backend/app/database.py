@@ -65,6 +65,9 @@ async def run_migrations():
         # Dossiers feature: papers belong to dossiers, dossiers belong to collections
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS dossier_id INTEGER REFERENCES dossiers(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS ix_papers_dossier ON papers(dossier_id)",
+        # Soft delete feature: papers can be soft deleted and restored
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL",
+        "CREATE INDEX IF NOT EXISTS ix_papers_deleted ON papers(deleted_at)",
     ]
 
     async with engine.begin() as conn:

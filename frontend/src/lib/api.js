@@ -87,8 +87,12 @@ class RefereeAPI {
     return this.request(`/api/papers/${paperId}`);
   }
 
-  async deletePaper(paperId) {
-    return this.request(`/api/papers/${paperId}`, { method: 'DELETE' });
+  async deletePaper(paperId, permanent = false) {
+    return this.request(`/api/papers/${paperId}?permanent=${permanent}`, { method: 'DELETE' });
+  }
+
+  async restorePaper(paperId) {
+    return this.request(`/api/papers/${paperId}/restore`, { method: 'POST' });
   }
 
   async resolvePaper(paperId) {

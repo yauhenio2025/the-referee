@@ -233,11 +233,13 @@ async def list_collections(db: AsyncSession = Depends(get_db)):
     )
     collections = result.scalars().all()
 
-    # Get paper counts for each collection
+    # Get paper counts for each collection (excluding soft-deleted)
     responses = []
     for c in collections:
         count_result = await db.execute(
-            select(func.count(Paper.id)).where(Paper.collection_id == c.id)
+            select(func.count(Paper.id))
+            .where(Paper.collection_id == c.id)
+            .where(Paper.deleted_at.is_(None))
         )
         paper_count = count_result.scalar() or 0
         responses.append(CollectionResponse(
@@ -260,9 +262,12 @@ async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db))
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Get papers in collection
+    # Get papers in collection (excluding soft-deleted)
     papers_result = await db.execute(
-        select(Paper).where(Paper.collection_id == collection_id).order_by(Paper.created_at.desc())
+        select(Paper)
+        .where(Paper.collection_id == collection_id)
+        .where(Paper.deleted_at.is_(None))
+        .order_by(Paper.created_at.desc())
     )
     papers = papers_result.scalars().all()
 
@@ -674,6 +679,7 @@ async def list_papers(
     limit: int = 100,
     status: str = None,
     collection_id: Optional[int] = None,
+    include_deleted: bool = False,
     db: AsyncSession = Depends(get_db)
 ):
     """List all papers, optionally filtered by status or collection"""
@@ -682,6 +688,9 @@ async def list_papers(
         query = query.where(Paper.status == status)
     if collection_id is not None:
         query = query.where(Paper.collection_id == collection_id)
+    # Exclude soft-deleted papers by default
+    if not include_deleted:
+        query = query.where(Paper.deleted_at.is_(None))
     result = await db.execute(query)
     papers = result.scalars().all()
 
@@ -716,15 +725,45 @@ async def get_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @app.delete("/api/papers/{paper_id}")
-async def delete_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete a paper and all related data"""
+async def delete_paper(
+    paper_id: int,
+    permanent: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """Soft delete a paper (or permanently delete if permanent=true)"""
     result = await db.execute(select(Paper).where(Paper.id == paper_id))
     paper = result.scalar_one_or_none()
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    await db.delete(paper)
-    return {"deleted": True, "paper_id": paper_id}
+    if permanent:
+        await db.delete(paper)
+        return {"deleted": True, "paper_id": paper_id, "permanent": True}
+    else:
+        # Soft delete - just set deleted_at timestamp
+        paper.deleted_at = datetime.utcnow()
+        return {
+            "deleted": True,
+            "paper_id": paper_id,
+            "permanent": False,
+            "title": paper.title,
+            "can_restore": True,
+        }
+
+
+@app.post("/api/papers/{paper_id}/restore")
+async def restore_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
+    """Restore a soft-deleted paper"""
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if paper.deleted_at is None:
+        raise HTTPException(status_code=400, detail="Paper is not deleted")
+
+    paper.deleted_at = None
+    return {"restored": True, "paper_id": paper_id, "title": paper.title}
 
 
 # ============== Edition Discovery Endpoints ==============

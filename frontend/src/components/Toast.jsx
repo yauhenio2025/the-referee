@@ -5,9 +5,10 @@ const ToastContext = createContext(null)
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
 
-  const addToast = useCallback((message, type = 'info', duration = 4000) => {
+  const addToast = useCallback((message, type = 'info', options = {}) => {
+    const { duration = 4000, action, actionLabel = 'Undo' } = options
     const id = Date.now() + Math.random()
-    setToasts(prev => [...prev, { id, message, type }])
+    setToasts(prev => [...prev, { id, message, type, action, actionLabel }])
 
     if (duration > 0) {
       setTimeout(() => {
@@ -22,12 +23,25 @@ export function ToastProvider({ children }) {
     setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
+  const handleAction = useCallback((toast) => {
+    if (toast.action) {
+      toast.action()
+    }
+    removeToast(toast.id)
+  }, [removeToast])
+
   const toast = {
-    show: (message, type, duration) => addToast(message, type, duration),
-    success: (message, duration) => addToast(message, 'success', duration),
-    error: (message, duration) => addToast(message, 'error', duration ?? 6000),
-    info: (message, duration) => addToast(message, 'info', duration),
-    warning: (message, duration) => addToast(message, 'warning', duration),
+    show: (message, type, options) => addToast(message, type, options),
+    success: (message, options) => addToast(message, 'success', options),
+    error: (message, options) => addToast(message, 'error', { duration: 6000, ...options }),
+    info: (message, options) => addToast(message, 'info', options),
+    warning: (message, options) => addToast(message, 'warning', options),
+    // Special undo toast with longer duration
+    undo: (message, undoFn) => addToast(message, 'info', {
+      duration: 8000,
+      action: undoFn,
+      actionLabel: 'Undo',
+    }),
   }
 
   return (
@@ -35,7 +49,7 @@ export function ToastProvider({ children }) {
       {children}
       <div className="toast-container">
         {toasts.map(t => (
-          <div key={t.id} className={`toast toast-${t.type}`} onClick={() => removeToast(t.id)}>
+          <div key={t.id} className={`toast toast-${t.type} ${t.action ? 'toast-with-action' : ''}`}>
             <span className="toast-icon">
               {t.type === 'success' && '✓'}
               {t.type === 'error' && '✕'}
@@ -43,6 +57,21 @@ export function ToastProvider({ children }) {
               {t.type === 'info' && 'ℹ'}
             </span>
             <span className="toast-message">{t.message}</span>
+            {t.action && (
+              <button
+                className="toast-action"
+                onClick={(e) => { e.stopPropagation(); handleAction(t) }}
+              >
+                {t.actionLabel}
+              </button>
+            )}
+            <button
+              className="toast-close"
+              onClick={() => removeToast(t.id)}
+              aria-label="Close"
+            >
+              ×
+            </button>
           </div>
         ))}
       </div>

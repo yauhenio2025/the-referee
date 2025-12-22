@@ -36,8 +36,23 @@ export default function PaperList({ onSelectPaper }) {
 
   const deletePaper = useMutation({
     mutationFn: (paperId) => api.deletePaper(paperId),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries(['papers'])
+      // Show undo toast for soft deletes
+      if (result.can_restore) {
+        toast.undo(
+          `Deleted: ${result.title?.substring(0, 40)}...`,
+          async () => {
+            try {
+              await api.restorePaper(result.paper_id)
+              queryClient.invalidateQueries(['papers'])
+              toast.success('Paper restored')
+            } catch (err) {
+              toast.error(`Failed to restore: ${err.message}`)
+            }
+          }
+        )
+      }
     },
   })
 
