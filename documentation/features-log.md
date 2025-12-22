@@ -4,6 +4,33 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Collection Badges & Auto-Hide Processed Papers
+
+**Commit:** `e92cd9d` on `main`
+
+**Description:** Added visual indicators for papers already in collections and automatic hiding of processed papers from the landing page.
+
+**Key Changes:**
+
+### Collection/Dossier Badges
+- Paper cards show collection/dossier badge when assigned
+- Badge displays collection name and dossier (if any)
+- Left border uses collection's color for visual consistency
+- Truncated display with full path in tooltip
+
+### Hide Processed Papers
+- Processed papers hidden from landing page by default
+- "Processed" = has collection_id + total_harvested_citations > 0
+- Toggle checkbox to show/hide processed papers
+- Counter shows how many papers are hidden
+- Dimmed styling for processed papers when shown
+
+**Files Modified:**
+- `frontend/src/components/PaperList.jsx` - Badges, filtering, toggle
+- `frontend/src/App.css` - Badge and toggle styling
+
+---
+
 ## 2025-12-22: Add to Collection & Expandable Editions
 
 **Commit:** `a18a5dd` on `main`
