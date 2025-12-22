@@ -12,7 +12,7 @@ import traceback
 import sys
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Job, Paper, Edition, Citation, RawSearchResult
