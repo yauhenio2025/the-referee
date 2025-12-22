@@ -995,8 +995,8 @@ async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str
     job.progress_message = f"Starting partition harvest for year {year}..."
     await db.commit()
 
-    # Get scholar service
-    scholar_service = await get_scholar_service()
+    # Get scholar service (not async)
+    scholar_service = get_scholar_service()
 
     # Get existing citation scholar IDs to avoid duplicates
     existing_result = await db.execute(
