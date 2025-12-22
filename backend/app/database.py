@@ -62,6 +62,9 @@ async def run_migrations():
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_resume_state TEXT NULL",
         # Pause auto-resume for specific papers
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS harvest_paused BOOLEAN DEFAULT FALSE",
+        # Dossiers feature: papers belong to dossiers, dossiers belong to collections
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS dossier_id INTEGER REFERENCES dossiers(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_papers_dossier ON papers(dossier_id)",
     ]
 
     async with engine.begin() as conn:

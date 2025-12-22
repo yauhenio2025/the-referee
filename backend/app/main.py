@@ -16,7 +16,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -27,6 +27,7 @@ from .schemas import (
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
     LanguageRecommendationRequest, LanguageRecommendationResponse, AvailableLanguagesResponse,
     CollectionCreate, CollectionUpdate, CollectionResponse, CollectionDetail,
+    DossierCreate, DossierUpdate, DossierResponse, DossierDetail,
     CanonicalEditionSummary,
     # Refresh/Auto-Updater schemas
     RefreshRequest, RefreshJobResponse, RefreshStatusResponse, StalenessReportResponse,
@@ -369,6 +370,215 @@ async def assign_papers_to_collection(
     }
 
 
+# ============== Dossier Endpoints ==============
+
+@app.post("/api/dossiers", response_model=DossierResponse)
+async def create_dossier(
+    dossier: DossierCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new dossier within a collection"""
+    # Verify collection exists
+    result = await db.execute(select(Collection).where(Collection.id == dossier.collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    db_dossier = Dossier(
+        name=dossier.name,
+        description=dossier.description,
+        color=dossier.color,
+        collection_id=dossier.collection_id,
+    )
+    db.add(db_dossier)
+    await db.flush()
+    await db.refresh(db_dossier)
+    return DossierResponse(
+        id=db_dossier.id,
+        name=db_dossier.name,
+        description=db_dossier.description,
+        color=db_dossier.color,
+        collection_id=db_dossier.collection_id,
+        created_at=db_dossier.created_at,
+        updated_at=db_dossier.updated_at,
+        paper_count=0,
+    )
+
+
+@app.get("/api/dossiers", response_model=List[DossierResponse])
+async def list_dossiers(
+    collection_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all dossiers, optionally filtered by collection"""
+    query = select(Dossier).order_by(Dossier.name)
+    if collection_id is not None:
+        query = query.where(Dossier.collection_id == collection_id)
+    result = await db.execute(query)
+    dossiers = result.scalars().all()
+
+    # Get paper counts for each dossier
+    responses = []
+    for d in dossiers:
+        count_result = await db.execute(
+            select(func.count(Paper.id)).where(Paper.dossier_id == d.id)
+        )
+        paper_count = count_result.scalar() or 0
+        responses.append(DossierResponse(
+            id=d.id,
+            name=d.name,
+            description=d.description,
+            color=d.color,
+            collection_id=d.collection_id,
+            created_at=d.created_at,
+            updated_at=d.updated_at,
+            paper_count=paper_count,
+        ))
+    return responses
+
+
+@app.get("/api/dossiers/{dossier_id}", response_model=DossierDetail)
+async def get_dossier(dossier_id: int, db: AsyncSession = Depends(get_db)):
+    """Get dossier details with papers"""
+    result = await db.execute(select(Dossier).where(Dossier.id == dossier_id))
+    dossier = result.scalar_one_or_none()
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier not found")
+
+    # Get collection name
+    collection_result = await db.execute(select(Collection).where(Collection.id == dossier.collection_id))
+    collection = collection_result.scalar_one_or_none()
+
+    # Get papers in dossier
+    papers_result = await db.execute(
+        select(Paper).where(Paper.dossier_id == dossier_id).order_by(Paper.created_at.desc())
+    )
+    papers = papers_result.scalars().all()
+
+    # Build paper responses with edition stats
+    paper_responses = []
+    for paper in papers:
+        paper_response = await build_paper_response_with_editions(paper, db)
+        paper_responses.append(paper_response)
+
+    return DossierDetail(
+        id=dossier.id,
+        name=dossier.name,
+        description=dossier.description,
+        color=dossier.color,
+        collection_id=dossier.collection_id,
+        created_at=dossier.created_at,
+        updated_at=dossier.updated_at,
+        paper_count=len(papers),
+        papers=paper_responses,
+        collection_name=collection.name if collection else None,
+    )
+
+
+@app.put("/api/dossiers/{dossier_id}", response_model=DossierResponse)
+async def update_dossier(
+    dossier_id: int,
+    update: DossierUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a dossier"""
+    result = await db.execute(select(Dossier).where(Dossier.id == dossier_id))
+    dossier = result.scalar_one_or_none()
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier not found")
+
+    # Verify new collection if changing
+    if update.collection_id is not None and update.collection_id != dossier.collection_id:
+        coll_result = await db.execute(select(Collection).where(Collection.id == update.collection_id))
+        if not coll_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Target collection not found")
+        dossier.collection_id = update.collection_id
+
+    if update.name is not None:
+        dossier.name = update.name
+    if update.description is not None:
+        dossier.description = update.description
+    if update.color is not None:
+        dossier.color = update.color
+
+    # Get paper count
+    count_result = await db.execute(
+        select(func.count(Paper.id)).where(Paper.dossier_id == dossier_id)
+    )
+    paper_count = count_result.scalar() or 0
+
+    return DossierResponse(
+        id=dossier.id,
+        name=dossier.name,
+        description=dossier.description,
+        color=dossier.color,
+        collection_id=dossier.collection_id,
+        created_at=dossier.created_at,
+        updated_at=dossier.updated_at,
+        paper_count=paper_count,
+    )
+
+
+@app.delete("/api/dossiers/{dossier_id}")
+async def delete_dossier(dossier_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a dossier (papers are unassigned, not deleted)"""
+    result = await db.execute(select(Dossier).where(Dossier.id == dossier_id))
+    dossier = result.scalar_one_or_none()
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier not found")
+
+    # Unassign papers from dossier (set dossier_id to NULL)
+    papers_result = await db.execute(
+        select(Paper).where(Paper.dossier_id == dossier_id)
+    )
+    papers = papers_result.scalars().all()
+    for paper in papers:
+        paper.dossier_id = None
+
+    await db.delete(dossier)
+    return {"deleted": True, "dossier_id": dossier_id, "papers_unassigned": len(papers)}
+
+
+class PaperDossierAssignment(BaseModel):
+    paper_ids: List[int]
+    dossier_id: Optional[int] = None  # None to unassign
+
+
+@app.post("/api/dossiers/assign")
+async def assign_papers_to_dossier(
+    assignment: PaperDossierAssignment,
+    db: AsyncSession = Depends(get_db)
+):
+    """Assign papers to a dossier (or unassign if dossier_id is None)"""
+    # Verify dossier exists if provided
+    if assignment.dossier_id:
+        result = await db.execute(select(Dossier).where(Dossier.id == assignment.dossier_id))
+        dossier = result.scalar_one_or_none()
+        if not dossier:
+            raise HTTPException(status_code=404, detail="Dossier not found")
+
+    # Update papers
+    result = await db.execute(
+        select(Paper).where(Paper.id.in_(assignment.paper_ids))
+    )
+    papers = result.scalars().all()
+
+    for paper in papers:
+        paper.dossier_id = assignment.dossier_id
+        # Also set collection_id based on dossier's collection for backward compatibility
+        if assignment.dossier_id:
+            dossier_result = await db.execute(select(Dossier).where(Dossier.id == assignment.dossier_id))
+            dossier = dossier_result.scalar_one_or_none()
+            if dossier:
+                paper.collection_id = dossier.collection_id
+
+    return {
+        "updated": len(papers),
+        "dossier_id": assignment.dossier_id,
+        "paper_ids": [p.id for p in papers],
+    }
+
+
 # ============== Paper Endpoints ==============
 
 @app.post("/api/papers", response_model=PaperResponse)
@@ -707,6 +917,10 @@ async def add_edition_as_seed(
 
     Creates a new Paper from the edition's data (title, authors, year, venue).
     Optionally excludes the edition from the current paper.
+    Supports dossier selection:
+    - dossier_id: specific dossier to add to
+    - create_new_dossier: create a new dossier first
+    - Falls back to parent paper's dossier
     """
     if request is None:
         request = EditionAddAsSeedRequest()
@@ -717,9 +931,56 @@ async def add_edition_as_seed(
     if not edition:
         raise HTTPException(status_code=404, detail="Edition not found")
 
-    # Get the parent paper to get collection_id
+    # Get the parent paper to get default dossier/collection
     parent_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
     parent_paper = parent_result.scalar_one_or_none()
+
+    # Determine target dossier
+    target_dossier_id = None
+    target_dossier_name = None
+    target_collection_id = parent_paper.collection_id if parent_paper else None
+
+    if request.create_new_dossier and request.new_dossier_name:
+        # Create a new dossier
+        collection_id = request.collection_id or (parent_paper.collection_id if parent_paper else None)
+        if not collection_id:
+            raise HTTPException(status_code=400, detail="Collection ID required when creating new dossier")
+
+        # Verify collection exists
+        coll_result = await db.execute(select(Collection).where(Collection.id == collection_id))
+        collection = coll_result.scalar_one_or_none()
+        if not collection:
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+        new_dossier = Dossier(
+            name=request.new_dossier_name,
+            collection_id=collection_id,
+        )
+        db.add(new_dossier)
+        await db.flush()
+        await db.refresh(new_dossier)
+        target_dossier_id = new_dossier.id
+        target_dossier_name = new_dossier.name
+        target_collection_id = collection_id
+
+    elif request.dossier_id:
+        # Use specified dossier
+        dossier_result = await db.execute(select(Dossier).where(Dossier.id == request.dossier_id))
+        dossier = dossier_result.scalar_one_or_none()
+        if not dossier:
+            raise HTTPException(status_code=404, detail="Dossier not found")
+        target_dossier_id = dossier.id
+        target_dossier_name = dossier.name
+        target_collection_id = dossier.collection_id
+
+    else:
+        # Default to parent paper's dossier
+        if parent_paper and parent_paper.dossier_id:
+            dossier_result = await db.execute(select(Dossier).where(Dossier.id == parent_paper.dossier_id))
+            dossier = dossier_result.scalar_one_or_none()
+            if dossier:
+                target_dossier_id = dossier.id
+                target_dossier_name = dossier.name
 
     # Create new paper from edition data
     new_paper = Paper(
@@ -729,7 +990,8 @@ async def add_edition_as_seed(
         venue=edition.venue,
         abstract=edition.abstract,
         link=edition.link,
-        collection_id=parent_paper.collection_id if parent_paper else None,
+        collection_id=target_collection_id,
+        dossier_id=target_dossier_id,
         status="pending",  # Will need to be resolved
     )
     db.add(new_paper)
@@ -753,7 +1015,9 @@ async def add_edition_as_seed(
     return EditionAddAsSeedResponse(
         new_paper_id=new_paper.id,
         title=new_paper.title,
-        message=f"Created new seed paper from edition: {new_paper.title[:50]}..."
+        message=f"Created new seed paper from edition: {new_paper.title[:50]}...",
+        dossier_id=target_dossier_id,
+        dossier_name=target_dossier_name,
     )
 
 

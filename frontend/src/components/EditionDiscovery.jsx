@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
+import DossierSelectModal from './DossierSelectModal'
 
 /**
  * Edition Discovery - Tufte-inspired compact data view
@@ -29,6 +30,8 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [expandedGroups, setExpandedGroups] = useState({ high: true, uncertain: true, rejected: false, excluded: false })
   const [languageFilter, setLanguageFilter] = useState(null)
   const [showExcluded, setShowExcluded] = useState(false) // Toggle to show excluded editions
+  const [showDossierModal, setShowDossierModal] = useState(false) // Dossier selection modal
+  const [pendingAddAsSeed, setPendingAddAsSeed] = useState(null) // Edition ID pending dossier selection
   const queryClient = useQueryClient()
 
   const { data: editions, isLoading } = useQuery({
@@ -187,19 +190,44 @@ export default function EditionDiscovery({ paper, onBack }) {
 
   // Add edition as new seed paper
   const addAsSeed = useMutation({
-    mutationFn: (editionId) => api.addEditionAsSeed(editionId),
+    mutationFn: ({ editionId, options }) => api.addEditionAsSeed(editionId, options),
     onSuccess: (result) => {
       // Invalidate editions (source will be excluded)
       queryClient.invalidateQueries(['editions', paper.id])
       // Invalidate papers list (new paper added)
       queryClient.invalidateQueries(['papers'])
-      // Show success toast
-      toast.success(`🌱 Created new seed: ${result.title.substring(0, 50)}...`)
+      // Invalidate dossiers (paper count changed)
+      queryClient.invalidateQueries(['dossiers'])
+      // Show success toast with dossier info if available
+      const dossierInfo = result.dossier_name ? ` (in ${result.dossier_name})` : ''
+      toast.success(`🌱 Created new seed: ${result.title.substring(0, 50)}...${dossierInfo}`)
     },
     onError: (error) => {
       toast.error(`Failed to create seed: ${error.message}`)
     },
   })
+
+  // Handle dossier selection for add-as-seed
+  const handleAddAsSeedWithDossier = useCallback((editionId) => {
+    setPendingAddAsSeed(editionId)
+    setShowDossierModal(true)
+  }, [])
+
+  const handleDossierSelected = useCallback((dossierOptions) => {
+    if (pendingAddAsSeed) {
+      addAsSeed.mutate({
+        editionId: pendingAddAsSeed,
+        options: {
+          excludeFromCurrent: true,
+          dossierId: dossierOptions.dossierId || null,
+          collectionId: dossierOptions.collectionId || null,
+          createNewDossier: dossierOptions.createNewDossier || false,
+          newDossierName: dossierOptions.newDossierName || null,
+        },
+      })
+    }
+    setPendingAddAsSeed(null)
+  }, [pendingAddAsSeed, addAsSeed])
 
   // Finalize editions
   const finalizeEditions = useMutation({
@@ -858,7 +886,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               showMarkAs="uncertain"
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
-              onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
             />
           )}
@@ -881,7 +909,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               showMarkAs="both"
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
-              onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
             />
           )}
@@ -904,7 +932,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               showMarkAs="restore"
               onViewCitations={viewCitationsForEdition}
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
-              onAddAsSeed={(id) => addAsSeed.mutate(id)}
+              onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
             />
           )}
@@ -1063,6 +1091,20 @@ export default function EditionDiscovery({ paper, onBack }) {
           </div>
         </div>
       )}
+
+      {/* Dossier Selection Modal - for Add as Seed */}
+      <DossierSelectModal
+        isOpen={showDossierModal}
+        onClose={() => {
+          setShowDossierModal(false)
+          setPendingAddAsSeed(null)
+        }}
+        onSelect={handleDossierSelected}
+        defaultCollectionId={paper.collection_id}
+        defaultDossierId={paper.dossier_id}
+        title="Add as New Seed"
+        subtitle="Select which dossier to add this new seed paper to"
+      />
     </div>
   )
 }

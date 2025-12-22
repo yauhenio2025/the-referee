@@ -31,6 +31,7 @@ class CollectionResponse(CollectionBase):
     created_at: datetime
     updated_at: datetime
     paper_count: int = 0
+    dossier_count: int = 0
 
     class Config:
         from_attributes = True
@@ -38,6 +39,45 @@ class CollectionResponse(CollectionBase):
 
 class CollectionDetail(CollectionResponse):
     papers: List["PaperResponse"] = []
+    dossiers: List["DossierResponse"] = []
+
+
+# ============== Dossier Schemas ==============
+
+class DossierBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class DossierCreate(DossierBase):
+    """Create a new dossier within a collection"""
+    collection_id: int
+
+
+class DossierUpdate(BaseModel):
+    """Update dossier fields (all optional)"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    collection_id: Optional[int] = None  # Allow moving dossier to another collection
+
+
+class DossierResponse(DossierBase):
+    id: int
+    collection_id: int
+    created_at: datetime
+    updated_at: datetime
+    paper_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class DossierDetail(DossierResponse):
+    """Dossier with its papers"""
+    papers: List["PaperResponse"] = []
+    collection_name: Optional[str] = None
 
 
 # ============== Paper Schemas ==============
@@ -52,12 +92,14 @@ class PaperBase(BaseModel):
 class PaperCreate(PaperBase):
     """Submit a paper for analysis"""
     collection_id: Optional[int] = None
+    dossier_id: Optional[int] = None  # Papers belong to dossiers, not directly to collections
 
 
 class PaperSubmitBatch(BaseModel):
     """Submit multiple papers for analysis"""
     papers: List[PaperCreate]
-    collection_id: Optional[int] = None  # Default collection for all papers
+    collection_id: Optional[int] = None  # Default collection for all papers (legacy)
+    dossier_id: Optional[int] = None  # Default dossier for all papers
     auto_discover_editions: bool = True
     language_strategy: str = "major_languages"
     custom_languages: List[str] = []
@@ -90,7 +132,8 @@ class CanonicalEditionSummary(BaseModel):
 
 class PaperResponse(PaperBase):
     id: int
-    collection_id: Optional[int] = None
+    collection_id: Optional[int] = None  # Legacy: for backward compatibility
+    dossier_id: Optional[int] = None  # Papers belong to dossiers
     scholar_id: Optional[str] = None
     citation_count: int = 0
     language: Optional[str] = None
@@ -183,6 +226,10 @@ class EditionExcludeRequest(BaseModel):
 class EditionAddAsSeedRequest(BaseModel):
     """Convert an edition into a new independent seed paper"""
     exclude_from_current: bool = True  # Also exclude this edition from current paper
+    dossier_id: Optional[int] = None  # Target dossier (if None, uses parent paper's dossier)
+    collection_id: Optional[int] = None  # Target collection (for creating new dossiers)
+    create_new_dossier: bool = False  # If True, create a new dossier
+    new_dossier_name: Optional[str] = None  # Name for new dossier
 
 
 class EditionAddAsSeedResponse(BaseModel):
@@ -190,6 +237,8 @@ class EditionAddAsSeedResponse(BaseModel):
     new_paper_id: int
     title: str
     message: str
+    dossier_id: Optional[int] = None
+    dossier_name: Optional[str] = None
 
 
 class EditionUpdateConfidenceRequest(BaseModel):
@@ -372,3 +421,4 @@ class StalenessReportResponse(BaseModel):
 # Update forward references
 PaperDetail.model_rebuild()
 CollectionDetail.model_rebuild()
+DossierDetail.model_rebuild()

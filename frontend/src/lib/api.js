@@ -166,6 +166,10 @@ class RefereeAPI {
       method: 'POST',
       body: {
         exclude_from_current: options.excludeFromCurrent ?? true,
+        dossier_id: options.dossierId || null,
+        collection_id: options.collectionId || null,
+        create_new_dossier: options.createNewDossier ?? false,
+        new_dossier_name: options.newDossierName || null,
       },
     });
   }
@@ -311,6 +315,47 @@ class RefereeAPI {
       body: {
         paper_ids: paperIds,
         collection_id: collectionId,
+      },
+    });
+  }
+
+  // ============== Dossiers ==============
+
+  async getDossiers(collectionId = null) {
+    const query = collectionId ? `?collection_id=${collectionId}` : '';
+    return this.request(`/api/dossiers${query}`);
+  }
+
+  async getDossier(dossierId) {
+    return this.request(`/api/dossiers/${dossierId}`);
+  }
+
+  async createDossier(dossier) {
+    return this.request('/api/dossiers', {
+      method: 'POST',
+      body: dossier,
+    });
+  }
+
+  async updateDossier(dossierId, updates) {
+    return this.request(`/api/dossiers/${dossierId}`, {
+      method: 'PUT',
+      body: updates,
+    });
+  }
+
+  async deleteDossier(dossierId) {
+    return this.request(`/api/dossiers/${dossierId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async assignPapersToDossier(paperIds, dossierId) {
+    return this.request('/api/dossiers/assign', {
+      method: 'POST',
+      body: {
+        paper_ids: paperIds,
+        dossier_id: dossierId,
       },
     });
   }

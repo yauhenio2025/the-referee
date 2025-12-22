@@ -1,7 +1,9 @@
-import { useState, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useMemo, useCallback } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { useToast } from './Toast'
+import DossierSelectModal from './DossierSelectModal'
 
 /**
  * Citations View - Shows extracted citations for a paper
@@ -11,6 +13,10 @@ export default function Citations({ paper, onBack }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortBy, setSortBy] = useState('citations') // intersection, citations, year
   const [minIntersection, setMinIntersection] = useState(1)
+  const [showDossierModal, setShowDossierModal] = useState(false)
+  const [pendingCitationSeed, setPendingCitationSeed] = useState(null) // Citation to add as seed
+  const toast = useToast()
+  const queryClient = useQueryClient()
 
   // Initialize selected edition from URL param
   const editionParam = searchParams.get('edition')
@@ -32,6 +38,46 @@ export default function Citations({ paper, onBack }) {
     queryKey: ['citations', paper.id],
     queryFn: () => api.getPaperCitations(paper.id),
   })
+
+  // Create seed paper from citation
+  const createSeedFromCitation = useMutation({
+    mutationFn: async ({ citation, dossierOptions }) => {
+      // Create a paper from the citation data
+      const newPaper = await api.createPaper({
+        title: citation.title,
+        authors: citation.authors,
+        year: citation.year,
+        venue: citation.venue,
+        dossier_id: dossierOptions.dossierId || null,
+        collection_id: dossierOptions.collectionId || paper.collection_id || null,
+      })
+      return { newPaper, dossierOptions }
+    },
+    onSuccess: ({ newPaper, dossierOptions }) => {
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['dossiers'])
+      toast.success(`🌱 Created new seed: ${newPaper.title.substring(0, 50)}...`)
+    },
+    onError: (error) => {
+      toast.error(`Failed to create seed: ${error.message}`)
+    },
+  })
+
+  // Handle adding citation as seed
+  const handleAddAsSeed = useCallback((citation) => {
+    setPendingCitationSeed(citation)
+    setShowDossierModal(true)
+  }, [])
+
+  const handleDossierSelected = useCallback((dossierOptions) => {
+    if (pendingCitationSeed) {
+      createSeedFromCitation.mutate({
+        citation: pendingCitationSeed,
+        dossierOptions,
+      })
+    }
+    setPendingCitationSeed(null)
+  }, [pendingCitationSeed, createSeedFromCitation])
 
   // Extract unique editions from citations (by edition_id)
   const editionGroups = useMemo(() => {
@@ -183,16 +229,36 @@ export default function Citations({ paper, onBack }) {
                 <th className="col-edition">Edition</th>
                 <th className="col-venue">Venue</th>
                 <th className="col-cites">Cited by</th>
+                <th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredCitations.map(citation => (
-                <CitationRow key={citation.id} citation={citation} maxIntersection={maxIntersection} />
+                <CitationRow
+                  key={citation.id}
+                  citation={citation}
+                  maxIntersection={maxIntersection}
+                  onAddAsSeed={handleAddAsSeed}
+                />
               ))}
             </tbody>
           </table>
         </>
       )}
+
+      {/* Dossier Selection Modal */}
+      <DossierSelectModal
+        isOpen={showDossierModal}
+        onClose={() => {
+          setShowDossierModal(false)
+          setPendingCitationSeed(null)
+        }}
+        onSelect={handleDossierSelected}
+        defaultCollectionId={paper.collection_id}
+        defaultDossierId={paper.dossier_id}
+        title="Add Citation as Seed"
+        subtitle="Select which dossier to add this citation as a new seed paper"
+      />
     </div>
   )
 }
@@ -224,7 +290,7 @@ function getLangEmoji(lang) {
   return flags[lang] || '🌐'
 }
 
-function CitationRow({ citation, maxIntersection }) {
+function CitationRow({ citation, maxIntersection, onAddAsSeed }) {
   const crossWidth = (citation.intersection_count / maxIntersection) * 100
 
   return (
@@ -264,6 +330,15 @@ function CitationRow({ citation, maxIntersection }) {
         </span>
       </td>
       <td className="col-cites">{citation.citation_count?.toLocaleString() || 0}</td>
+      <td className="col-actions">
+        <button
+          className="btn-icon btn-seed"
+          onClick={() => onAddAsSeed(citation)}
+          title="Add as new seed paper"
+        >
+          🌱
+        </button>
+      </td>
     </tr>
   )
 }
