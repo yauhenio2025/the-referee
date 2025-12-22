@@ -2840,3 +2840,156 @@ async def test_partition_harvest(
         "total_count": total_count,
         "message": f"Partition harvest queued for year {request.year} with {total_count} citations"
     }
+
+
+# ============== Overflow Year Re-Harvest ==============
+
+class ReharvestOverflowRequest(BaseModel):
+    """Request to re-harvest overflow years (>1000 citations) for a paper"""
+    paper_id: int
+    year_start: int  # Start of year range (inclusive)
+    year_end: int    # End of year range (inclusive)
+
+
+@app.post("/api/papers/{paper_id}/reharvest-overflow")
+async def reharvest_overflow_years(
+    paper_id: int,
+    request: ReharvestOverflowRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Re-harvest overflow years (>1000 citations) for a paper using partition strategy.
+
+    This endpoint:
+    1. Checks each selected edition of the paper
+    2. For each year in the range, checks if Google Scholar reports >1000 citations
+    3. Removes those years from completed_years in harvest_resume_state
+    4. Creates a harvest job that will use partition strategy for overflow years
+
+    Use this to recover citations that were truncated before partition harvesting was implemented.
+    """
+    from .services.scholar_search import get_scholar_service
+
+    # Validate paper exists
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get selected editions with scholar_id
+    editions_result = await db.execute(
+        select(Edition)
+        .where(Edition.paper_id == paper_id)
+        .where(Edition.selected == True)
+        .where(Edition.scholar_id.isnot(None))
+    )
+    editions = editions_result.scalars().all()
+
+    if not editions:
+        raise HTTPException(status_code=400, detail="No selected editions with scholar_id found")
+
+    scholar_service = get_scholar_service()
+    overflow_years_found = []
+    editions_updated = []
+
+    # Check each edition
+    for edition in editions:
+        edition_overflow_years = []
+
+        # Check each year in range for overflow
+        for year in range(request.year_start, request.year_end + 1):
+            try:
+                count_result = await scholar_service.get_cited_by(
+                    scholar_id=edition.scholar_id,
+                    max_results=10,
+                    year_low=year,
+                    year_high=year,
+                )
+                total_count = count_result.get('totalResults', 0)
+
+                if total_count > 1000:
+                    edition_overflow_years.append({
+                        "year": year,
+                        "count": total_count
+                    })
+
+            except Exception as e:
+                logger.warning(f"Error checking year {year} for edition {edition.id}: {e}")
+                continue
+
+        if edition_overflow_years:
+            # Remove these years from completed_years
+            years_to_remove = {y["year"] for y in edition_overflow_years}
+
+            resume_state = {}
+            if edition.harvest_resume_state:
+                try:
+                    resume_state = json.loads(edition.harvest_resume_state)
+                except json.JSONDecodeError:
+                    resume_state = {}
+
+            completed_years = set(resume_state.get("completed_years", []))
+            original_count = len(completed_years)
+            completed_years -= years_to_remove
+
+            # Update the resume state
+            resume_state["completed_years"] = sorted(list(completed_years), reverse=True)
+            resume_state["mode"] = "year_by_year"
+            resume_state["overflow_reharvest"] = {
+                "years_reset": list(years_to_remove),
+                "reset_at": datetime.utcnow().isoformat()
+            }
+
+            await db.execute(
+                update(Edition)
+                .where(Edition.id == edition.id)
+                .values(harvest_resume_state=json.dumps(resume_state))
+            )
+
+            editions_updated.append({
+                "edition_id": edition.id,
+                "title": edition.title,
+                "overflow_years": edition_overflow_years,
+                "years_removed_from_completed": list(years_to_remove),
+                "completed_years_before": original_count,
+                "completed_years_after": len(completed_years)
+            })
+
+            overflow_years_found.extend([y["year"] for y in edition_overflow_years])
+
+    await db.commit()
+
+    if not overflow_years_found:
+        return {
+            "status": "no_overflow",
+            "message": f"No years with >1000 citations found in range {request.year_start}-{request.year_end}",
+            "paper_id": paper_id,
+            "editions_checked": len(editions)
+        }
+
+    # Create a harvest job to process these editions
+    job = Job(
+        paper_id=paper_id,
+        job_type="extract_citations",  # Standard harvest job type
+        status="pending",
+        params=json.dumps({
+            "overflow_reharvest": True,
+            "year_range": [request.year_start, request.year_end],
+            "overflow_years": list(set(overflow_years_found))
+        }),
+        progress=0,
+        progress_message=f"Queued: re-harvest overflow years {request.year_start}-{request.year_end}",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    return {
+        "status": "started",
+        "job_id": job.id,
+        "paper_id": paper_id,
+        "year_range": [request.year_start, request.year_end],
+        "overflow_years_found": list(set(overflow_years_found)),
+        "editions_updated": editions_updated,
+        "message": f"Re-harvest queued for {len(set(overflow_years_found))} overflow years across {len(editions_updated)} editions"
+    }

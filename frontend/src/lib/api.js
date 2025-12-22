@@ -449,6 +449,18 @@ class RefereeAPI {
     });
   }
 
+  // Re-harvest overflow years (>1000 citations) for a paper
+  async reharvestOverflowYears(paperId, yearStart, yearEnd) {
+    return this.request(`/api/papers/${paperId}/reharvest-overflow`, {
+      method: 'POST',
+      body: {
+        paper_id: paperId,
+        year_start: yearStart,
+        year_end: yearEnd,
+      },
+    });
+  }
+
   // ============== Multi-Dossier Support ==============
 
   /**
