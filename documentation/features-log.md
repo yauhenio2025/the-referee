@@ -4,6 +4,42 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Citation Search & Faceted Filtering
+
+**Commit:** `492fa3e` on `main`
+
+**Description:** Added search and faceted filtering to the Citations page for finding specific citing papers.
+
+**Key Changes:**
+
+### Search Box
+- Full-text search across title, author, and venue
+- Instant filtering as you type
+- Clear button to reset search
+
+### Top Authors Facet
+- Shows authors ranked by citation count
+- Click to filter citations by that author
+- Expandable to show all authors (top 8 by default)
+- Authors extracted and normalized from citation data
+
+### Top Venues Facet
+- Shows venues ranked by citation count
+- Click to filter by venue
+- Expandable list
+- Venue names normalized for grouping
+
+### UI/UX
+- Responsive two-column layout for facets
+- Active filters shown in results count
+- Toggle selected facet to clear filter
+
+**Files Modified:**
+- `frontend/src/components/Citations.jsx` - Search, facets, filtering logic
+- `frontend/src/App.css` - Search box and facet styling
+
+---
+
 ## 2025-12-22: Bug Fix - Auto-Resume Creating Duplicate Jobs
 
 **Commit:** `3f4d6fb` on `main`
