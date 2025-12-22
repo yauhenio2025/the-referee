@@ -4,6 +4,28 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Bug Fix - Auto-Resume Creating Duplicate Jobs
+
+**Commit:** `3f4d6fb` on `main`
+
+**Description:** Fixed critical bug where auto-resume was creating multiple jobs for the same paper, wasting API credits.
+
+**The Bug:**
+- When a paper had multiple editions (e.g., English, German, French versions)
+- `auto_resume_incomplete_harvests()` created a SEPARATE job for EACH edition
+- Each job fetched the same citations from Scholar API
+- Citations de-duplicated in DB, but API calls already made = wasted credits
+
+**The Fix:**
+- Group incomplete editions by paper_id
+- Create ONE job per paper with ALL edition_ids included
+- Citations fetched once, not N times
+
+**Files Modified:**
+- `backend/app/services/job_worker.py` - Fixed `auto_resume_incomplete_harvests()`
+
+---
+
 ## 2025-12-22: Collection Badges & Auto-Hide Processed Papers
 
 **Commit:** `e92cd9d` on `main`
