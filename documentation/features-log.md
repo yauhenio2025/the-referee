@@ -4,6 +4,46 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Soft Delete with Undo & Dossier Management UI
+
+**Commit:** `fbeba6e` on `main`
+
+**Description:** Major UI enhancement adding soft delete with undo for papers and a complete dossier management interface with power-user features.
+
+**Key Changes:**
+
+### Soft Delete with Undo
+- Backend: Added `deleted_at` timestamp to Paper model
+- Backend: Modified delete endpoint to soft delete by default, with `permanent=true` option
+- Backend: Added `POST /api/papers/{id}/restore` endpoint
+- Backend: All paper listing queries now exclude deleted papers
+- Frontend: Toast notifications now support action buttons
+- Frontend: Delete actions show "Undo" toast for 8 seconds before permanent deletion
+- Frontend: Toast component enhanced with close button and action support
+
+### Dossier Management UI
+- Complete rewrite of CollectionDetail.jsx with dossier sidebar
+- Dossier sidebar shows all dossiers with paper counts
+- Create/edit/delete dossier functionality
+- "Unassigned" virtual dossier for papers without dossier
+- Multi-select papers with shift-click and cmd-click
+- Drag-and-drop paper assignment to dossiers
+- Search/filter papers within collection
+- Keyboard shortcuts: ⌘N (new dossier), ⌘A (select all), Esc (clear selection)
+- Power-user friendly with visual keyboard hints
+
+**Files Modified:**
+- `backend/app/models.py` - Added deleted_at field
+- `backend/app/database.py` - Added migration for deleted_at
+- `backend/app/main.py` - Modified delete, added restore, updated queries
+- `frontend/src/lib/api.js` - Added restorePaper method
+- `frontend/src/components/Toast.jsx` - Enhanced with action buttons
+- `frontend/src/components/PaperList.jsx` - Updated delete with undo
+- `frontend/src/components/CollectionDetail.jsx` - Complete rewrite
+- `frontend/src/App.css` - Added extensive styling for dossier UI
+
+---
+
 ## 2025-12-22: Bug Fix - Dossier Creation When Adding Seeds
 
 **Commit:** `b8ba68b` on `main`
