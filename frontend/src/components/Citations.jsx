@@ -15,9 +15,11 @@ export default function Citations({ paper, onBack }) {
   const [minIntersection, setMinIntersection] = useState(1)
   const [showDossierModal, setShowDossierModal] = useState(false)
   const [pendingCitationSeed, setPendingCitationSeed] = useState(null) // Citation to add as seed
-  const [searchTerm, setSearchTerm] = useState('') // Search in title/author/venue
-  const [selectedAuthor, setSelectedAuthor] = useState(null) // Filter by author
-  const [selectedVenue, setSelectedVenue] = useState(null) // Filter by venue
+  const [searchTitle, setSearchTitle] = useState('') // Search in title
+  const [searchAuthor, setSearchAuthor] = useState('') // Search in author
+  const [searchVenue, setSearchVenue] = useState('') // Search in venue
+  const [selectedAuthor, setSelectedAuthor] = useState(null) // Filter by author facet
+  const [selectedVenue, setSelectedVenue] = useState(null) // Filter by venue facet
   const [showAllAuthors, setShowAllAuthors] = useState(false) // Expand authors list
   const [showAllVenues, setShowAllVenues] = useState(false) // Expand venues list
   const toast = useToast()
@@ -117,18 +119,36 @@ export default function Citations({ paper, onBack }) {
   }, [citations])
 
   // Extract top authors with counts
+  // Author string format: "MC Jensen, WH Meckling - Corporate governance, 2019 - taylorfrancis.com"
+  // Or: "A Smith, B Jones, C Lee - Journal name, 2020 - publisher.com"
   const topAuthors = useMemo(() => {
     if (!citations) return []
     const authorCounts = {}
     citations.forEach(c => {
       if (!c.authors) return
-      // Split authors and count each (handle common separators)
-      const authors = c.authors.split(/,|;|&/).map(a => a.trim()).filter(a => a && a.length > 2)
-      authors.forEach(author => {
-        // Normalize: remove trailing periods, extra spaces
-        const normalized = author.replace(/\.$/, '').trim()
-        if (normalized.length > 2) {
-          authorCounts[normalized] = (authorCounts[normalized] || 0) + 1
+      // First split on " - " to separate authors from venue/year/source
+      const authorsPart = c.authors.split(' - ')[0]
+      if (!authorsPart) return
+
+      // Split authors on ", " but be careful with initials like "MC Jensen"
+      // Authors are typically: "FirstInitial LastName" or "F LastName"
+      const authorList = authorsPart.split(/,\s*/)
+
+      authorList.forEach(author => {
+        // Clean up the author name
+        let cleaned = author.trim()
+        // Skip if it looks like a year (4 digits)
+        if (/^\d{4}$/.test(cleaned)) return
+        // Skip if too short
+        if (cleaned.length < 3) return
+        // Skip if it contains URL patterns
+        if (cleaned.includes('.com') || cleaned.includes('.org') || cleaned.includes('.edu')) return
+        // Skip common non-author patterns
+        if (/^(vol|no|pp|ed|eds|et al)\.?$/i.test(cleaned)) return
+
+        // Normalize: capitalize properly
+        if (cleaned.length > 2) {
+          authorCounts[cleaned] = (authorCounts[cleaned] || 0) + 1
         }
       })
     })
@@ -157,24 +177,34 @@ export default function Citations({ paper, onBack }) {
   // Filter and sort citations
   const filteredCitations = useMemo(() => {
     if (!citations) return []
-    const searchLower = searchTerm.toLowerCase().trim()
+    const titleSearch = searchTitle.toLowerCase().trim()
+    const authorSearch = searchAuthor.toLowerCase().trim()
+    const venueSearch = searchVenue.toLowerCase().trim()
+
     return citations
       .filter(c => c.intersection_count >= minIntersection)
       .filter(c => selectedEdition === null || c.edition_id === selectedEdition)
-      // Search filter: title, authors, or venue
+      // Title search
       .filter(c => {
-        if (!searchLower) return true
-        const title = (c.title || '').toLowerCase()
-        const authors = (c.authors || '').toLowerCase()
-        const venue = (c.venue || '').toLowerCase()
-        return title.includes(searchLower) || authors.includes(searchLower) || venue.includes(searchLower)
+        if (!titleSearch) return true
+        return (c.title || '').toLowerCase().includes(titleSearch)
       })
-      // Author filter
+      // Author search (free text)
+      .filter(c => {
+        if (!authorSearch) return true
+        return (c.authors || '').toLowerCase().includes(authorSearch)
+      })
+      // Venue search (free text)
+      .filter(c => {
+        if (!venueSearch) return true
+        return (c.venue || '').toLowerCase().includes(venueSearch)
+      })
+      // Author facet filter (exact match on parsed author)
       .filter(c => {
         if (!selectedAuthor) return true
         return (c.authors || '').toLowerCase().includes(selectedAuthor.toLowerCase())
       })
-      // Venue filter
+      // Venue facet filter
       .filter(c => {
         if (!selectedVenue) return true
         return (c.venue || '').toLowerCase() === selectedVenue.toLowerCase()
@@ -185,7 +215,7 @@ export default function Citations({ paper, onBack }) {
         if (sortBy === 'year') return (b.year || 0) - (a.year || 0)
         return 0
       })
-  }, [citations, minIntersection, selectedEdition, sortBy, searchTerm, selectedAuthor, selectedVenue])
+  }, [citations, minIntersection, selectedEdition, sortBy, searchTitle, searchAuthor, searchVenue, selectedAuthor, selectedVenue])
 
   // Group by intersection count for summary
   const intersectionGroups = useMemo(() => {
@@ -253,18 +283,44 @@ export default function Citations({ paper, onBack }) {
 
           {/* Search and Facets */}
           <div className="citations-search-facets">
-            {/* Search Box */}
-            <div className="search-box">
-              <input
-                type="text"
-                placeholder="Search title, author, or venue..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="search-input"
-              />
-              {searchTerm && (
-                <button className="search-clear" onClick={() => setSearchTerm('')}>×</button>
-              )}
+            {/* Search Fields */}
+            <div className="search-fields">
+              <div className="search-field">
+                <label>Title</label>
+                <input
+                  type="text"
+                  placeholder="Search in title..."
+                  value={searchTitle}
+                  onChange={e => setSearchTitle(e.target.value)}
+                />
+                {searchTitle && (
+                  <button className="field-clear" onClick={() => setSearchTitle('')}>×</button>
+                )}
+              </div>
+              <div className="search-field">
+                <label>Author</label>
+                <input
+                  type="text"
+                  placeholder="Search by author..."
+                  value={searchAuthor}
+                  onChange={e => setSearchAuthor(e.target.value)}
+                />
+                {searchAuthor && (
+                  <button className="field-clear" onClick={() => setSearchAuthor('')}>×</button>
+                )}
+              </div>
+              <div className="search-field">
+                <label>Venue</label>
+                <input
+                  type="text"
+                  placeholder="Search by venue..."
+                  value={searchVenue}
+                  onChange={e => setSearchVenue(e.target.value)}
+                />
+                {searchVenue && (
+                  <button className="field-clear" onClick={() => setSearchVenue('')}>×</button>
+                )}
+              </div>
             </div>
 
             {/* Facets Row */}
@@ -373,9 +429,11 @@ export default function Citations({ paper, onBack }) {
             Showing {filteredCitations.length} of {citations.length} citations
             {selectedEditionInfo && ` • Edition: ${selectedEditionInfo.language} - ${truncate(selectedEditionInfo.title, 30)}`}
             {minIntersection > 1 && ` • Citing ${minIntersection}+ editions`}
-            {searchTerm && ` • Search: "${searchTerm}"`}
-            {selectedAuthor && ` • Author: ${truncate(selectedAuthor, 20)}`}
-            {selectedVenue && ` • Venue: ${truncate(selectedVenue, 20)}`}
+            {searchTitle && ` • Title: "${searchTitle}"`}
+            {searchAuthor && ` • Author: "${searchAuthor}"`}
+            {searchVenue && ` • Venue: "${searchVenue}"`}
+            {selectedAuthor && ` • Author facet: ${truncate(selectedAuthor, 20)}`}
+            {selectedVenue && ` • Venue facet: ${truncate(selectedVenue, 20)}`}
           </div>
 
           {/* Citations Table */}

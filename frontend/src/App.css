@@ -3263,41 +3263,63 @@ button:disabled {
   margin-bottom: 1rem;
 }
 
-.search-box {
-  position: relative;
+.search-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-.search-box .search-input {
+@media (max-width: 900px) {
+  .search-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.search-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.search-field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.search-field input {
   width: 100%;
-  padding: 0.75rem 2.5rem 0.75rem 1rem;
+  padding: 0.6rem 2rem 0.6rem 0.75rem;
   background: var(--bg-dark);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-primary);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
-.search-box .search-input:focus {
+.search-field input:focus {
   outline: none;
   border-color: var(--accent);
 }
 
-.search-box .search-clear {
+.search-field .field-clear {
   position: absolute;
-  right: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 0.5rem;
+  bottom: 0.5rem;
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   cursor: pointer;
-  padding: 0.25rem;
+  padding: 0.2rem;
   line-height: 1;
 }
 
-.search-box .search-clear:hover {
+.search-field .field-clear:hover {
   color: var(--text-primary);
 }
 
