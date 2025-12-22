@@ -1576,7 +1576,7 @@ async def extract_citations(
 async def get_paper_citations(
     paper_id: int,
     skip: int = 0,
-    limit: int = 10000,  # High default - need all citations for search/filtering
+    limit: Optional[int] = None,  # No limit by default - return ALL citations
     language: Optional[str] = None,
     edition_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
@@ -1599,7 +1599,9 @@ async def get_paper_citations(
     if edition_id:
         query = query.where(Citation.edition_id == edition_id)
 
-    query = query.order_by(Citation.citation_count.desc()).offset(skip).limit(limit)
+    query = query.order_by(Citation.citation_count.desc()).offset(skip)
+    if limit:
+        query = query.limit(limit)
 
     result = await db.execute(query)
     rows = result.all()
