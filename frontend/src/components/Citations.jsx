@@ -15,6 +15,11 @@ export default function Citations({ paper, onBack }) {
   const [minIntersection, setMinIntersection] = useState(1)
   const [showDossierModal, setShowDossierModal] = useState(false)
   const [pendingCitationSeed, setPendingCitationSeed] = useState(null) // Citation to add as seed
+  const [searchTerm, setSearchTerm] = useState('') // Search in title/author/venue
+  const [selectedAuthor, setSelectedAuthor] = useState(null) // Filter by author
+  const [selectedVenue, setSelectedVenue] = useState(null) // Filter by venue
+  const [showAllAuthors, setShowAllAuthors] = useState(false) // Expand authors list
+  const [showAllVenues, setShowAllVenues] = useState(false) // Expand venues list
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -111,19 +116,76 @@ export default function Citations({ paper, onBack }) {
     return Object.values(groups).sort((a, b) => b.count - a.count)
   }, [citations])
 
+  // Extract top authors with counts
+  const topAuthors = useMemo(() => {
+    if (!citations) return []
+    const authorCounts = {}
+    citations.forEach(c => {
+      if (!c.authors) return
+      // Split authors and count each (handle common separators)
+      const authors = c.authors.split(/,|;|&/).map(a => a.trim()).filter(a => a && a.length > 2)
+      authors.forEach(author => {
+        // Normalize: remove trailing periods, extra spaces
+        const normalized = author.replace(/\.$/, '').trim()
+        if (normalized.length > 2) {
+          authorCounts[normalized] = (authorCounts[normalized] || 0) + 1
+        }
+      })
+    })
+    return Object.entries(authorCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [citations])
+
+  // Extract top venues with counts
+  const topVenues = useMemo(() => {
+    if (!citations) return []
+    const venueCounts = {}
+    citations.forEach(c => {
+      if (!c.venue) return
+      // Normalize venue name (lowercase for grouping, keep original for display)
+      const normalized = c.venue.toLowerCase().trim()
+      if (!venueCounts[normalized]) {
+        venueCounts[normalized] = { name: c.venue, count: 0 }
+      }
+      venueCounts[normalized].count++
+    })
+    return Object.values(venueCounts)
+      .sort((a, b) => b.count - a.count)
+  }, [citations])
+
   // Filter and sort citations
   const filteredCitations = useMemo(() => {
     if (!citations) return []
+    const searchLower = searchTerm.toLowerCase().trim()
     return citations
       .filter(c => c.intersection_count >= minIntersection)
       .filter(c => selectedEdition === null || c.edition_id === selectedEdition)
+      // Search filter: title, authors, or venue
+      .filter(c => {
+        if (!searchLower) return true
+        const title = (c.title || '').toLowerCase()
+        const authors = (c.authors || '').toLowerCase()
+        const venue = (c.venue || '').toLowerCase()
+        return title.includes(searchLower) || authors.includes(searchLower) || venue.includes(searchLower)
+      })
+      // Author filter
+      .filter(c => {
+        if (!selectedAuthor) return true
+        return (c.authors || '').toLowerCase().includes(selectedAuthor.toLowerCase())
+      })
+      // Venue filter
+      .filter(c => {
+        if (!selectedVenue) return true
+        return (c.venue || '').toLowerCase() === selectedVenue.toLowerCase()
+      })
       .sort((a, b) => {
         if (sortBy === 'intersection') return b.intersection_count - a.intersection_count
         if (sortBy === 'citations') return (b.citation_count || 0) - (a.citation_count || 0)
         if (sortBy === 'year') return (b.year || 0) - (a.year || 0)
         return 0
       })
-  }, [citations, minIntersection, selectedEdition, sortBy])
+  }, [citations, minIntersection, selectedEdition, sortBy, searchTerm, selectedAuthor, selectedVenue])
 
   // Group by intersection count for summary
   const intersectionGroups = useMemo(() => {
@@ -189,6 +251,88 @@ export default function Citations({ paper, onBack }) {
             </div>
           )}
 
+          {/* Search and Facets */}
+          <div className="citations-search-facets">
+            {/* Search Box */}
+            <div className="search-box">
+              <input
+                type="text"
+                placeholder="Search title, author, or venue..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="search-input"
+              />
+              {searchTerm && (
+                <button className="search-clear" onClick={() => setSearchTerm('')}>×</button>
+              )}
+            </div>
+
+            {/* Facets Row */}
+            <div className="facets-row">
+              {/* Top Authors Facet */}
+              <div className="facet">
+                <div className="facet-header">
+                  <span className="facet-title">Top Authors</span>
+                  {selectedAuthor && (
+                    <button className="facet-clear" onClick={() => setSelectedAuthor(null)}>Clear</button>
+                  )}
+                </div>
+                <div className="facet-items">
+                  {(showAllAuthors ? topAuthors : topAuthors.slice(0, 8)).map(author => (
+                    <button
+                      key={author.name}
+                      className={`facet-item ${selectedAuthor === author.name ? 'active' : ''}`}
+                      onClick={() => setSelectedAuthor(selectedAuthor === author.name ? null : author.name)}
+                      title={author.name}
+                    >
+                      <span className="facet-name">{truncate(author.name, 25)}</span>
+                      <span className="facet-count">{author.count}</span>
+                    </button>
+                  ))}
+                  {topAuthors.length > 8 && (
+                    <button
+                      className="facet-toggle"
+                      onClick={() => setShowAllAuthors(!showAllAuthors)}
+                    >
+                      {showAllAuthors ? 'Show less' : `+${topAuthors.length - 8} more`}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Top Venues Facet */}
+              <div className="facet">
+                <div className="facet-header">
+                  <span className="facet-title">Top Venues</span>
+                  {selectedVenue && (
+                    <button className="facet-clear" onClick={() => setSelectedVenue(null)}>Clear</button>
+                  )}
+                </div>
+                <div className="facet-items">
+                  {(showAllVenues ? topVenues : topVenues.slice(0, 8)).map(venue => (
+                    <button
+                      key={venue.name}
+                      className={`facet-item ${selectedVenue === venue.name ? 'active' : ''}`}
+                      onClick={() => setSelectedVenue(selectedVenue === venue.name ? null : venue.name)}
+                      title={venue.name}
+                    >
+                      <span className="facet-name">{truncate(venue.name, 30)}</span>
+                      <span className="facet-count">{venue.count}</span>
+                    </button>
+                  ))}
+                  {topVenues.length > 8 && (
+                    <button
+                      className="facet-toggle"
+                      onClick={() => setShowAllVenues(!showAllVenues)}
+                    >
+                      {showAllVenues ? 'Show less' : `+${topVenues.length - 8} more`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Summary Stats */}
           <div className="citations-summary">
             <div className="intersection-bars">
@@ -229,6 +373,9 @@ export default function Citations({ paper, onBack }) {
             Showing {filteredCitations.length} of {citations.length} citations
             {selectedEditionInfo && ` • Edition: ${selectedEditionInfo.language} - ${truncate(selectedEditionInfo.title, 30)}`}
             {minIntersection > 1 && ` • Citing ${minIntersection}+ editions`}
+            {searchTerm && ` • Search: "${searchTerm}"`}
+            {selectedAuthor && ` • Author: ${truncate(selectedAuthor, 20)}`}
+            {selectedVenue && ` • Venue: ${truncate(selectedVenue, 20)}`}
           </div>
 
           {/* Citations Table */}
