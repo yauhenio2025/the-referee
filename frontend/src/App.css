@@ -4223,6 +4223,25 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Add to Collection button */
+.btn-collection {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #10b981, #059669);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-collection:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
 /* Refresh progress bar */
 .ed-progress.refresh-progress {
   background: #1e3a5f;
@@ -4329,4 +4348,171 @@ button:disabled {
 .collection-detail-header .btn-refresh {
   margin-left: auto;
   flex-shrink: 0;
+}
+
+/* ============================================
+   Expandable Editions in Collection Detail
+   ============================================ */
+
+/* Expand column */
+.papers-table .col-expand {
+  width: 30px;
+  padding: 0 4px !important;
+}
+
+.btn-expand {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+}
+
+.btn-expand:hover {
+  color: var(--text-primary);
+}
+
+.btn-expand.expanded {
+  transform: rotate(0deg);
+}
+
+/* Editions column */
+.papers-table .col-editions {
+  width: 80px;
+  text-align: center;
+}
+
+.btn-editions-count {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  color: var(--primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-editions-count:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* Paper row when expanded */
+.paper-row.expanded {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Editions row (expanded) */
+.editions-row {
+  background: var(--bg-secondary);
+}
+
+.editions-row td {
+  padding: 0 !important;
+  border-top: none !important;
+}
+
+.editions-panel {
+  padding: 12px 20px 12px 50px;
+  background: linear-gradient(to right, rgba(59, 130, 246, 0.05), transparent);
+  border-left: 3px solid var(--primary);
+  margin-left: 30px;
+}
+
+.editions-loading,
+.editions-empty {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
+.editions-empty .btn-link {
+  margin-left: 8px;
+  color: var(--primary);
+}
+
+/* Editions table (nested) */
+.editions-table {
+  width: 100%;
+  font-size: 0.85rem;
+  border-collapse: collapse;
+}
+
+.editions-table th {
+  text-align: left;
+  padding: 6px 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.editions-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(var(--border-rgb), 0.3);
+}
+
+.editions-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Edition item styling */
+.edition-item.confidence-high {
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.edition-item.confidence-rejected {
+  opacity: 0.5;
+}
+
+.edition-lang .lang-badge {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.edition-title a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.edition-title a:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.edition-citations,
+.edition-harvested {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.confidence-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+
+.confidence-badge.high {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.confidence-badge.uncertain {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.confidence-badge.rejected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }

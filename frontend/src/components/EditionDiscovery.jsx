@@ -32,6 +32,7 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [showExcluded, setShowExcluded] = useState(false) // Toggle to show excluded editions
   const [showDossierModal, setShowDossierModal] = useState(false) // Dossier selection modal
   const [pendingAddAsSeed, setPendingAddAsSeed] = useState(null) // Edition ID pending dossier selection
+  const [showAddPaperToCollection, setShowAddPaperToCollection] = useState(false) // Add this paper to collection
   const queryClient = useQueryClient()
 
   const { data: editions, isLoading } = useQuery({
@@ -228,6 +229,31 @@ export default function EditionDiscovery({ paper, onBack }) {
     }
     setPendingAddAsSeed(null)
   }, [pendingAddAsSeed, addAsSeed])
+
+  // Add this paper to a collection/dossier
+  const handleAddPaperToCollection = useCallback(async (selection) => {
+    try {
+      if (selection.collectionId) {
+        await api.assignPapersToCollection([paper.id], selection.collectionId)
+      }
+      if (selection.dossierId) {
+        await api.assignPapersToDossier([paper.id], selection.dossierId)
+      } else if (selection.createNewDossier && selection.newDossierName) {
+        const newDossier = await api.createDossier({
+          name: selection.newDossierName,
+          collection_id: selection.collectionId,
+        })
+        await api.assignPapersToDossier([paper.id], newDossier.id)
+      }
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['collections'])
+      queryClient.invalidateQueries(['dossiers'])
+      toast.success(`Added "${paper.title?.substring(0, 30)}..." to collection`)
+      setShowAddPaperToCollection(false)
+    } catch (err) {
+      toast.error(`Failed to add: ${err.message}`)
+    }
+  }, [paper.id, paper.title, queryClient, toast])
 
   // Finalize editions
   const finalizeEditions = useMutation({
@@ -706,6 +732,14 @@ export default function EditionDiscovery({ paper, onBack }) {
             {refreshBatchId ? '🔄 Refreshing...' : '🔄 Refresh Citations'}
           </button>
         )}
+        {/* Add to Collection button */}
+        <button
+          onClick={() => setShowAddPaperToCollection(true)}
+          className="btn-collection"
+          title="Add this paper (with all its editions) to a collection"
+        >
+          📁 Add to Collection
+        </button>
       </div>
 
       {/* Refresh Progress */}
@@ -1104,6 +1138,17 @@ export default function EditionDiscovery({ paper, onBack }) {
         defaultDossierId={paper.dossier_id}
         title="Track as Separate Work"
         subtitle="This item isn't an edition of the current work - track it as a new seed in:"
+      />
+
+      {/* Add Paper to Collection Modal */}
+      <DossierSelectModal
+        isOpen={showAddPaperToCollection}
+        onClose={() => setShowAddPaperToCollection(false)}
+        onSelect={handleAddPaperToCollection}
+        defaultCollectionId={paper.collection_id}
+        defaultDossierId={paper.dossier_id}
+        title="Add to Collection"
+        subtitle={`Add "${paper.title?.substring(0, 50)}..." with all its editions to a collection`}
       />
     </div>
   )

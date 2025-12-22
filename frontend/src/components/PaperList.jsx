@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
+import DossierSelectModal from './DossierSelectModal'
 
 export default function PaperList({ onSelectPaper }) {
   const queryClient = useQueryClient()
@@ -14,6 +15,7 @@ export default function PaperList({ onSelectPaper }) {
   const [quickHarvestingPapers, setQuickHarvestingPapers] = useState({})
   const [batchResolving, setBatchResolving] = useState(false)
   const [selectedPapers, setSelectedPapers] = useState(new Set())
+  const [addToCollectionPaper, setAddToCollectionPaper] = useState(null)
 
   const { data: papers, isLoading, error } = useQuery({
     queryKey: ['papers'],
@@ -171,6 +173,34 @@ export default function PaperList({ onSelectPaper }) {
       toast.error(`Failed to queue resolution: ${error.message}`)
     },
   })
+
+  // Add paper to collection/dossier
+  const handleAddToCollection = async (selection) => {
+    if (!addToCollectionPaper) return
+    try {
+      const paperId = addToCollectionPaper.id
+      if (selection.collectionId) {
+        await api.assignPapersToCollection([paperId], selection.collectionId)
+      }
+      if (selection.dossierId) {
+        await api.assignPapersToDossier([paperId], selection.dossierId)
+      } else if (selection.createNewDossier && selection.newDossierName) {
+        // Create new dossier first, then assign
+        const newDossier = await api.createDossier({
+          name: selection.newDossierName,
+          collection_id: selection.collectionId,
+        })
+        await api.assignPapersToDossier([paperId], newDossier.id)
+      }
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['collections'])
+      queryClient.invalidateQueries(['dossiers'])
+      toast.success(`Added "${addToCollectionPaper.title?.substring(0, 30)}..." to collection`)
+      setAddToCollectionPaper(null)
+    } catch (err) {
+      toast.error(`Failed to add: ${err.message}`)
+    }
+  }
 
   // Selection helpers
   const togglePaperSelection = (paperId) => {
@@ -521,6 +551,14 @@ export default function PaperList({ onSelectPaper }) {
                     {refreshingPapers[paper.id] ? '🔄 Refreshing...' : '🔄 Refresh'}
                   </button>
                 )}
+                {/* Add to Collection - always available */}
+                <button
+                  onClick={() => setAddToCollectionPaper(paper)}
+                  className="btn-collection"
+                  title="Add this paper to a collection"
+                >
+                  📁 Add to Collection
+                </button>
                 <button
                   onClick={() => deletePaper.mutate(paper.id)}
                   className="btn-danger"
@@ -533,6 +571,15 @@ export default function PaperList({ onSelectPaper }) {
           )
         })}
       </div>
+
+      {/* Add to Collection Modal */}
+      <DossierSelectModal
+        isOpen={!!addToCollectionPaper}
+        onClose={() => setAddToCollectionPaper(null)}
+        onSelect={handleAddToCollection}
+        title="Add to Collection"
+        subtitle={addToCollectionPaper ? `Add "${addToCollectionPaper.title?.substring(0, 50)}..." to a collection` : ''}
+      />
 
       {/* Reconciliation Modal */}
       {reconciliationPaper && (

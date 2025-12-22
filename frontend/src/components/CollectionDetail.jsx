@@ -20,6 +20,8 @@ export default function CollectionDetail({ collectionId, onBack }) {
   const [editingDossier, setEditingDossier] = useState(null)
   const [selectedPapers, setSelectedPapers] = useState(new Set())
   const [searchFilter, setSearchFilter] = useState('')
+  const [expandedPapers, setExpandedPapers] = useState(new Set()) // Track which papers have editions expanded
+  const [paperEditions, setPaperEditions] = useState({}) // Cache of editions by paper id
 
   const { data: collection, isLoading } = useQuery({
     queryKey: ['collection', collectionId],
@@ -223,6 +225,29 @@ export default function CollectionDetail({ collectionId, onBack }) {
     assignToDossier.mutate({
       paperIds: Array.from(selectedPapers),
       dossierId: dossierId === 'unassigned' ? null : dossierId,
+    })
+  }
+
+  // Toggle paper expansion and fetch editions if not cached
+  const togglePaperExpansion = async (paperId, e) => {
+    e.stopPropagation()
+    setExpandedPapers(prev => {
+      const next = new Set(prev)
+      if (next.has(paperId)) {
+        next.delete(paperId)
+      } else {
+        next.add(paperId)
+        // Fetch editions if not cached
+        if (!paperEditions[paperId]) {
+          api.getPaperEditions(paperId).then(editions => {
+            setPaperEditions(prev => ({ ...prev, [paperId]: editions }))
+          }).catch(err => {
+            console.error('Failed to fetch editions:', err)
+            setPaperEditions(prev => ({ ...prev, [paperId]: [] }))
+          })
+        }
+      }
+      return next
     })
   }
 
@@ -464,6 +489,7 @@ export default function CollectionDetail({ collectionId, onBack }) {
             <table className="papers-table compact">
               <thead>
                 <tr>
+                  <th className="col-expand"></th>
                   <th className="col-select">
                     <input
                       type="checkbox"
@@ -480,70 +506,161 @@ export default function CollectionDetail({ collectionId, onBack }) {
                   <th className="col-title">Title</th>
                   <th className="col-year">Year</th>
                   <th className="col-status">Status</th>
+                  <th className="col-editions">Editions</th>
                   <th className="col-dossier">Dossier</th>
                   <th className="col-citations">Citations</th>
                   <th className="col-actions"></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredPapers.map(paper => (
-                  <tr
-                    key={paper.id}
-                    className={`${selectedPapers.has(paper.id) ? 'selected' : ''}`}
-                    onClick={e => handleSelectPaper(paper.id, e)}
-                    draggable
-                    onDragStart={e => {
-                      const ids = selectedPapers.has(paper.id)
-                        ? Array.from(selectedPapers)
-                        : [paper.id]
-                      e.dataTransfer.setData('paperIds', JSON.stringify(ids))
-                    }}
-                  >
-                    <td className="col-select" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedPapers.has(paper.id)}
-                        onChange={() => handleSelectPaper(paper.id)}
-                      />
-                    </td>
-                    <td className="col-title">
-                      <a
-                        href="#"
-                        onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(`/paper/${paper.id}`); }}
+                {filteredPapers.map(paper => {
+                  const isExpanded = expandedPapers.has(paper.id)
+                  const editions = paperEditions[paper.id] || []
+                  const editionCount = paper.edition_count || editions.length || 0
+                  return (
+                    <>
+                      <tr
+                        key={paper.id}
+                        className={`paper-row ${selectedPapers.has(paper.id) ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`}
+                        onClick={e => handleSelectPaper(paper.id, e)}
+                        draggable
+                        onDragStart={e => {
+                          const ids = selectedPapers.has(paper.id)
+                            ? Array.from(selectedPapers)
+                            : [paper.id]
+                          e.dataTransfer.setData('paperIds', JSON.stringify(ids))
+                        }}
                       >
-                        {paper.title}
-                      </a>
-                      <span className="authors-sub">{paper.authors}</span>
-                    </td>
-                    <td className="col-year">{paper.year || '–'}</td>
-                    <td className="col-status">
-                      <span className={`status-badge status-${paper.status}`}>
-                        {paper.status}
-                      </span>
-                    </td>
-                    <td className="col-dossier">
-                      {paper.dossier_id ? (
-                        <span className="dossier-tag">
-                          {dossiers.find(d => d.id === paper.dossier_id)?.name || '...'}
-                        </span>
-                      ) : (
-                        <span className="unassigned-tag">—</span>
+                        <td className="col-expand" onClick={e => e.stopPropagation()}>
+                          {paper.status === 'resolved' && (
+                            <button
+                              className={`btn-expand ${isExpanded ? 'expanded' : ''}`}
+                              onClick={e => togglePaperExpansion(paper.id, e)}
+                              title={isExpanded ? 'Collapse editions' : 'Show editions'}
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                          )}
+                        </td>
+                        <td className="col-select" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedPapers.has(paper.id)}
+                            onChange={() => handleSelectPaper(paper.id)}
+                          />
+                        </td>
+                        <td className="col-title">
+                          <a
+                            href="#"
+                            onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(`/paper/${paper.id}`); }}
+                          >
+                            {paper.title}
+                          </a>
+                          <span className="authors-sub">{paper.authors}</span>
+                        </td>
+                        <td className="col-year">{paper.year || '–'}</td>
+                        <td className="col-status">
+                          <span className={`status-badge status-${paper.status}`}>
+                            {paper.status}
+                          </span>
+                        </td>
+                        <td className="col-editions" onClick={e => e.stopPropagation()}>
+                          {paper.status === 'resolved' && (
+                            <button
+                              className="btn-editions-count"
+                              onClick={e => togglePaperExpansion(paper.id, e)}
+                              title="Click to expand/collapse editions"
+                            >
+                              📖 {editionCount > 0 ? editionCount : '?'}
+                            </button>
+                          )}
+                        </td>
+                        <td className="col-dossier">
+                          {paper.dossier_id ? (
+                            <span className="dossier-tag">
+                              {dossiers.find(d => d.id === paper.dossier_id)?.name || '...'}
+                            </span>
+                          ) : (
+                            <span className="unassigned-tag">—</span>
+                          )}
+                        </td>
+                        <td className="col-citations">
+                          {paper.total_harvested_citations?.toLocaleString() || 0}
+                        </td>
+                        <td className="col-actions" onClick={e => e.stopPropagation()}>
+                          <button
+                            className="btn-icon btn-danger btn-xs"
+                            onClick={() => removePaper.mutate(paper)}
+                            title="Remove from collection"
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                      {/* Expanded editions row */}
+                      {isExpanded && (
+                        <tr key={`${paper.id}-editions`} className="editions-row">
+                          <td colSpan="9">
+                            <div className="editions-panel">
+                              {!paperEditions[paper.id] ? (
+                                <div className="editions-loading">Loading editions...</div>
+                              ) : editions.length === 0 ? (
+                                <div className="editions-empty">
+                                  No editions discovered yet.
+                                  <button
+                                    className="btn-link"
+                                    onClick={() => navigate(`/paper/${paper.id}`)}
+                                  >
+                                    Discover Editions →
+                                  </button>
+                                </div>
+                              ) : (
+                                <table className="editions-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Language</th>
+                                      <th>Title</th>
+                                      <th>Citations</th>
+                                      <th>Harvested</th>
+                                      <th>Confidence</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {editions.filter(e => e.selected && !e.excluded).map(edition => (
+                                      <tr key={edition.id} className={`edition-item confidence-${edition.confidence}`}>
+                                        <td className="edition-lang">
+                                          <span className="lang-badge">{edition.language?.toUpperCase() || '?'}</span>
+                                        </td>
+                                        <td className="edition-title">
+                                          {edition.link ? (
+                                            <a href={edition.link} target="_blank" rel="noopener noreferrer">
+                                              {edition.title}
+                                            </a>
+                                          ) : edition.title}
+                                        </td>
+                                        <td className="edition-citations">
+                                          {edition.citation_count?.toLocaleString() || 0}
+                                        </td>
+                                        <td className="edition-harvested">
+                                          {edition.harvested_citation_count?.toLocaleString() || 0}
+                                        </td>
+                                        <td className="edition-confidence">
+                                          <span className={`confidence-badge ${edition.confidence}`}>
+                                            {edition.confidence}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="col-citations">
-                      {paper.total_harvested_citations?.toLocaleString() || 0}
-                    </td>
-                    <td className="col-actions" onClick={e => e.stopPropagation()}>
-                      <button
-                        className="btn-icon btn-danger btn-xs"
-                        onClick={() => removePaper.mutate(paper)}
-                        title="Remove from collection"
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                    </>
+                  )
+                })}
               </tbody>
             </table>
           )}
