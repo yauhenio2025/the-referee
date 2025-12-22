@@ -202,7 +202,11 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
 
 
 async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
-    """Find and queue jobs for incomplete harvests. Returns number of jobs queued."""
+    """Find and queue jobs for incomplete harvests. Returns number of jobs queued.
+
+    IMPORTANT: Groups editions by paper_id to avoid creating multiple jobs
+    for the same paper (which would waste API credits fetching same citations).
+    """
     global _last_auto_resume_check
 
     # Rate limit checks
@@ -215,40 +219,47 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
     if not incomplete:
         return 0
 
-    jobs_queued = 0
+    # GROUP editions by paper_id to avoid duplicate jobs for same paper
+    # This is critical - multiple editions of same paper share citations!
+    editions_by_paper: Dict[int, List[Edition]] = {}
     for edition in incomplete:
-        missing = edition.citation_count - edition.harvested_citation_count
-        # Calculate resume page: Google Scholar shows 10 results per page
-        # If we have 643 citations, we've fetched ~64 pages, resume from page 64
-        resume_page = edition.harvested_citation_count // 10
-        log_now(f"[AutoResume] Edition {edition.id} (paper {edition.paper_id}): {edition.harvested_citation_count}/{edition.citation_count} harvested, missing {missing}, resume from page {resume_page}")
+        if edition.paper_id not in editions_by_paper:
+            editions_by_paper[edition.paper_id] = []
+        editions_by_paper[edition.paper_id].append(edition)
 
-        # Create resume job with proper resume_state to skip already-fetched pages
+    log_now(f"[AutoResume] Found {len(incomplete)} incomplete editions across {len(editions_by_paper)} papers")
+
+    jobs_queued = 0
+    for paper_id, paper_editions in editions_by_paper.items():
+        # Log all editions for this paper
+        total_missing = sum(e.citation_count - e.harvested_citation_count for e in paper_editions)
+        edition_ids = [e.id for e in paper_editions]
+        log_now(f"[AutoResume] Paper {paper_id}: {len(paper_editions)} editions with {total_missing:,} total missing citations")
+        for e in paper_editions:
+            missing = e.citation_count - e.harvested_citation_count
+            log_now(f"[AutoResume]   - Edition {e.id}: {e.harvested_citation_count}/{e.citation_count} harvested ({missing} missing)")
+
+        # Create ONE job for ALL editions of this paper
         job = Job(
-            paper_id=edition.paper_id,
+            paper_id=paper_id,
             job_type="extract_citations",
             status="pending",
             params=json.dumps({
-                "edition_ids": [edition.id],
+                "edition_ids": edition_ids,  # ALL editions for this paper
                 "max_citations_per_edition": 1000,
                 "skip_threshold": 50000,
                 "is_resume": True,
-                "resume_state": {
-                    "edition_id": edition.id,
-                    "last_page": resume_page,
-                    "total_citations": edition.harvested_citation_count,
-                },
             }),
             progress=0,
-            progress_message=f"Auto-resume from page {resume_page}: {missing:,} citations remaining",
+            progress_message=f"Auto-resume: {len(paper_editions)} editions, {total_missing:,} citations remaining",
         )
         db.add(job)
         jobs_queued += 1
-        log_now(f"[AutoResume] Queued resume job for edition {edition.id} starting at page {resume_page}")
+        log_now(f"[AutoResume] Queued 1 job for paper {paper_id} covering {len(paper_editions)} editions")
 
     if jobs_queued > 0:
         await db.commit()
-        log_now(f"[AutoResume] Queued {jobs_queued} auto-resume jobs")
+        log_now(f"[AutoResume] Queued {jobs_queued} auto-resume jobs (1 per paper)")
 
     return jobs_queued
 
