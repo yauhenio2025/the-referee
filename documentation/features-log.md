@@ -4,6 +4,80 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Dossiers & Terminology Cleanup
+
+**Commit:** `9be6494` on `main`
+
+**Description:** Added Dossiers as an organizational layer between Collections and Papers. Dossiers allow grouping related Works (seeds) within a Collection. Also created terminology documentation and updated UI labels to use clearer language.
+
+**Key Changes:**
+- Backend: Added `Dossier` model (belongs to Collection, has many Papers)
+- Backend: Added `dossier_id` to Paper model
+- Backend: CRUD endpoints for Dossiers (`/api/dossiers`)
+- Backend: Updated `add_edition_as_seed` to support dossier selection
+- Frontend: Created `DossierSelectModal.jsx` component
+- Frontend: Editions page - "Add as Seed" now prompts for dossier selection
+- Frontend: Citations page - Added "Track this paper" button with dossier selection
+- Frontend: Updated tooltips and messages for clarity
+- Documentation: Created `terminology.md` with ontology definitions
+
+**Organizational Hierarchy:**
+```
+Collection → Dossier → Work (Seed) → Editions → Citing Papers
+```
+
+**Files Modified:**
+- `backend/app/models.py`
+- `backend/app/schemas.py`
+- `backend/app/database.py`
+- `backend/app/main.py`
+- `frontend/src/lib/api.js`
+- `frontend/src/components/DossierSelectModal.jsx` (new)
+- `frontend/src/components/EditionDiscovery.jsx`
+- `frontend/src/components/Citations.jsx`
+- `documentation/terminology.md` (new)
+
+---
+
+## 2025-12-22: Per-Edition Harvest Button
+
+**Commit:** `499901c` on `main`
+
+**Description:** Added ability to manually start/resume harvest for a specific edition, useful when auto-resume fails or user wants to prioritize a particular edition.
+
+**Key Changes:**
+- Backend: `POST /api/editions/{edition_id}/harvest` endpoint
+- Frontend: Harvest button (📥) on each edition row
+- Frontend: Visual feedback for harvesting state
+
+**Files Modified:**
+- `backend/app/main.py`
+- `frontend/src/lib/api.js`
+- `frontend/src/components/EditionDiscovery.jsx`
+
+---
+
+## 2025-12-22: Smart Resume Fix & Pause/Unpause Harvest
+
+**Commit:** `bf3a9ae`, `3bdf66e` on `main`
+
+**Description:** Fixed year-by-year harvest resume logic to only trust saved state (not re-derive from citations). Added ability to pause/unpause automatic harvest resume for specific papers.
+
+**Key Changes:**
+- Backend: Fixed `harvest_resume_state` handling in job worker
+- Backend: Added `harvest_paused` field to Paper model
+- Backend: `POST /api/papers/{id}/pause-harvest` and `unpause-harvest` endpoints
+- Auto-resume skips paused papers
+
+**Files Modified:**
+- `backend/app/models.py`
+- `backend/app/database.py`
+- `backend/app/services/job_worker.py`
+- `backend/app/main.py`
+- `frontend/src/lib/api.js`
+
+---
+
 ## 2025-12-20: Edition Management - Add as Seed, Exclude, Finalize
 
 **Commit:** `700fa60` on `main`

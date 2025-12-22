@@ -56,7 +56,7 @@ export default function Citations({ paper, onBack }) {
     onSuccess: ({ newPaper, dossierOptions }) => {
       queryClient.invalidateQueries(['papers'])
       queryClient.invalidateQueries(['dossiers'])
-      toast.success(`🌱 Created new seed: ${newPaper.title.substring(0, 50)}...`)
+      toast.success(`🌱 Now tracking: ${newPaper.title.substring(0, 50)}...`)
     },
     onError: (error) => {
       toast.error(`Failed to create seed: ${error.message}`)
@@ -256,8 +256,8 @@ export default function Citations({ paper, onBack }) {
         onSelect={handleDossierSelected}
         defaultCollectionId={paper.collection_id}
         defaultDossierId={paper.dossier_id}
-        title="Add Citation as Seed"
-        subtitle="Select which dossier to add this citation as a new seed paper"
+        title="Track Citing Paper"
+        subtitle="This citing paper is interesting - track its citations as a new seed in:"
       />
     </div>
   )
@@ -334,7 +334,7 @@ function CitationRow({ citation, maxIntersection, onAddAsSeed }) {
         <button
           className="btn-icon btn-seed"
           onClick={() => onAddAsSeed(citation)}
-          title="Add as new seed paper"
+          title="Track this paper's citations"
         >
           🌱
         </button>

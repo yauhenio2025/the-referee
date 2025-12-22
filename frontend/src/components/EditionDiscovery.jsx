@@ -199,8 +199,8 @@ export default function EditionDiscovery({ paper, onBack }) {
       // Invalidate dossiers (paper count changed)
       queryClient.invalidateQueries(['dossiers'])
       // Show success toast with dossier info if available
-      const dossierInfo = result.dossier_name ? ` (in ${result.dossier_name})` : ''
-      toast.success(`🌱 Created new seed: ${result.title.substring(0, 50)}...${dossierInfo}`)
+      const dossierInfo = result.dossier_name ? ` → ${result.dossier_name}` : ''
+      toast.success(`🌱 Now tracking: ${result.title.substring(0, 50)}...${dossierInfo}`)
     },
     onError: (error) => {
       toast.error(`Failed to create seed: ${error.message}`)
@@ -1102,8 +1102,8 @@ export default function EditionDiscovery({ paper, onBack }) {
         onSelect={handleDossierSelected}
         defaultCollectionId={paper.collection_id}
         defaultDossierId={paper.dossier_id}
-        title="Add as New Seed"
-        subtitle="Select which dossier to add this new seed paper to"
+        title="Track as Separate Work"
+        subtitle="This item isn't an edition of the current work - track it as a new seed in:"
       />
     </div>
   )
@@ -1210,7 +1210,7 @@ function EditionGroup({
                   className="btn-xs btn-seed-batch"
                   onClick={() => selectedIds.forEach(id => onAddAsSeed(id))}
                 >
-                  🌱 Add {selectedCount} as Seeds
+                  🌱 Track {selectedCount} Separately
                 </button>
               )}
               {/* Select & Harvest - mark as editions and start harvesting */}
@@ -1383,7 +1383,7 @@ function EditionRow({
           <button
             className="btn-icon btn-seed"
             onClick={() => onAddAsSeed(edition.id)}
-            title="Add as new seed paper"
+            title="Not an edition? Track as separate work"
           >
             🌱
           </button>
