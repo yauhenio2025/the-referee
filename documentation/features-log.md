@@ -4,6 +4,36 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2025-12-22: Add to Collection & Expandable Editions
+
+**Commit:** `a18a5dd` on `main`
+
+**Description:** Added ability to add papers to collections from anywhere in the app, plus expandable editions view in collection detail.
+
+**Key Changes:**
+
+### Add to Collection
+- PaperList: Added "📁 Add to Collection" button on each paper card
+- EditionDiscovery: Added "📁 Add to Collection" button in action bar
+- Both use DossierSelectModal for consistent UX
+- Can select existing collection/dossier or create new
+
+### Expandable Editions in Collection Detail
+- New "Editions" column shows count badge for each paper
+- Click to expand and see all editions inline
+- Nested table shows: Language, Title, Citations, Harvested count, Confidence
+- Lazy-loads editions on first expand for performance
+- Visual hierarchy with indentation and color coding
+- Confidence badges (high/uncertain/rejected)
+
+**Files Modified:**
+- `frontend/src/components/PaperList.jsx` - Added Add to Collection button
+- `frontend/src/components/EditionDiscovery.jsx` - Added Add to Collection button
+- `frontend/src/components/CollectionDetail.jsx` - Added expandable editions
+- `frontend/src/App.css` - Added CSS for expandable editions panel
+
+---
+
 ## 2025-12-22: Soft Delete with Undo & Dossier Management UI
 
 **Commit:** `fbeba6e` on `main`
