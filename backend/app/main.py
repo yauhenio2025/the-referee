@@ -1576,7 +1576,7 @@ async def extract_citations(
 async def get_paper_citations(
     paper_id: int,
     skip: int = 0,
-    limit: int = 500,
+    limit: int = 10000,  # High default - need all citations for search/filtering
     language: Optional[str] = None,
     edition_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
