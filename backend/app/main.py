@@ -16,7 +16,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -31,6 +31,8 @@ from .schemas import (
     CanonicalEditionSummary,
     # Refresh/Auto-Updater schemas
     RefreshRequest, RefreshJobResponse, RefreshStatusResponse, StalenessReportResponse,
+    # Harvest Completeness schemas
+    HarvestTargetResponse, FailedFetchResponse, HarvestCompletenessResponse, FailedFetchesSummary,
 )
 
 # Configure logging with immediate flush for Render
@@ -2777,6 +2779,447 @@ async def get_staleness_report(
         never_harvested_editions=never_harvested_editions,
         oldest_harvest_date=oldest_harvest,
         staleness_threshold_days=threshold_days,
+    )
+
+
+# ============== Harvest Completeness ==============
+
+@app.get("/api/harvest-completeness/edition/{edition_id}", response_model=HarvestCompletenessResponse)
+async def get_edition_harvest_completeness(
+    edition_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get harvest completeness report for a specific edition.
+
+    Shows expected vs actual citation counts per year, any incomplete years,
+    and failed page fetches that need retry.
+    """
+    # Get the edition
+    edition_result = await db.execute(
+        select(Edition).where(Edition.id == edition_id)
+    )
+    edition = edition_result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get harvest targets for this edition
+    targets_result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.edition_id == edition_id)
+        .order_by(HarvestTarget.year.desc())
+    )
+    targets = list(targets_result.scalars().all())
+
+    # Get failed fetches for this edition
+    failed_result = await db.execute(
+        select(FailedFetch)
+        .where(FailedFetch.edition_id == edition_id)
+        .order_by(FailedFetch.year.desc(), FailedFetch.page_number.asc())
+    )
+    failed_fetches = list(failed_result.scalars().all())
+
+    # Build response
+    total_expected = sum(t.expected_count for t in targets)
+    total_actual = sum(t.actual_count for t in targets)
+    total_missing = total_expected - total_actual
+    completion_percent = (total_actual / total_expected * 100) if total_expected > 0 else 0
+
+    # Find incomplete years
+    incomplete_years = [
+        t.year for t in targets
+        if t.status == "incomplete" or (t.pages_failed > 0)
+    ]
+
+    # Format targets
+    formatted_targets = [
+        HarvestTargetResponse(
+            id=t.id,
+            edition_id=t.edition_id,
+            year=t.year,
+            expected_count=t.expected_count,
+            actual_count=t.actual_count,
+            status=t.status,
+            pages_attempted=t.pages_attempted,
+            pages_succeeded=t.pages_succeeded,
+            pages_failed=t.pages_failed,
+            created_at=t.created_at,
+            completed_at=t.completed_at,
+            missing_count=t.expected_count - t.actual_count,
+            completion_percent=(t.actual_count / t.expected_count * 100) if t.expected_count > 0 else 0,
+        )
+        for t in targets
+    ]
+
+    # Format failed fetches
+    formatted_failed = [
+        FailedFetchResponse(
+            id=f.id,
+            edition_id=f.edition_id,
+            url=f.url,
+            year=f.year,
+            page_number=f.page_number,
+            retry_count=f.retry_count,
+            last_retry_at=f.last_retry_at,
+            last_error=f.last_error,
+            status=f.status,
+            recovered_citations=f.recovered_citations,
+            created_at=f.created_at,
+            resolved_at=f.resolved_at,
+            edition_title=edition.title,
+            paper_id=edition.paper_id,
+        )
+        for f in failed_fetches
+    ]
+
+    return HarvestCompletenessResponse(
+        edition_id=edition_id,
+        paper_id=edition.paper_id,
+        total_expected=total_expected,
+        total_actual=total_actual,
+        total_missing=total_missing,
+        completion_percent=completion_percent,
+        targets=formatted_targets,
+        failed_fetches=formatted_failed,
+        incomplete_years=incomplete_years,
+    )
+
+
+@app.get("/api/harvest-completeness/paper/{paper_id}", response_model=HarvestCompletenessResponse)
+async def get_paper_harvest_completeness(
+    paper_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get harvest completeness report for all editions of a paper.
+
+    Aggregates data across all selected editions.
+    """
+    # Get all selected editions for this paper
+    editions_result = await db.execute(
+        select(Edition).where(
+            Edition.paper_id == paper_id,
+            Edition.selected == True
+        )
+    )
+    editions = list(editions_result.scalars().all())
+    edition_ids = [e.id for e in editions]
+
+    if not edition_ids:
+        return HarvestCompletenessResponse(
+            paper_id=paper_id,
+            total_expected=0,
+            total_actual=0,
+            total_missing=0,
+            completion_percent=0,
+        )
+
+    # Get harvest targets for all editions
+    targets_result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.edition_id.in_(edition_ids))
+        .order_by(HarvestTarget.edition_id, HarvestTarget.year.desc())
+    )
+    targets = list(targets_result.scalars().all())
+
+    # Get failed fetches for all editions
+    failed_result = await db.execute(
+        select(FailedFetch)
+        .where(FailedFetch.edition_id.in_(edition_ids))
+        .order_by(FailedFetch.edition_id, FailedFetch.year.desc())
+    )
+    failed_fetches = list(failed_result.scalars().all())
+
+    # Build edition lookup
+    edition_map = {e.id: e for e in editions}
+
+    # Calculate totals
+    total_expected = sum(t.expected_count for t in targets)
+    total_actual = sum(t.actual_count for t in targets)
+    total_missing = total_expected - total_actual
+    completion_percent = (total_actual / total_expected * 100) if total_expected > 0 else 0
+
+    # Find incomplete years (deduplicated)
+    incomplete_years = list(set(
+        t.year for t in targets
+        if t.year and (t.status == "incomplete" or t.pages_failed > 0)
+    ))
+    incomplete_years.sort(reverse=True)
+
+    # Format targets
+    formatted_targets = [
+        HarvestTargetResponse(
+            id=t.id,
+            edition_id=t.edition_id,
+            year=t.year,
+            expected_count=t.expected_count,
+            actual_count=t.actual_count,
+            status=t.status,
+            pages_attempted=t.pages_attempted,
+            pages_succeeded=t.pages_succeeded,
+            pages_failed=t.pages_failed,
+            created_at=t.created_at,
+            completed_at=t.completed_at,
+            missing_count=t.expected_count - t.actual_count,
+            completion_percent=(t.actual_count / t.expected_count * 100) if t.expected_count > 0 else 0,
+        )
+        for t in targets
+    ]
+
+    # Format failed fetches
+    formatted_failed = [
+        FailedFetchResponse(
+            id=f.id,
+            edition_id=f.edition_id,
+            url=f.url,
+            year=f.year,
+            page_number=f.page_number,
+            retry_count=f.retry_count,
+            last_retry_at=f.last_retry_at,
+            last_error=f.last_error,
+            status=f.status,
+            recovered_citations=f.recovered_citations,
+            created_at=f.created_at,
+            resolved_at=f.resolved_at,
+            edition_title=edition_map.get(f.edition_id, Edition()).title if f.edition_id in edition_map else None,
+            paper_id=paper_id,
+        )
+        for f in failed_fetches
+    ]
+
+    return HarvestCompletenessResponse(
+        paper_id=paper_id,
+        total_expected=total_expected,
+        total_actual=total_actual,
+        total_missing=total_missing,
+        completion_percent=completion_percent,
+        targets=formatted_targets,
+        failed_fetches=formatted_failed,
+        incomplete_years=incomplete_years,
+    )
+
+
+@app.get("/api/failed-fetches", response_model=FailedFetchesSummary)
+async def get_failed_fetches(
+    status: Optional[str] = None,
+    edition_id: Optional[int] = None,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get failed page fetches with optional filtering.
+
+    Args:
+        status: Filter by status (pending, retrying, succeeded, abandoned)
+        edition_id: Filter to a specific edition
+        limit: Max number to return (default 100)
+    """
+    # Build query
+    query = select(FailedFetch)
+    if status:
+        query = query.where(FailedFetch.status == status)
+    if edition_id:
+        query = query.where(FailedFetch.edition_id == edition_id)
+
+    query = query.order_by(FailedFetch.created_at.desc()).limit(limit)
+
+    result = await db.execute(query)
+    failed_fetches = list(result.scalars().all())
+
+    # Get edition info for display
+    edition_ids = list(set(f.edition_id for f in failed_fetches))
+    if edition_ids:
+        editions_result = await db.execute(
+            select(Edition).where(Edition.id.in_(edition_ids))
+        )
+        editions = {e.id: e for e in editions_result.scalars().all()}
+    else:
+        editions = {}
+
+    # Count by status
+    all_result = await db.execute(select(FailedFetch))
+    all_fetches = list(all_result.scalars().all())
+
+    total_pending = sum(1 for f in all_fetches if f.status == "pending")
+    total_retrying = sum(1 for f in all_fetches if f.status == "retrying")
+    total_succeeded = sum(1 for f in all_fetches if f.status == "succeeded")
+    total_abandoned = sum(1 for f in all_fetches if f.status == "abandoned")
+    total_recovered = sum(f.recovered_citations for f in all_fetches if f.status == "succeeded")
+
+    # Format failed fetches
+    formatted = [
+        FailedFetchResponse(
+            id=f.id,
+            edition_id=f.edition_id,
+            url=f.url,
+            year=f.year,
+            page_number=f.page_number,
+            retry_count=f.retry_count,
+            last_retry_at=f.last_retry_at,
+            last_error=f.last_error,
+            status=f.status,
+            recovered_citations=f.recovered_citations,
+            created_at=f.created_at,
+            resolved_at=f.resolved_at,
+            edition_title=editions.get(f.edition_id, Edition()).title if f.edition_id in editions else None,
+            paper_id=editions.get(f.edition_id, Edition()).paper_id if f.edition_id in editions else None,
+        )
+        for f in failed_fetches
+    ]
+
+    return FailedFetchesSummary(
+        total_pending=total_pending,
+        total_retrying=total_retrying,
+        total_succeeded=total_succeeded,
+        total_abandoned=total_abandoned,
+        total_recovered_citations=total_recovered,
+        failed_fetches=formatted,
+    )
+
+
+@app.post("/api/failed-fetches/retry")
+async def trigger_retry_failed_fetches(
+    max_retries: int = 50,
+    db: AsyncSession = Depends(get_db)
+):
+    """Manually trigger a retry job for pending failed fetches.
+
+    This queues a retry_failed_fetches job that will attempt to re-fetch
+    pages that previously failed.
+    """
+    # Check if there's already a pending/running retry job
+    existing = await db.execute(
+        select(Job).where(
+            Job.job_type == "retry_failed_fetches",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="A retry job is already pending or running"
+        )
+
+    # Check if there are pending failed fetches
+    pending_result = await db.execute(
+        select(func.count(FailedFetch.id)).where(FailedFetch.status == "pending")
+    )
+    pending_count = pending_result.scalar() or 0
+
+    if pending_count == 0:
+        return {"message": "No pending failed fetches to retry", "job_id": None}
+
+    # Create the job
+    job = Job(
+        job_type="retry_failed_fetches",
+        status="pending",
+        params=json.dumps({"max_retries": max_retries}),
+        progress=0,
+        progress_message=f"Queued: Retry {min(pending_count, max_retries)} failed fetches",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    return {
+        "message": f"Retry job queued for {min(pending_count, max_retries)} failed fetches",
+        "job_id": job.id,
+        "pending_failed_fetches": pending_count,
+    }
+
+
+# ============== Verify and Repair Harvest ==============
+
+class VerifyRepairRequest(BaseModel):
+    """Request to verify and repair harvest gaps"""
+    year_start: int = 2025  # Start from most recent
+    year_end: int = 1932    # Go back to publication year
+    fix_gaps: bool = True   # If True, fetch missing pages. If False, just report.
+
+
+class VerifyRepairResponse(BaseModel):
+    """Response from verify/repair endpoint"""
+    job_id: int
+    paper_id: int
+    years_to_check: int
+    message: str
+
+
+@app.post("/api/papers/{paper_id}/verify-repair", response_model=VerifyRepairResponse)
+async def verify_and_repair_harvest(
+    paper_id: int,
+    request: VerifyRepairRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify harvest completeness and repair gaps for a paper.
+
+    This queues a verify_and_repair job that will:
+    1. For each year in the specified range, verify that the last page exists
+    2. Compare Scholar's actual count to our harvested count
+    3. Identify missing pages between what we have and what Scholar reports
+    4. If fix_gaps=True, fetch the missing pages and save citations
+
+    Use this to recover citations that may have been lost during original harvest.
+    """
+    # Get paper with its editions
+    result = await db.execute(
+        select(Paper).where(Paper.id == paper_id, Paper.deleted == False)
+    )
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if not paper.scholar_id:
+        raise HTTPException(status_code=400, detail="Paper has no Scholar ID - cannot verify")
+
+    # Get selected editions
+    editions_result = await db.execute(
+        select(Edition)
+        .where(Edition.paper_id == paper_id, Edition.selected == True, Edition.excluded == False)
+    )
+    editions = list(editions_result.scalars().all())
+
+    if not editions:
+        raise HTTPException(status_code=400, detail="Paper has no selected editions to verify")
+
+    # Check if there's already a pending/running verify job for this paper
+    existing = await db.execute(
+        select(Job).where(
+            Job.paper_id == paper_id,
+            Job.job_type == "verify_and_repair",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="A verify/repair job is already pending or running for this paper"
+        )
+
+    # Calculate years to check
+    years_to_check = request.year_start - request.year_end + 1
+
+    # Create the job
+    job = Job(
+        paper_id=paper_id,
+        job_type="verify_and_repair",
+        status="pending",
+        params=json.dumps({
+            "paper_id": paper_id,
+            "year_start": request.year_start,
+            "year_end": request.year_end,
+            "fix_gaps": request.fix_gaps,
+            "edition_ids": [e.id for e in editions],
+        }),
+        progress=0,
+        progress_message=f"Queued: Verify/repair years {request.year_start} to {request.year_end} ({years_to_check} years)",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    return VerifyRepairResponse(
+        job_id=job.id,
+        paper_id=paper_id,
+        years_to_check=years_to_check,
+        message=f"Verify/repair job queued for {years_to_check} years across {len(editions)} editions"
     )
 
 

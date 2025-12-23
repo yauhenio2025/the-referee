@@ -485,6 +485,59 @@ class RefereeAPI {
       body: { dossier_ids: dossierIds },
     });
   }
+
+  // ============== Harvest Completeness ==============
+
+  /**
+   * Get harvest completeness report for an edition.
+   * Shows expected vs actual counts per year and any failed fetches.
+   */
+  async getEditionHarvestCompleteness(editionId) {
+    return this.request(`/api/harvest-completeness/edition/${editionId}`);
+  }
+
+  /**
+   * Get harvest completeness report for a paper (all selected editions).
+   */
+  async getPaperHarvestCompleteness(paperId) {
+    return this.request(`/api/harvest-completeness/paper/${paperId}`);
+  }
+
+  /**
+   * Get failed page fetches with optional filtering.
+   * @param {Object} params - { status, edition_id, limit }
+   */
+  async getFailedFetches(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/api/failed-fetches${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Manually trigger a retry job for pending failed fetches.
+   * @param {number} maxRetries - Max failed fetches to retry (default 50)
+   */
+  async retryFailedFetches(maxRetries = 50) {
+    return this.request(`/api/failed-fetches/retry?max_retries=${maxRetries}`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Verify and repair harvest gaps for a paper.
+   * Checks each year for missing citations and fetches them.
+   * @param {number} paperId - Paper ID
+   * @param {Object} options - { yearStart, yearEnd, fixGaps }
+   */
+  async verifyRepairHarvest(paperId, options = {}) {
+    return this.request(`/api/papers/${paperId}/verify-repair`, {
+      method: 'POST',
+      body: {
+        year_start: options.yearStart ?? 2025,
+        year_end: options.yearEnd ?? 1932,
+        fix_gaps: options.fixGaps ?? true,
+      },
+    });
+  }
 }
 
 export const api = new RefereeAPI();

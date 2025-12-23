@@ -425,6 +425,74 @@ class StalenessReportResponse(BaseModel):
     staleness_threshold_days: int = 90
 
 
+# ============== Harvest Completeness Schemas ==============
+
+class HarvestTargetResponse(BaseModel):
+    """A single harvest target (expected vs actual for a year)"""
+    id: int
+    edition_id: int
+    year: Optional[int] = None  # null = all years combined
+    expected_count: int
+    actual_count: int
+    status: str  # harvesting, complete, incomplete
+    pages_attempted: int
+    pages_succeeded: int
+    pages_failed: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    # Computed fields
+    missing_count: int = 0
+    completion_percent: float = 0.0
+
+    class Config:
+        from_attributes = True
+
+
+class FailedFetchResponse(BaseModel):
+    """A failed page fetch record"""
+    id: int
+    edition_id: int
+    url: str
+    year: Optional[int] = None
+    page_number: int
+    retry_count: int
+    last_retry_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    status: str  # pending, retrying, succeeded, abandoned
+    recovered_citations: int = 0
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+    # Joined data
+    edition_title: Optional[str] = None
+    paper_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class HarvestCompletenessResponse(BaseModel):
+    """Report on harvest completeness for an edition or paper"""
+    edition_id: Optional[int] = None
+    paper_id: Optional[int] = None
+    total_expected: int
+    total_actual: int
+    total_missing: int
+    completion_percent: float
+    targets: List[HarvestTargetResponse] = []
+    failed_fetches: List[FailedFetchResponse] = []
+    incomplete_years: List[int] = []
+
+
+class FailedFetchesSummary(BaseModel):
+    """Summary of all failed fetches in the system"""
+    total_pending: int
+    total_retrying: int
+    total_succeeded: int
+    total_abandoned: int
+    total_recovered_citations: int
+    failed_fetches: List[FailedFetchResponse] = []
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 CollectionDetail.model_rebuild()

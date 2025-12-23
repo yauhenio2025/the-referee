@@ -296,3 +296,77 @@ class SearchCache(Base):
     __table_args__ = (
         Index("ix_cache_expires", "expires_at"),
     )
+
+
+class FailedFetch(Base):
+    """Track failed page fetches for retry later.
+
+    When a page fetch fails after all retries, store it here instead of skipping.
+    A background job will periodically retry these until successful.
+    """
+    __tablename__ = "failed_fetches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
+
+    # The full URL that failed
+    url: Mapped[str] = mapped_column(Text)
+
+    # Context for retry
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Year filter if applicable
+    page_number: Mapped[int] = mapped_column(Integer)  # Which page (0-indexed)
+
+    # Retry tracking
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Status: pending, retrying, succeeded, abandoned (after max retries)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+
+    # When successfully retried, how many citations were recovered
+    recovered_citations: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_failed_fetches_status", "status"),
+        Index("ix_failed_fetches_edition", "edition_id"),
+    )
+
+
+class HarvestTarget(Base):
+    """Track expected citation counts per year for an edition.
+
+    When we start harvesting, we record the total count Scholar reports for each year.
+    This lets us verify completeness and identify gaps.
+    """
+    __tablename__ = "harvest_targets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
+
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # null = all years combined
+
+    # What Scholar reported as the total count
+    expected_count: Mapped[int] = mapped_column(Integer)
+
+    # What we actually harvested
+    actual_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Status: harvesting, complete, incomplete
+    status: Mapped[str] = mapped_column(String(20), default="harvesting")
+
+    # Track pages harvested for this year
+    pages_attempted: Mapped[int] = mapped_column(Integer, default=0)
+    pages_succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    pages_failed: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_harvest_targets_edition_year", "edition_id", "year", unique=True),
+    )

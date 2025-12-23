@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Job, Paper, Edition, Citation, RawSearchResult
+from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
@@ -132,6 +132,349 @@ async def update_paper_harvest_stats(db: AsyncSession, paper_id: int):
     )
     await db.commit()
     log_now(f"[Harvest] Updated paper {paper_id}: any_harvested_at={any_harvested_at}, total={total_harvested}")
+
+
+async def create_or_update_harvest_target(
+    db: AsyncSession,
+    edition_id: int,
+    year: Optional[int],
+    expected_count: int
+) -> HarvestTarget:
+    """Create or update a HarvestTarget record for tracking expected vs actual citations.
+
+    Called when we start harvesting a year and know the expected count from Scholar.
+    """
+    # Check for existing target for this edition+year
+    result = await db.execute(
+        select(HarvestTarget).where(
+            HarvestTarget.edition_id == edition_id,
+            HarvestTarget.year == year
+        )
+    )
+    target = result.scalar_one_or_none()
+
+    if target:
+        # Update expected count if it's higher (Scholar may report different counts)
+        if expected_count > target.expected_count:
+            target.expected_count = expected_count
+            target.updated_at = datetime.utcnow()
+            await db.commit()
+            log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: expected={expected_count}")
+    else:
+        # Create new target
+        target = HarvestTarget(
+            edition_id=edition_id,
+            year=year,
+            expected_count=expected_count,
+            actual_count=0,
+            status="harvesting",
+        )
+        db.add(target)
+        await db.commit()
+        log_now(f"[HarvestTarget] Created for edition {edition_id} year {year}: expected={expected_count}")
+
+    return target
+
+
+async def update_harvest_target_progress(
+    db: AsyncSession,
+    edition_id: int,
+    year: Optional[int],
+    actual_count: int,
+    pages_succeeded: int = 0,
+    pages_failed: int = 0,
+    pages_attempted: int = 0,
+    mark_complete: bool = False
+):
+    """Update a HarvestTarget with progress data after harvesting."""
+    result = await db.execute(
+        select(HarvestTarget).where(
+            HarvestTarget.edition_id == edition_id,
+            HarvestTarget.year == year
+        )
+    )
+    target = result.scalar_one_or_none()
+
+    if target:
+        target.actual_count = actual_count
+        target.pages_succeeded = pages_succeeded
+        target.pages_failed = pages_failed
+        target.pages_attempted = pages_attempted
+        target.updated_at = datetime.utcnow()
+
+        if mark_complete:
+            target.status = "complete" if pages_failed == 0 else "incomplete"
+            target.completed_at = datetime.utcnow()
+
+        await db.commit()
+        status_str = f", status={target.status}" if mark_complete else ""
+        log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: actual={actual_count}, pages OK={pages_succeeded}, pages FAIL={pages_failed}{status_str}")
+
+
+async def record_failed_fetch(
+    db: AsyncSession,
+    edition_id: int,
+    url: str,
+    page_number: int,
+    year: Optional[int],
+    error: str
+) -> FailedFetch:
+    """Record a failed page fetch for later retry.
+
+    Called when all retry attempts fail for a page.
+    """
+    # Check if we already have this failure recorded
+    result = await db.execute(
+        select(FailedFetch).where(
+            FailedFetch.edition_id == edition_id,
+            FailedFetch.page_number == page_number,
+            FailedFetch.year == year,
+            FailedFetch.status == "pending"
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        # Update retry count
+        existing.retry_count += 1
+        existing.last_retry_at = datetime.utcnow()
+        existing.last_error = error[:500] if error else None
+        await db.commit()
+        log_now(f"[FailedFetch] Updated existing: edition {edition_id}, year {year}, page {page_number}, retry #{existing.retry_count}")
+        return existing
+
+    # Create new record
+    failed = FailedFetch(
+        edition_id=edition_id,
+        url=url,
+        year=year,
+        page_number=page_number,
+        last_error=error[:500] if error else None,
+        status="pending",
+    )
+    db.add(failed)
+    await db.commit()
+    log_now(f"[FailedFetch] Recorded: edition {edition_id}, year {year}, page {page_number}, error: {error[:100]}...")
+    return failed
+
+
+# Retry settings
+FAILED_FETCH_RETRY_INTERVAL_MINUTES = 60  # Wait at least this long before retrying
+MAX_FAILED_FETCH_RETRIES = 5  # Abandon after this many retries
+FAILED_FETCH_CHECK_INTERVAL = 300  # Check for pending retries every 5 minutes
+_last_failed_fetch_check = None
+
+
+async def find_pending_failed_fetches(db: AsyncSession, limit: int = 50) -> List[FailedFetch]:
+    """Find failed fetches that are ready to be retried.
+
+    Returns failed fetches where:
+    - status is 'pending'
+    - retry_count < MAX_FAILED_FETCH_RETRIES
+    - last_retry_at is null OR > FAILED_FETCH_RETRY_INTERVAL_MINUTES ago
+    """
+    from sqlalchemy import and_, or_
+
+    cutoff_time = datetime.utcnow() - timedelta(minutes=FAILED_FETCH_RETRY_INTERVAL_MINUTES)
+
+    result = await db.execute(
+        select(FailedFetch)
+        .where(
+            FailedFetch.status == "pending",
+            FailedFetch.retry_count < MAX_FAILED_FETCH_RETRIES,
+            or_(
+                FailedFetch.last_retry_at.is_(None),
+                FailedFetch.last_retry_at < cutoff_time
+            )
+        )
+        .order_by(FailedFetch.created_at.asc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def process_retry_failed_fetches_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
+    """Process a retry_failed_fetches job - attempt to fetch previously failed pages."""
+    log_now("="*70)
+    log_now(f"RETRY_FAILED_FETCHES JOB START - Job {job.id}")
+    log_now("="*70)
+
+    params = json.loads(job.params) if job.params else {}
+    max_retries = params.get("max_retries", 50)
+
+    # Find pending failed fetches
+    pending = await find_pending_failed_fetches(db, limit=max_retries)
+
+    if not pending:
+        log_now("[RetryFailed] No pending failed fetches found")
+        return {"retried": 0, "succeeded": 0, "failed_again": 0}
+
+    log_now(f"[RetryFailed] Found {len(pending)} failed fetches to retry")
+
+    scholar_service = get_scholar_service()
+    succeeded = 0
+    failed_again = 0
+    total_recovered = 0
+
+    for i, failed_fetch in enumerate(pending):
+        await update_job_progress(
+            db, job.id,
+            (i / len(pending)) * 90,
+            f"Retrying {i+1}/{len(pending)}: edition {failed_fetch.edition_id}, year {failed_fetch.year}, page {failed_fetch.page_number}"
+        )
+
+        # Mark as retrying
+        failed_fetch.status = "retrying"
+        failed_fetch.last_retry_at = datetime.utcnow()
+        failed_fetch.retry_count += 1
+        await db.commit()
+
+        try:
+            # Get the edition for scholar_id
+            edition_result = await db.execute(
+                select(Edition).where(Edition.id == failed_fetch.edition_id)
+            )
+            edition = edition_result.scalar_one_or_none()
+
+            if not edition or not edition.scholar_id:
+                log_now(f"[RetryFailed] Edition {failed_fetch.edition_id} not found or no scholar_id")
+                failed_fetch.status = "abandoned"
+                failed_fetch.last_error = "Edition not found or no scholar_id"
+                await db.commit()
+                continue
+
+            # Try to fetch the specific page
+            log_now(f"[RetryFailed] Attempting to fetch page {failed_fetch.page_number} for edition {edition.id}, year {failed_fetch.year}")
+
+            result = await scholar_service.get_cited_by(
+                scholar_id=edition.scholar_id,
+                max_results=10,  # Just one page
+                year_low=failed_fetch.year,
+                year_high=failed_fetch.year,
+                start_page=failed_fetch.page_number,
+            )
+
+            papers = result.get("papers", []) if isinstance(result, dict) else []
+
+            if papers:
+                # SUCCESS - save the citations
+                log_now(f"[RetryFailed] ✓ Got {len(papers)} papers from retry")
+
+                # Get existing citations to avoid duplicates
+                existing_result = await db.execute(
+                    select(Citation.scholar_id).where(Citation.paper_id == edition.paper_id)
+                )
+                existing_ids = {r[0] for r in existing_result.fetchall() if r[0]}
+
+                new_count = 0
+                for paper_data in papers:
+                    scholar_id = paper_data.get("scholarId")
+                    if not scholar_id or scholar_id in existing_ids:
+                        continue
+
+                    citation = Citation(
+                        paper_id=edition.paper_id,
+                        edition_id=edition.id,
+                        scholar_id=scholar_id,
+                        title=paper_data.get("title", "Unknown"),
+                        authors=paper_data.get("authorsRaw"),
+                        year=paper_data.get("year"),
+                        venue=paper_data.get("venue"),
+                        abstract=paper_data.get("abstract"),
+                        link=paper_data.get("link"),
+                        citation_count=paper_data.get("citationCount", 0),
+                        intersection_count=1,
+                    )
+                    db.add(citation)
+                    existing_ids.add(scholar_id)
+                    new_count += 1
+
+                await db.commit()
+
+                # Mark as succeeded
+                failed_fetch.status = "succeeded"
+                failed_fetch.recovered_citations = new_count
+                failed_fetch.resolved_at = datetime.utcnow()
+                await db.commit()
+
+                succeeded += 1
+                total_recovered += new_count
+                log_now(f"[RetryFailed] ✓ Recovered {new_count} citations from page {failed_fetch.page_number}")
+
+            else:
+                # Got empty response - might be a real empty page or still failing
+                log_now(f"[RetryFailed] Got empty response for page {failed_fetch.page_number}")
+                if failed_fetch.retry_count >= MAX_FAILED_FETCH_RETRIES:
+                    failed_fetch.status = "abandoned"
+                    failed_fetch.last_error = "Max retries reached, still empty"
+                else:
+                    failed_fetch.status = "pending"  # Try again later
+                await db.commit()
+                failed_again += 1
+
+        except Exception as e:
+            log_now(f"[RetryFailed] ✗ Retry failed: {e}")
+            failed_fetch.last_error = str(e)[:500]
+
+            if failed_fetch.retry_count >= MAX_FAILED_FETCH_RETRIES:
+                failed_fetch.status = "abandoned"
+                log_now(f"[RetryFailed] Abandoning after {failed_fetch.retry_count} retries")
+            else:
+                failed_fetch.status = "pending"  # Try again later
+
+            await db.commit()
+            failed_again += 1
+
+        # Small delay between retries
+        await asyncio.sleep(3)
+
+    log_now(f"[RetryFailed] Complete: {succeeded} succeeded, {failed_again} failed, {total_recovered} citations recovered")
+
+    return {
+        "retried": len(pending),
+        "succeeded": succeeded,
+        "failed_again": failed_again,
+        "citations_recovered": total_recovered,
+    }
+
+
+async def auto_retry_failed_fetches(db: AsyncSession) -> int:
+    """Check for and queue retry jobs for pending failed fetches. Returns jobs queued."""
+    global _last_failed_fetch_check
+
+    # Rate limit checks
+    now = datetime.utcnow()
+    if _last_failed_fetch_check and (now - _last_failed_fetch_check).total_seconds() < FAILED_FETCH_CHECK_INTERVAL:
+        return 0
+    _last_failed_fetch_check = now
+
+    # Check if there are pending failed fetches
+    pending = await find_pending_failed_fetches(db, limit=1)
+    if not pending:
+        return 0
+
+    # Check if there's already a pending/running retry job
+    existing_job = await db.execute(
+        select(Job).where(
+            Job.job_type == "retry_failed_fetches",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    if existing_job.scalar_one_or_none():
+        return 0
+
+    # Queue a retry job
+    job = Job(
+        job_type="retry_failed_fetches",
+        status="pending",
+        params=json.dumps({"max_retries": 50}),
+        progress=0,
+        progress_message="Queued: Retry failed page fetches",
+    )
+    db.add(job)
+    await db.commit()
+    log_now("[AutoRetry] Queued retry_failed_fetches job")
+    return 1
 
 
 # Auto-resume settings
@@ -774,6 +1117,22 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     )
                     total_this_year = count_result.get('totalResults', 0) if isinstance(count_result, dict) else 0
 
+                    # STEP 1.5: Record the expected count for this year (for completeness tracking)
+                    if total_this_year > 0:
+                        await create_or_update_harvest_target(db, edition.id, year, total_this_year)
+
+                    # Track pages for this year
+                    year_pages_succeeded = 0
+                    year_pages_failed = 0
+                    year_pages_attempted = 0
+
+                    # Create on_page_failed callback for this year
+                    async def on_page_failed_for_year(page_num: int, url: str, error: str):
+                        nonlocal year_pages_failed, year_pages_attempted
+                        year_pages_failed += 1
+                        year_pages_attempted += 1
+                        await record_failed_fetch(db, edition.id, url, page_num, year, error)
+
                     # STEP 2: Decide harvest strategy based on count
                     if total_this_year > 1000:
                         # OVERFLOW: Use partition strategy from the start
@@ -806,8 +1165,13 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 year_low=year,
                                 year_high=year,
                                 on_page_complete=save_page_citations_with_year_state,
+                                on_page_failed=on_page_failed_for_year,
                             )
                             year_citations = total_new_citations - year_start_citations
+                            # Track pages from result
+                            if isinstance(result, dict):
+                                year_pages_succeeded = result.get("pages_succeeded", 0)
+                                year_pages_attempted = result.get("pages_fetched", 0)
 
                     else:
                         # Normal case: <= 1000 citations, standard harvest
@@ -817,15 +1181,34 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             year_low=year,
                             year_high=year,
                             on_page_complete=save_page_citations_with_year_state,
+                            on_page_failed=on_page_failed_for_year,
                             start_page=start_page_for_this_year,
                         )
 
                         year_citations = total_new_citations - year_start_citations
-                        log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total)")
+                        # Track pages from result
+                        if isinstance(result, dict):
+                            year_pages_succeeded = result.get("pages_succeeded", 0)
+                            year_pages_failed = result.get("pages_failed", 0)
+                            year_pages_attempted = result.get("pages_fetched", 0)
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total, pages OK={year_pages_succeeded}, FAIL={year_pages_failed})")
 
                     # Mark this year as completed
                     completed_years.add(year)
                     await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
+
+                    # Update HarvestTarget with actual results for this year
+                    if total_this_year > 0:
+                        await update_harvest_target_progress(
+                            db=db,
+                            edition_id=edition.id,
+                            year=year,
+                            actual_count=year_citations,
+                            pages_succeeded=year_pages_succeeded,
+                            pages_failed=year_pages_failed,
+                            pages_attempted=year_pages_attempted,
+                            mark_complete=True
+                        )
 
                     # Track consecutive empty years for early termination
                     if year_citations == 0 and total_this_year == 0:
@@ -862,11 +1245,25 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
                 log_now(f"[EDITION {i+1}] Calling scholar_service.get_cited_by(year_low={effective_year_low})...")
 
+                # Track standard harvest failures
+                std_pages_failed = 0
+
+                async def on_page_failed_standard(page_num: int, url: str, error: str):
+                    nonlocal std_pages_failed
+                    std_pages_failed += 1
+                    # year=None for standard (non-year-partitioned) harvests
+                    await record_failed_fetch(db, edition.id, url, page_num, None, error)
+
+                # Record expected count for standard harvest (year=None means "all years")
+                if edition.citation_count and edition.citation_count > 0:
+                    await create_or_update_harvest_target(db, edition.id, None, edition.citation_count)
+
                 result = await scholar_service.get_cited_by(
                     scholar_id=edition.scholar_id,
                     max_results=max_citations_per_edition,
                     year_low=effective_year_low,  # Pass year_low for refresh filtering
                     on_page_complete=save_page_citations,
+                    on_page_failed=on_page_failed_standard,
                     start_page=resume_page,
                 )
 
@@ -875,6 +1272,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 log_now(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
                 log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
                 log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
+
+                # Update HarvestTarget with actual results
+                if isinstance(result, dict) and edition.citation_count and edition.citation_count > 0:
+                    std_citations = total_new_citations - edition_start_citations
+                    await update_harvest_target_progress(
+                        db=db,
+                        edition_id=edition.id,
+                        year=None,  # Standard harvest = all years
+                        actual_count=std_citations,
+                        pages_succeeded=result.get("pages_succeeded", 0),
+                        pages_failed=result.get("pages_failed", 0),
+                        pages_attempted=result.get("pages_fetched", 0),
+                        mark_complete=True
+                    )
 
             edition_citations = total_new_citations - edition_start_citations
             log_now(f"[EDITION {i+1}] ✓ Complete: {edition_citations} new citations saved")
@@ -1079,6 +1490,259 @@ async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str
         raise
 
 
+async def process_verify_and_repair_job(job: Job, db: AsyncSession) -> Dict[str, Any]:
+    """Process a verify_and_repair job - detect gaps and fill missing citations.
+
+    This job:
+    1. For each year in the range, verifies the last page exists
+    2. Compares Scholar's count to our harvested count
+    3. Identifies missing pages
+    4. Fetches missing pages and saves citations
+    """
+    log_now("="*70)
+    log_now(f"VERIFY_AND_REPAIR JOB START - Job {job.id}")
+    log_now("="*70)
+
+    params = json.loads(job.params) if job.params else {}
+    paper_id = params.get("paper_id")
+    edition_ids = params.get("edition_ids", [])
+    year_start = params.get("year_start", 2025)
+    year_end = params.get("year_end", 2011)
+    fix_gaps = params.get("fix_gaps", True)
+
+    if not paper_id:
+        raise ValueError("paper_id is required")
+
+    # Get the editions to verify
+    if edition_ids:
+        editions_result = await db.execute(
+            select(Edition).where(Edition.id.in_(edition_ids), Edition.scholar_id.isnot(None))
+        )
+    else:
+        # Get all selected editions for this paper
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper_id,
+                Edition.selected == True,
+                Edition.excluded == False,
+                Edition.scholar_id.isnot(None)
+            )
+        )
+    editions = list(editions_result.scalars().all())
+
+    if not editions:
+        raise ValueError(f"No editions with Scholar IDs found for paper {paper_id}")
+
+    scholar_service = get_scholar_service()
+
+    # Track results across all editions
+    total_years_checked = 0
+    total_years_with_gaps = 0
+    total_missing = 0
+    total_recovered = 0
+    all_gap_details = []
+    edition_results = []
+
+    # Get existing citations to avoid duplicates
+    existing_result = await db.execute(
+        select(Citation.scholar_id).where(Citation.paper_id == paper_id)
+    )
+    existing_scholar_ids = {r[0] for r in existing_result.fetchall() if r[0]}
+
+    log_now(f"[VerifyRepair] Processing {len(editions)} editions for years {year_start}-{year_end}")
+    log_now(f"[VerifyRepair] fix_gaps={fix_gaps}, existing citations: {len(existing_scholar_ids)}")
+
+    # Process each edition
+    for edition_idx, edition in enumerate(editions):
+        log_now(f"[VerifyRepair] ─── Edition {edition_idx + 1}/{len(editions)}: {edition.title} (id={edition.id}) ───")
+
+        edition_years_checked = 0
+        edition_years_with_gaps = 0
+        edition_missing = 0
+        edition_recovered = 0
+        edition_gap_details = []
+
+        for year in range(year_start, year_end - 1, -1):
+            edition_years_checked += 1
+            total_years_checked += 1
+
+            # Calculate progress: (edition progress + year progress within edition) / total
+            edition_progress = edition_idx / len(editions)
+            year_progress_in_edition = (year_start - year) / (year_start - year_end + 1)
+            overall_progress = (edition_progress + year_progress_in_edition / len(editions)) * 90
+
+            await update_job_progress(
+                db, job.id,
+                overall_progress,
+                f"Edition {edition_idx + 1}/{len(editions)}: Verifying year {year}..."
+            )
+
+            # Step 1: Get count from first page
+            count_result = await scholar_service.get_cited_by(
+                scholar_id=edition.scholar_id,
+                max_results=10,
+                year_low=year,
+                year_high=year,
+            )
+            scholar_count = count_result.get('totalResults', 0) if isinstance(count_result, dict) else 0
+
+            if scholar_count == 0:
+                log_now(f"[VerifyRepair] Year {year}: No citations reported by Scholar")
+                continue
+
+            # Step 2: Verify last page exists
+            verify_result = await scholar_service.verify_last_page(
+                scholar_id=edition.scholar_id,
+                expected_count=scholar_count,
+                year_low=year,
+                year_high=year,
+            )
+
+            verified_count = verify_result.get("verified_count") or scholar_count
+            log_now(f"[VerifyRepair] Year {year}: Scholar reports {scholar_count}, verified last page shows {verified_count}")
+
+            # Step 3: Count our harvested citations for this year (for this edition)
+            our_count_result = await db.execute(
+                select(func.count(Citation.id))
+                .where(Citation.edition_id == edition.id)
+                .where(Citation.year == year)
+            )
+            our_count = our_count_result.scalar() or 0
+
+            # Step 4: Calculate gap
+            gap = verified_count - our_count
+            if gap > 0:
+                edition_years_with_gaps += 1
+                total_years_with_gaps += 1
+                edition_missing += gap
+                total_missing += gap
+                log_now(f"[VerifyRepair] Year {year}: GAP DETECTED - Scholar has {verified_count}, we have {our_count}, missing {gap}")
+
+                if fix_gaps:
+                    # Step 5: Calculate which pages we're missing
+                    # The safest approach: fetch pages from (our_count // 10 * 10) to end
+                    start_from = (our_count // 10) * 10  # Round down to page boundary
+                    end_at = verified_count
+
+                    pages_to_fetch = []
+                    for start in range(start_from, end_at, 10):
+                        pages_to_fetch.append(start)
+
+                    log_now(f"[VerifyRepair] Year {year}: Will fetch pages starting at: {pages_to_fetch}")
+
+                    year_recovered = 0
+                    for page_start in pages_to_fetch:
+                        page_result = await scholar_service.fetch_specific_page(
+                            scholar_id=edition.scholar_id,
+                            page_start=page_start,
+                            year_low=year,
+                            year_high=year,
+                        )
+
+                        if page_result.get("success"):
+                            papers = page_result.get("papers", [])
+                            new_count = 0
+
+                            for paper_data in papers:
+                                cit_scholar_id = paper_data.get("scholarId")
+                                if not cit_scholar_id or cit_scholar_id in existing_scholar_ids:
+                                    continue
+
+                                citation = Citation(
+                                    paper_id=paper_id,
+                                    edition_id=edition.id,
+                                    scholar_id=cit_scholar_id,
+                                    title=paper_data.get("title", "Unknown"),
+                                    authors=paper_data.get("authorsRaw"),
+                                    year=paper_data.get("year"),
+                                    venue=paper_data.get("venue"),
+                                    abstract=paper_data.get("abstract"),
+                                    link=paper_data.get("link"),
+                                    citation_count=paper_data.get("citationCount", 0),
+                                    intersection_count=1,
+                                )
+                                db.add(citation)
+                                existing_scholar_ids.add(cit_scholar_id)
+                                new_count += 1
+
+                            await db.commit()
+                            year_recovered += new_count
+                            log_now(f"[VerifyRepair] Year {year}, page start={page_start}: recovered {new_count} new citations")
+
+                        await asyncio.sleep(2)  # Rate limit
+
+                    edition_recovered += year_recovered
+                    total_recovered += year_recovered
+                    edition_gap_details.append({
+                        "year": year,
+                        "scholar_count": verified_count,
+                        "our_count_before": our_count,
+                        "gap": gap,
+                        "recovered": year_recovered,
+                        "pages_fetched": len(pages_to_fetch),
+                    })
+
+                    # Update HarvestTarget if it exists
+                    target_result = await db.execute(
+                        select(HarvestTarget).where(
+                            HarvestTarget.edition_id == edition.id,
+                            HarvestTarget.year == year
+                        )
+                    )
+                    target = target_result.scalar_one_or_none()
+                    if target:
+                        target.expected_count = verified_count
+                        target.actual_count = our_count + year_recovered
+                        target.status = "complete" if (our_count + year_recovered) >= verified_count * 0.95 else "incomplete"
+                        await db.commit()
+                else:
+                    # Just record the gap without fixing
+                    edition_gap_details.append({
+                        "year": year,
+                        "scholar_count": verified_count,
+                        "our_count": our_count,
+                        "gap": gap,
+                        "fix_gaps": False,
+                    })
+
+            else:
+                log_now(f"[VerifyRepair] Year {year}: OK - Scholar has {verified_count}, we have {our_count}")
+
+            await asyncio.sleep(3)  # Rate limit between years
+
+        # Update edition harvest stats after processing
+        await update_edition_harvest_stats(db, edition.id)
+        all_gap_details.extend(edition_gap_details)
+        edition_results.append({
+            "edition_id": edition.id,
+            "edition_title": edition.title,
+            "years_checked": edition_years_checked,
+            "years_with_gaps": edition_years_with_gaps,
+            "missing": edition_missing,
+            "recovered": edition_recovered,
+            "gap_details": edition_gap_details,
+        })
+
+    # Update paper harvest stats at the end
+    await update_paper_harvest_stats(db, paper_id)
+
+    log_now(f"[VerifyRepair] ═══════════════════════════════════════════════")
+    log_now(f"[VerifyRepair] COMPLETE: {len(editions)} editions, {total_years_checked} year-checks, {total_years_with_gaps} gaps found")
+    log_now(f"[VerifyRepair] Total missing: {total_missing}, Total recovered: {total_recovered}")
+    log_now(f"[VerifyRepair] ═══════════════════════════════════════════════")
+
+    return {
+        "paper_id": paper_id,
+        "editions_processed": len(editions),
+        "years_checked": total_years_checked,
+        "years_with_gaps": total_years_with_gaps,
+        "total_missing": total_missing,
+        "total_recovered": total_recovered,
+        "edition_results": edition_results,
+        "gap_details": all_gap_details,
+    }
+
+
 async def process_single_job(job_id: int):
     """Process a single job by ID with concurrency control"""
     global _job_semaphore, _running_jobs
@@ -1124,6 +1788,10 @@ async def process_single_job(job_id: int):
                         result = await process_resolve_job(job, db)
                     elif job.job_type == "partition_harvest_test":
                         result = await process_partition_harvest_test(job, db)
+                    elif job.job_type == "retry_failed_fetches":
+                        result = await process_retry_failed_fetches_job(job, db)
+                    elif job.job_type == "verify_and_repair":
+                        result = await process_verify_and_repair_job(job, db)
                     else:
                         raise ValueError(f"Unknown job type: {job.job_type}")
 
@@ -1197,6 +1865,14 @@ async def worker_loop():
                                 continue  # Immediately process the new jobs
                         except Exception as e:
                             log_now(f"[Worker] Auto-resume check failed: {e}")
+
+                        # Check for failed fetches that need retry
+                        try:
+                            retried = await auto_retry_failed_fetches(db)
+                            if retried > 0:
+                                continue  # Immediately process the new job
+                        except Exception as e:
+                            log_now(f"[Worker] Auto-retry check failed: {e}")
 
                         # Still no jobs, wait before checking again
                         await asyncio.sleep(5)

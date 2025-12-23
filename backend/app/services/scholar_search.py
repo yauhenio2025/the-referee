@@ -190,6 +190,7 @@ class ScholarSearchService:
         on_page_complete: Optional[callable] = None,
         start_page: int = 0,
         additional_query: Optional[str] = None,
+        on_page_failed: Optional[callable] = None,
     ) -> Dict[str, Any]:
         """
         Get papers that cite a given paper - WITH PAGE-BY-PAGE CALLBACK
@@ -201,9 +202,11 @@ class ScholarSearchService:
             on_page_complete: Callback(page_num, papers) called after each page - SAVE TO DB HERE
             start_page: Resume from this page (0-indexed)
             additional_query: Additional query terms to append (e.g., exclusions like -author:"Smith")
+            on_page_failed: Callback(page_num, url, error) called when page fails - STORE FOR RETRY
 
         Returns:
-            Dict with 'papers' list, 'totalResults' count, 'last_page' for resume
+            Dict with 'papers' list, 'totalResults' count, 'last_page' for resume,
+            plus 'failed_pages' list with details of pages that failed all retries
         """
         log_now(f"╔{'═'*60}╗")
         log_now(f"║  GET_CITED_BY ENTRY POINT")
@@ -214,11 +217,12 @@ class ScholarSearchService:
         log_now(f"║  start_page: {start_page}")
         log_now(f"║  additional_query: {additional_query}")
         log_now(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
+        log_now(f"║  on_page_failed callback: {'SET' if on_page_failed else 'NOT SET'}")
         log_now(f"╚{'═'*60}╝")
 
         # No timeout wrapper - let it run, save pages as we go
         return await self._get_cited_by_impl(
-            scholar_id, max_results, year_low, year_high, on_page_complete, start_page, additional_query
+            scholar_id, max_results, year_low, year_high, on_page_complete, start_page, additional_query, on_page_failed
         )
 
     async def _get_cited_by_impl(
@@ -230,8 +234,14 @@ class ScholarSearchService:
         on_page_complete: Optional[callable] = None,
         start_page: int = 0,
         additional_query: Optional[str] = None,
+        on_page_failed: Optional[callable] = None,  # NEW: callback for failed pages
     ) -> Dict[str, Any]:
-        """Internal cited-by implementation with page-by-page callback for immediate DB saves"""
+        """Internal cited-by implementation with page-by-page callback for immediate DB saves
+
+        Args:
+            on_page_failed: async callback(page_num, url, error_msg) called when a page fails all retries.
+                           Use this to store failed pages for later retry.
+        """
         # Build URL exactly like gs-harvester JS version
         # CRITICAL: scipsc=1 tells Scholar to search WITHIN citations, not just the paper
         base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
@@ -254,11 +264,13 @@ class ScholarSearchService:
         log_now(f"[CITED_BY_IMPL] FINAL BASE URL: {base_url}")
 
         all_papers = []
+        failed_pages = []  # Track failed pages for retry
         total_results = None
         current_page = start_page
         max_pages = (max_results + 9) // 10
         consecutive_failures = 0
         max_consecutive_failures = 3
+        pages_succeeded = 0
 
         log_now(f"[CITED_BY_IMPL] max_pages calculated: {max_pages}")
         log_now(f"[CITED_BY_IMPL] Starting page loop...")
@@ -312,6 +324,7 @@ class ScholarSearchService:
                 all_papers.extend(extracted)
                 current_page += 1
                 consecutive_failures = 0
+                pages_succeeded += 1
                 log_now(f"[PROGRESS] Total papers so far: {len(all_papers)}")
 
                 if current_page < max_pages and len(all_papers) < max_results:
@@ -319,15 +332,36 @@ class ScholarSearchService:
                     await asyncio.sleep(2)
 
             except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
                 consecutive_failures += 1
                 log_now(f"[PAGE {current_page + 1}] ✗ FETCH FAILED ({consecutive_failures}/{max_consecutive_failures})")
                 log_now(f"[PAGE {current_page + 1}] Error type: {type(e).__name__}")
                 log_now(f"[PAGE {current_page + 1}] Error: {e}")
                 log_now(f"[PAGE {current_page + 1}] Traceback: {traceback.format_exc()}")
 
+                # RECORD THE FAILED PAGE for later retry
+                failed_page_info = {
+                    "page_number": current_page,
+                    "url": page_url,
+                    "error": error_msg,
+                    "year_low": year_low,
+                    "year_high": year_high,
+                }
+                failed_pages.append(failed_page_info)
+                log_now(f"[PAGE {current_page + 1}] 📝 Recorded failed page for retry: page {current_page}")
+
+                # Call the failure callback if provided (to store in DB immediately)
+                if on_page_failed:
+                    try:
+                        await on_page_failed(current_page, page_url, error_msg)
+                        log_now(f"[PAGE {current_page + 1}] ✓ Failure recorded via callback")
+                    except Exception as cb_err:
+                        log_now(f"[PAGE {current_page + 1}] ⚠️ Failed to record failure: {cb_err}")
+
                 if consecutive_failures >= max_consecutive_failures:
-                    log_now(f"[CITED_BY_IMPL] ✗✗✗ TOO MANY FAILURES - STOPPING ✗✗✗")
+                    log_now(f"[CITED_BY_IMPL] ✗✗✗ TOO MANY CONSECUTIVE FAILURES - STOPPING ✗✗✗")
                     log_now(f"[CITED_BY_IMPL] Stopped at page {current_page}. Saved {len(all_papers)} papers.")
+                    log_now(f"[CITED_BY_IMPL] Failed pages recorded: {len(failed_pages)} - will retry later")
                     break
 
                 current_page += 1
@@ -337,7 +371,9 @@ class ScholarSearchService:
         log_now(f"║  CITED_BY_IMPL COMPLETE")
         log_now(f"╠{'═'*60}╣")
         log_now(f"║  Total papers: {len(all_papers)}")
-        log_now(f"║  Pages fetched: {current_page}")
+        log_now(f"║  Pages succeeded: {pages_succeeded}")
+        log_now(f"║  Pages failed: {len(failed_pages)}")
+        log_now(f"║  Last page: {current_page}")
         log_now(f"║  Total results (Scholar count): {total_results}")
         log_now(f"╚{'═'*60}╝")
 
@@ -345,8 +381,186 @@ class ScholarSearchService:
             "papers": all_papers[:max_results],
             "totalResults": total_results or len(all_papers),
             "pages_fetched": current_page,
+            "pages_succeeded": pages_succeeded,
+            "pages_failed": len(failed_pages),
+            "failed_pages": failed_pages,  # NEW: include failed page details
             "last_page": current_page,  # For resume
         }
+
+    async def verify_last_page(
+        self,
+        scholar_id: str,
+        expected_count: int,
+        year_low: Optional[int] = None,
+        year_high: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Verify that the last page of results exists and confirm actual count.
+
+        This fetches the calculated last page based on expected_count to:
+        1. Confirm results actually exist at that offset
+        2. Get the actual result count from Scholar's page header
+        3. Help identify if we're missing any pages
+
+        Args:
+            scholar_id: Google Scholar cluster ID
+            expected_count: Expected number of results (from HarvestTarget or initial fetch)
+            year_low/year_high: Year filters
+
+        Returns:
+            Dict with:
+            - verified_count: Actual count from last page header
+            - last_page_exists: Whether the last page returned results
+            - last_page_papers: Number of papers on the last page
+            - calculated_last_start: The start offset we calculated
+            - actual_results_at_offset: Papers found at that offset
+        """
+        log_now(f"[VERIFY_LAST_PAGE] Verifying for scholar_id={scholar_id}, expected={expected_count}, year={year_low}-{year_high}")
+
+        # Calculate the last page offset
+        # If expected_count=648, last page starts at 640 (results 641-650) but more precisely:
+        # Page 64 (0-indexed 63) would start at 630 and show results 631-640
+        # Page 65 (0-indexed 64) would start at 640 and show results 641-650, but 648 means only 8 results
+        # Actually Scholar starts at 0, so:
+        # - 648 results means positions 1-648
+        # - Last page start = ((648-1) // 10) * 10 = 640
+        # But looking at the screenshot, start=638 shows "Page 64 of 648"
+        # So Scholar's logic is: start = (total - 10) rounded to nearest 10?
+        # Let's calculate: if 648 results, last full page ends at 640, so start=638 shows 639-648
+        # Actually just do: last_start = max(0, expected_count - 10)
+        # Hmm, let me think more carefully:
+        # - start=0 shows results 1-10
+        # - start=10 shows results 11-20
+        # - start=630 shows results 631-640
+        # - start=638 shows "Page 64 of 648" - results 639-648 (10 results)
+        # Wait, that's not right. If start=638, that's result 639 onwards.
+        # 648 - 638 = 10, so it shows results 639-648 (all 10)
+        # So the calculation is: last_start = (expected_count - 1) // 10 * 10
+        # For 648: (647) // 10 * 10 = 640, but screenshot shows 638...
+        # Hmm, let me look again at the URL: start=638
+        # 648 total, start=638 means showing result 639 onwards
+        # Page 64 = start 630 would show 631-640, that's only 10 results
+        # Wait, the screenshot says "Page 64 of 648 results"
+        # If start=638, and page=64, then pages are 10 results each
+        # 64 * 10 = 640, but start=638? That's confusing.
+        # Let me just calculate: last_start = max(0, ((expected_count - 1) // 10) * 10)
+        # For 648: ((647) // 10) * 10 = 640
+        # But we need to be a bit more conservative to make sure we're on a page that exists
+        # Let's use: last_start = max(0, expected_count - 10) if expected_count > 10 else 0
+        # For 648: 648 - 10 = 638. That matches the screenshot!
+
+        if expected_count <= 0:
+            return {
+                "verified_count": 0,
+                "last_page_exists": False,
+                "last_page_papers": 0,
+                "calculated_last_start": 0,
+                "actual_results_at_offset": 0,
+                "error": "Expected count is zero or negative"
+            }
+
+        # Calculate last page start offset
+        # Scholar shows 10 results per page, start=0 is first page
+        # If we have 648 results, start=638 shows the last 10 (or fewer)
+        last_start = max(0, expected_count - 10)
+
+        # Build URL
+        base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
+        if year_low:
+            base_url += f"&as_ylo={year_low}"
+        if year_high:
+            base_url += f"&as_yhi={year_high}"
+
+        page_url = f"{base_url}&start={last_start}"
+        log_now(f"[VERIFY_LAST_PAGE] Fetching last page: {page_url}")
+
+        try:
+            html = await self._fetch_with_retry(page_url)
+            verified_count = self._extract_result_count(html)
+            papers = self._parse_scholar_page(html)
+
+            result = {
+                "verified_count": verified_count,
+                "last_page_exists": len(papers) > 0,
+                "last_page_papers": len(papers),
+                "calculated_last_start": last_start,
+                "actual_results_at_offset": len(papers),
+                "expected_count": expected_count,
+                "discrepancy": abs(verified_count - expected_count) if verified_count else None,
+            }
+
+            log_now(f"[VERIFY_LAST_PAGE] Result: verified={verified_count}, papers_on_page={len(papers)}, expected={expected_count}")
+
+            if verified_count and verified_count != expected_count:
+                log_now(f"[VERIFY_LAST_PAGE] ⚠️ DISCREPANCY: Scholar says {verified_count}, we expected {expected_count}")
+
+            return result
+
+        except Exception as e:
+            log_now(f"[VERIFY_LAST_PAGE] ✗ Failed to fetch last page: {e}")
+            return {
+                "verified_count": None,
+                "last_page_exists": False,
+                "last_page_papers": 0,
+                "calculated_last_start": last_start,
+                "actual_results_at_offset": 0,
+                "error": str(e)
+            }
+
+    async def fetch_specific_page(
+        self,
+        scholar_id: str,
+        page_start: int,
+        year_low: Optional[int] = None,
+        year_high: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch a specific page of citation results.
+
+        Used for gap-filling when specific pages were missed.
+
+        Args:
+            scholar_id: Google Scholar cluster ID
+            page_start: The start offset (0, 10, 20, etc.)
+            year_low/year_high: Year filters
+
+        Returns:
+            Dict with papers list and metadata
+        """
+        log_now(f"[FETCH_SPECIFIC_PAGE] scholar_id={scholar_id}, start={page_start}, year={year_low}-{year_high}")
+
+        # Build URL
+        base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
+        if year_low:
+            base_url += f"&as_ylo={year_low}"
+        if year_high:
+            base_url += f"&as_yhi={year_high}"
+
+        page_url = f"{base_url}&start={page_start}" if page_start > 0 else base_url
+
+        try:
+            html = await self._fetch_with_retry(page_url)
+            total_results = self._extract_result_count(html)
+            papers = self._parse_scholar_page(html)
+
+            log_now(f"[FETCH_SPECIFIC_PAGE] Got {len(papers)} papers from start={page_start}")
+
+            return {
+                "papers": papers,
+                "total_results": total_results,
+                "page_start": page_start,
+                "success": True,
+            }
+
+        except Exception as e:
+            log_now(f"[FETCH_SPECIFIC_PAGE] ✗ Failed: {e}")
+            return {
+                "papers": [],
+                "total_results": None,
+                "page_start": page_start,
+                "success": False,
+                "error": str(e),
+            }
 
     async def _fetch_with_retry(self, url: str, max_retries: int = 5) -> str:
         """
