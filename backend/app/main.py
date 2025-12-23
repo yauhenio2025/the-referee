@@ -1690,24 +1690,25 @@ async def get_paper_citations(
     return citations
 
 
-@app.post("/api/citations/mark-reviewed")
-async def mark_citations_reviewed(
-    request: CitationMarkReviewedRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """Bulk mark citations as reviewed/unseen"""
-    if not request.citation_ids:
-        return {"updated": 0}
-
-    stmt = (
-        update(Citation)
-        .where(Citation.id.in_(request.citation_ids))
-        .values(reviewed=request.reviewed)
-    )
-    result = await db.execute(stmt)
-    await db.commit()
-
-    return {"updated": result.rowcount, "reviewed": request.reviewed}
+# TODO: Enable after adding 'reviewed' column to production DB
+# @app.post("/api/citations/mark-reviewed")
+# async def mark_citations_reviewed(
+#     request: CitationMarkReviewedRequest,
+#     db: AsyncSession = Depends(get_db)
+# ):
+#     """Bulk mark citations as reviewed/unseen"""
+#     if not request.citation_ids:
+#         return {"updated": 0}
+#
+#     stmt = (
+#         update(Citation)
+#         .where(Citation.id.in_(request.citation_ids))
+#         .values(reviewed=request.reviewed)
+#     )
+#     result = await db.execute(stmt)
+#     await db.commit()
+#
+#     return {"updated": result.rowcount, "reviewed": request.reviewed}
 
 
 @app.get("/api/papers/{paper_id}/cross-citations", response_model=CrossCitationResult)

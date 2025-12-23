@@ -293,7 +293,7 @@ class CitationResponse(BaseModel):
     edition_id: Optional[int] = None
     edition_language: Optional[str] = None
     edition_title: Optional[str] = None  # For edition-specific filtering
-    reviewed: bool = False  # User has reviewed/seen this citation
+    # reviewed: bool = False  # TODO: add column to production DB first
 
     class Config:
         from_attributes = True
