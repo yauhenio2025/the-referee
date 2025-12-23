@@ -3160,7 +3160,7 @@ async def verify_and_repair_harvest(
     """
     # Get paper with its editions
     result = await db.execute(
-        select(Paper).where(Paper.id == paper_id, Paper.deleted == False)
+        select(Paper).where(Paper.id == paper_id, Paper.deleted_at.is_(None))
     )
     paper = result.scalar_one_or_none()
     if not paper:
