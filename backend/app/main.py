@@ -3194,9 +3194,9 @@ async def analyze_harvest_gaps_with_ai(
     failed_fetches = list(failed_result.scalars().all())
 
     # Build analysis data - use edition's current citation_count (from Scholar) as expected
-    # and harvested_citations (actual unique citations in DB) as actual
+    # and harvested_citation_count (actual unique citations in DB) as actual
     total_expected = sum(e.citation_count or 0 for e in editions)
-    total_harvested = sum(e.harvested_citations or 0 for e in editions)
+    total_harvested = sum(e.harvested_citation_count or 0 for e in editions)
     total_missing = total_expected - total_harvested
     completion_percent = (total_harvested / total_expected * 100) if total_expected > 0 else 0
 
