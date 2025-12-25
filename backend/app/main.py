@@ -3193,11 +3193,16 @@ async def analyze_harvest_gaps_with_ai(
     )
     failed_fetches = list(failed_result.scalars().all())
 
-    # Build analysis data
-    total_expected = sum(t.expected_count for t in targets)
-    total_actual = sum(t.actual_count for t in targets)
-    total_missing = total_expected - total_actual
-    completion_percent = (total_actual / total_expected * 100) if total_expected > 0 else 0
+    # Build analysis data - use edition's current citation_count (from Scholar) as expected
+    # and harvested_citations (actual unique citations in DB) as actual
+    total_expected = sum(e.citation_count or 0 for e in editions)
+    total_harvested = sum(e.harvested_citations or 0 for e in editions)
+    total_missing = total_expected - total_harvested
+    completion_percent = (total_harvested / total_expected * 100) if total_expected > 0 else 0
+
+    # Also track harvest_targets totals for gap detection
+    targets_expected = sum(t.expected_count for t in targets)
+    targets_actual = sum(t.actual_count for t in targets)
 
     # Identify gaps
     gaps: List[GapDetail] = []
@@ -3331,8 +3336,8 @@ async def analyze_harvest_gaps_with_ai(
 
 HARVEST STATUS:
 - Total editions selected: {len(editions)}
-- Total expected citations: {total_expected}
-- Total harvested: {total_actual}
+- Total expected citations (from Google Scholar): {total_expected}
+- Total harvested (unique citations in DB): {total_harvested}
 - Missing: {total_missing} ({100 - completion_percent:.1f}% gap)
 
 DETECTED GAPS:
@@ -3382,7 +3387,7 @@ RECOMMENDATIONS:
         total_editions=len(editions),
         selected_editions=len(editions),
         total_expected_citations=total_expected,
-        total_harvested_citations=total_actual,
+        total_harvested_citations=total_harvested,
         total_missing_citations=total_missing,
         completion_percent=completion_percent,
         gaps=gaps,
