@@ -3144,6 +3144,8 @@ async def analyze_harvest_gaps_with_ai(
     4. Returns actionable fixes with API endpoints to execute them
     """
     import anthropic
+    import asyncio
+    from .services.scholar_search import get_scholar_service
 
     # Get paper
     paper_result = await db.execute(
@@ -3230,17 +3232,41 @@ async def analyze_harvest_gaps_with_ai(
             expected_years = set(range(min_year, max_year + 1))
             missing_years = expected_years - years_harvested
 
+            # Query Scholar for actual counts (limit to 5 years to avoid rate limiting)
+            MAX_YEAR_LOOKUPS = 5
+            scholar_service = get_scholar_service()
+            years_to_check = sorted(missing_years, reverse=True)[:MAX_YEAR_LOOKUPS]
+
             for year in sorted(missing_years, reverse=True):
+                # Query Scholar for actual expected count if edition has scholar_id
+                expected_count = None
+                if edition and edition.scholar_id and year in years_to_check:
+                    try:
+                        expected_count = await scholar_service.get_year_citation_count(
+                            edition.scholar_id, year
+                        )
+                        await asyncio.sleep(0.3)  # Small delay between requests
+                    except Exception as e:
+                        logger.warning(f"Failed to get year count for {year}: {e}")
+
+                # Build description based on whether we have count
+                if expected_count:
+                    description = f"Year {year}: {expected_count} citations never harvested"
+                    severity = "critical" if expected_count > 100 else "high" if expected_count > 20 else "medium"
+                else:
+                    description = f"Year {year} was never harvested for {edition_title}"
+                    severity = "high"
+
                 gaps.append(GapDetail(
                     gap_type="missing_year",
                     year=year,
                     edition_id=edition_id,
                     edition_title=edition_title,
-                    expected_count=0,  # Unknown
+                    expected_count=expected_count or 0,
                     actual_count=0,
-                    missing_count=0,  # Unknown
-                    description=f"Year {year} was never harvested for {edition_title}",
-                    severity="high",
+                    missing_count=expected_count or 0,
+                    description=description,
+                    severity=severity,
                 ))
                 recommended_fixes.append(GapFix(
                     fix_type="harvest_year",
@@ -3248,8 +3274,8 @@ async def analyze_harvest_gaps_with_ai(
                     year=year,
                     edition_id=edition_id,
                     edition_title=edition_title,
-                    estimated_citations=0,
-                    description=f"Harvest citations from year {year}",
+                    estimated_citations=expected_count or 0,
+                    description=f"Harvest citations from year {year}" + (f" (~{expected_count} citations)" if expected_count else ""),
                     action_url=f"/api/papers/{paper_id}/verify-repair",
                 ))
 

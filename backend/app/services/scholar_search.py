@@ -904,6 +904,33 @@ class ScholarSearchService:
 
         return None
 
+    async def get_year_citation_count(self, scholar_id: str, year: int) -> Optional[int]:
+        """
+        Query Scholar to get the citation count for a specific year.
+
+        Useful for missing year gaps where we don't know how many citations exist.
+        Makes a lightweight query to Scholar and parses "About X results" count.
+
+        Args:
+            scholar_id: The cluster ID to get citations for
+            year: The specific year to check
+
+        Returns:
+            The citation count for that year, or None if query fails
+        """
+        url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1&as_ylo={year}&as_yhi={year}"
+
+        try:
+            html = await self._fetch_with_retry(url)
+            if not html:
+                return None
+
+            count = self._extract_result_count(html)
+            return count
+        except Exception as e:
+            log_now(f"Failed to get year count for {scholar_id}/{year}: {e}")
+            return None
+
     async def scrape_abstract_via_allintitle(
         self,
         title: str,
