@@ -826,8 +826,8 @@ export default function EditionDiscovery({ paper, onBack }) {
         >
           📁 Add to Collection
         </button>
-        {/* AI Gap Analysis button */}
-        {editions?.some(e => e.harvested_citations > 0) && (
+        {/* AI Gap Analysis button - show when any edition has been selected */}
+        {editions?.length > 0 && (
           <button
             onClick={analyzeGaps}
             disabled={isAnalyzingGaps}
@@ -835,26 +835,6 @@ export default function EditionDiscovery({ paper, onBack }) {
             title="Use AI to analyze harvest completeness and find missing citations"
           >
             {isAnalyzingGaps ? '🔍 Analyzing...' : '🔍 Find Gaps with AI'}
-          </button>
-        )}
-        {/* TEST: Partition harvest button for year 2011 */}
-        {editions?.some(e => e.scholar_id) && (
-          <button
-            onClick={() => {
-              const edition = editions.find(e => e.scholar_id && e.selected)
-                || editions.find(e => e.scholar_id)
-              if (edition) {
-                testPartitionHarvest(edition.id, 2011)
-              } else {
-                toast.error('No edition with Scholar ID found')
-              }
-            }}
-            disabled={!!partitionTestJob}
-            className="btn-test"
-            style={{ backgroundColor: '#ff6b00', color: 'white' }}
-            title="TEST: Run partition harvest strategy for year 2011 only"
-          >
-            🧪 Test Partition (2011)
           </button>
         )}
       </div>
@@ -869,17 +849,6 @@ export default function EditionDiscovery({ paper, onBack }) {
             {refreshProgress.message}
             {refreshProgress.newCitations > 0 && ` (${refreshProgress.newCitations} new citations)`}
           </span>
-        </div>
-      )}
-
-      {/* TEST: Partition Harvest Progress */}
-      {partitionTestProgress && (
-        <div className={`ed-progress partition-progress ${partitionTestProgress.done ? 'done' : ''} ${partitionTestProgress.error ? 'error' : ''}`}
-             style={{ backgroundColor: partitionTestProgress.error ? '#fee' : partitionTestProgress.done ? '#efe' : '#fff8e0' }}>
-          {!partitionTestProgress.done && !partitionTestProgress.error && (
-            <div className="progress-bar" style={{ width: `${partitionTestProgress.progress || 0}%`, backgroundColor: '#ff6b00' }} />
-          )}
-          <span>🧪 PARTITION TEST: {partitionTestProgress.message}</span>
         </div>
       )}
 
