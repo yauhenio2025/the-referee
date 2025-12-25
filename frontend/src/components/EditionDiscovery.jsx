@@ -827,7 +827,7 @@ export default function EditionDiscovery({ paper, onBack }) {
           📁 Add to Collection
         </button>
         {/* AI Gap Analysis button */}
-        {editions?.some(e => e.last_harvested_at) && (
+        {editions?.some(e => e.harvested_citations > 0) && (
           <button
             onClick={analyzeGaps}
             disabled={isAnalyzingGaps}
