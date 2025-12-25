@@ -493,6 +493,55 @@ class FailedFetchesSummary(BaseModel):
     failed_fetches: List[FailedFetchResponse] = []
 
 
+# ============== AI Gap Analysis Schemas ==============
+
+class GapDetail(BaseModel):
+    """Details of a single gap in the harvest"""
+    gap_type: str  # "missing_year", "incomplete_year", "failed_pages", "never_harvested"
+    year: Optional[int] = None
+    edition_id: Optional[int] = None
+    edition_title: Optional[str] = None
+    expected_count: int = 0
+    actual_count: int = 0
+    missing_count: int = 0
+    failed_pages: List[int] = []
+    description: str = ""
+    severity: str = "medium"  # "low", "medium", "high", "critical"
+
+
+class GapFix(BaseModel):
+    """A recommended fix for a gap"""
+    fix_type: str  # "harvest_year", "retry_failed_pages", "full_harvest", "partition_harvest"
+    priority: int = 1  # 1 = highest priority
+    year: Optional[int] = None
+    edition_id: Optional[int] = None
+    edition_title: Optional[str] = None
+    estimated_citations: int = 0
+    description: str = ""
+    action_url: Optional[str] = None  # API endpoint to call
+
+
+class AIGapAnalysisResponse(BaseModel):
+    """Response from AI gap analysis for a paper"""
+    paper_id: int
+    paper_title: str
+    analysis_timestamp: datetime
+    # Summary stats
+    total_editions: int = 0
+    selected_editions: int = 0
+    total_expected_citations: int = 0
+    total_harvested_citations: int = 0
+    total_missing_citations: int = 0
+    completion_percent: float = 0.0
+    # Gap details
+    gaps: List[GapDetail] = []
+    # Recommended fixes
+    recommended_fixes: List[GapFix] = []
+    # LLM-generated summary
+    ai_summary: str = ""
+    ai_recommendations: str = ""
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 CollectionDetail.model_rebuild()

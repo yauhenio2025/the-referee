@@ -33,6 +33,8 @@ from .schemas import (
     RefreshRequest, RefreshJobResponse, RefreshStatusResponse, StalenessReportResponse,
     # Harvest Completeness schemas
     HarvestTargetResponse, FailedFetchResponse, HarvestCompletenessResponse, FailedFetchesSummary,
+    # AI Gap Analysis schemas
+    GapDetail, GapFix, AIGapAnalysisResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -3124,6 +3126,270 @@ async def trigger_retry_failed_fetches(
         "job_id": job.id,
         "pending_failed_fetches": pending_count,
     }
+
+
+# ============== AI Gap Analysis ==============
+
+@app.get("/api/papers/{paper_id}/analyze-gaps", response_model=AIGapAnalysisResponse)
+async def analyze_harvest_gaps_with_ai(
+    paper_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Analyze harvest gaps for a paper using AI.
+
+    This endpoint:
+    1. Collects all harvest data (targets, failed fetches, editions)
+    2. Identifies gaps: missing years, incomplete years, failed pages
+    3. Uses LLM to generate human-readable analysis and recommendations
+    4. Returns actionable fixes with API endpoints to execute them
+    """
+    import anthropic
+
+    # Get paper
+    paper_result = await db.execute(
+        select(Paper).where(Paper.id == paper_id)
+    )
+    paper = paper_result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get all selected editions
+    editions_result = await db.execute(
+        select(Edition).where(
+            Edition.paper_id == paper_id,
+            Edition.selected == True
+        )
+    )
+    editions = list(editions_result.scalars().all())
+    edition_ids = [e.id for e in editions]
+    edition_map = {e.id: e for e in editions}
+
+    if not edition_ids:
+        return AIGapAnalysisResponse(
+            paper_id=paper_id,
+            paper_title=paper.title,
+            analysis_timestamp=datetime.utcnow(),
+            total_editions=0,
+            selected_editions=0,
+            ai_summary="No editions selected for harvesting.",
+            ai_recommendations="Select editions to harvest before analyzing gaps.",
+        )
+
+    # Get harvest targets for all editions
+    targets_result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.edition_id.in_(edition_ids))
+        .order_by(HarvestTarget.edition_id, HarvestTarget.year.desc())
+    )
+    targets = list(targets_result.scalars().all())
+
+    # Get failed fetches
+    failed_result = await db.execute(
+        select(FailedFetch)
+        .where(
+            FailedFetch.edition_id.in_(edition_ids),
+            FailedFetch.status.in_(["pending", "retrying"])
+        )
+    )
+    failed_fetches = list(failed_result.scalars().all())
+
+    # Build analysis data
+    total_expected = sum(t.expected_count for t in targets)
+    total_actual = sum(t.actual_count for t in targets)
+    total_missing = total_expected - total_actual
+    completion_percent = (total_actual / total_expected * 100) if total_expected > 0 else 0
+
+    # Identify gaps
+    gaps: List[GapDetail] = []
+    recommended_fixes: List[GapFix] = []
+
+    # Group targets by edition for analysis
+    targets_by_edition = {}
+    for t in targets:
+        if t.edition_id not in targets_by_edition:
+            targets_by_edition[t.edition_id] = []
+        targets_by_edition[t.edition_id].append(t)
+
+    # Check each edition for gaps
+    for edition_id, edition_targets in targets_by_edition.items():
+        edition = edition_map.get(edition_id)
+        edition_title = edition.title if edition else f"Edition {edition_id}"
+
+        # Find year range from targets
+        years_harvested = set(t.year for t in edition_targets if t.year)
+        if years_harvested:
+            min_year = min(years_harvested)
+            max_year = max(years_harvested)
+
+            # Check for missing years in the range
+            expected_years = set(range(min_year, max_year + 1))
+            missing_years = expected_years - years_harvested
+
+            for year in sorted(missing_years, reverse=True):
+                gaps.append(GapDetail(
+                    gap_type="missing_year",
+                    year=year,
+                    edition_id=edition_id,
+                    edition_title=edition_title,
+                    expected_count=0,  # Unknown
+                    actual_count=0,
+                    missing_count=0,  # Unknown
+                    description=f"Year {year} was never harvested for {edition_title}",
+                    severity="high",
+                ))
+                recommended_fixes.append(GapFix(
+                    fix_type="harvest_year",
+                    priority=1,
+                    year=year,
+                    edition_id=edition_id,
+                    edition_title=edition_title,
+                    estimated_citations=0,
+                    description=f"Harvest citations from year {year}",
+                    action_url=f"/api/papers/{paper_id}/verify-repair",
+                ))
+
+        # Check for incomplete years
+        for target in edition_targets:
+            if target.status == "incomplete" or (target.expected_count > target.actual_count and target.expected_count - target.actual_count > 5):
+                missing = target.expected_count - target.actual_count
+                severity = "critical" if missing > 100 else "high" if missing > 20 else "medium"
+
+                gaps.append(GapDetail(
+                    gap_type="incomplete_year",
+                    year=target.year,
+                    edition_id=edition_id,
+                    edition_title=edition_title,
+                    expected_count=target.expected_count,
+                    actual_count=target.actual_count,
+                    missing_count=missing,
+                    description=f"Year {target.year}: Expected {target.expected_count}, got {target.actual_count} ({missing} missing)",
+                    severity=severity,
+                ))
+
+                if target.pages_failed > 0:
+                    gaps[-1].failed_pages = list(range(1, target.pages_failed + 1))  # Approximation
+                    recommended_fixes.append(GapFix(
+                        fix_type="retry_failed_pages",
+                        priority=2,
+                        year=target.year,
+                        edition_id=edition_id,
+                        edition_title=edition_title,
+                        estimated_citations=missing,
+                        description=f"Retry {target.pages_failed} failed pages for year {target.year}",
+                        action_url="/api/failed-fetches/retry",
+                    ))
+
+    # Check for failed fetches
+    failed_by_year = {}
+    for ff in failed_fetches:
+        key = (ff.edition_id, ff.year)
+        if key not in failed_by_year:
+            failed_by_year[key] = []
+        failed_by_year[key].append(ff.page_number)
+
+    for (edition_id, year), pages in failed_by_year.items():
+        edition_title = edition_map.get(edition_id, Edition()).title if edition_id in edition_map else f"Edition {edition_id}"
+        gaps.append(GapDetail(
+            gap_type="failed_pages",
+            year=year,
+            edition_id=edition_id,
+            edition_title=edition_title,
+            failed_pages=sorted(pages),
+            description=f"Year {year}: {len(pages)} page(s) failed to fetch: {sorted(pages)[:5]}{'...' if len(pages) > 5 else ''}",
+            severity="medium",
+        ))
+
+    # Sort gaps by severity
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    gaps.sort(key=lambda g: (severity_order.get(g.severity, 99), -(g.year or 0)))
+
+    # Sort fixes by priority
+    recommended_fixes.sort(key=lambda f: f.priority)
+
+    # Generate AI summary
+    ai_summary = ""
+    ai_recommendations = ""
+
+    if settings.anthropic_api_key:
+        try:
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+            # Build analysis context for LLM
+            gap_descriptions = "\n".join([
+                f"- {g.description} (severity: {g.severity})"
+                for g in gaps[:20]  # Limit to top 20 gaps
+            ]) or "No gaps detected."
+
+            fix_descriptions = "\n".join([
+                f"- Priority {f.priority}: {f.description}"
+                for f in recommended_fixes[:10]  # Limit to top 10 fixes
+            ]) or "No fixes needed."
+
+            prompt = f"""Analyze this citation harvest report for the academic paper "{paper.title}" and provide:
+1. A brief summary of the harvest status (2-3 sentences)
+2. Specific recommendations for filling gaps (bullet points)
+
+HARVEST STATUS:
+- Total editions selected: {len(editions)}
+- Total expected citations: {total_expected}
+- Total harvested: {total_actual}
+- Missing: {total_missing} ({100 - completion_percent:.1f}% gap)
+
+DETECTED GAPS:
+{gap_descriptions}
+
+RECOMMENDED FIXES:
+{fix_descriptions}
+
+Respond in this exact format:
+SUMMARY:
+[Your 2-3 sentence summary]
+
+RECOMMENDATIONS:
+[Your bullet-point recommendations]"""
+
+            response = client.messages.create(
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=1000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = response.content[0].text
+
+            # Parse response
+            if "SUMMARY:" in response_text and "RECOMMENDATIONS:" in response_text:
+                parts = response_text.split("RECOMMENDATIONS:")
+                ai_summary = parts[0].replace("SUMMARY:", "").strip()
+                ai_recommendations = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                ai_summary = response_text
+
+        except Exception as e:
+            logger.warning(f"AI analysis failed: {e}")
+            ai_summary = f"Harvest is {completion_percent:.1f}% complete. {len(gaps)} gaps detected across {len(editions)} editions."
+            ai_recommendations = "Run verify-repair to fill gaps."
+    else:
+        ai_summary = f"Harvest is {completion_percent:.1f}% complete. {len(gaps)} gaps detected across {len(editions)} editions."
+        if gaps:
+            ai_recommendations = f"Found {len([g for g in gaps if g.gap_type == 'missing_year'])} missing years, {len([g for g in gaps if g.gap_type == 'incomplete_year'])} incomplete years, {len([g for g in gaps if g.gap_type == 'failed_pages'])} years with failed pages. Use verify-repair to fill gaps."
+        else:
+            ai_recommendations = "Harvest appears complete. No action needed."
+
+    return AIGapAnalysisResponse(
+        paper_id=paper_id,
+        paper_title=paper.title,
+        analysis_timestamp=datetime.utcnow(),
+        total_editions=len(editions),
+        selected_editions=len(editions),
+        total_expected_citations=total_expected,
+        total_harvested_citations=total_actual,
+        total_missing_citations=total_missing,
+        completion_percent=completion_percent,
+        gaps=gaps,
+        recommended_fixes=recommended_fixes,
+        ai_summary=ai_summary,
+        ai_recommendations=ai_recommendations,
+    )
 
 
 # ============== Verify and Repair Harvest ==============

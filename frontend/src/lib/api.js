@@ -538,6 +538,17 @@ class RefereeAPI {
       },
     });
   }
+
+  // ============== AI Gap Analysis ==============
+
+  /**
+   * Analyze harvest gaps for a paper using AI.
+   * Returns gaps, recommended fixes, and AI-generated summary.
+   * @param {number} paperId - Paper ID
+   */
+  async analyzeHarvestGaps(paperId) {
+    return this.request(`/api/papers/${paperId}/analyze-gaps`);
+  }
 }
 
 export const api = new RefereeAPI();

@@ -4639,6 +4639,203 @@ button:disabled {
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
+/* AI Gap Analysis button */
+.btn-gap-analysis {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-gap-analysis:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+}
+
+.btn-gap-analysis:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Gap Analysis Modal */
+.gap-analysis-modal {
+  max-width: 700px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.gap-summary {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-dark);
+  border-radius: 8px;
+}
+
+.gap-stat {
+  flex: 1;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.gap-stat .stat-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.gap-stat .stat-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.gap-stat.missing .stat-value {
+  color: var(--warning);
+}
+
+.ai-summary,
+.ai-recommendations {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #f8f9ff;
+  border-radius: 8px;
+  border-left: 3px solid var(--primary);
+}
+
+.ai-summary h4,
+.ai-recommendations h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--primary);
+}
+
+.ai-summary p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.recommendations-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 0.9rem;
+}
+
+.gaps-list {
+  margin-bottom: 1.5rem;
+}
+
+.gaps-list h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.gaps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.gaps-table th,
+.gaps-table td {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.gaps-table th {
+  background: var(--bg-dark);
+  font-weight: 600;
+}
+
+.gaps-table .gap-desc {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.severity-badge {
+  display: inline-block;
+  font-size: 0.9rem;
+}
+
+.gaps-table tr.severity-critical {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.gaps-table tr.severity-high {
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.more-gaps {
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.no-gaps {
+  padding: 2rem;
+  text-align: center;
+  background: #f0fdf4;
+  border-radius: 8px;
+  color: #22c55e;
+  font-weight: 500;
+}
+
+.recommended-fixes {
+  margin-bottom: 1.5rem;
+}
+
+.recommended-fixes h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.fixes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fix-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-dark);
+  border-radius: 6px;
+}
+
+.fix-priority {
+  background: var(--primary);
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.fix-desc {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.fix-estimate {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
 /* Refresh progress bar */
 .ed-progress.refresh-progress {
   background: #1e3a5f;
