@@ -3791,3 +3791,128 @@ async def reharvest_overflow_years(
         "editions_updated": editions_updated,
         "message": f"Re-harvest queued for {len(set(overflow_years_found))} overflow years across {len(editions_updated)} editions"
     }
+
+
+# ============== Orphan/Incomplete Work Detection ==============
+
+@app.get("/api/incomplete-harvests")
+async def get_incomplete_harvests(
+    db: AsyncSession = Depends(get_db)
+):
+    """Scan for editions with incomplete harvests that should be resumed.
+
+    Returns editions where:
+    - selected = True (we want their citations)
+    - harvested_citation_count < citation_count (incomplete)
+    - No pending/running job for that paper
+    - Paper is not paused
+    - Harvest is not stalled
+    """
+    from app.services.job_worker import find_incomplete_harvests
+
+    incomplete = await find_incomplete_harvests(db)
+
+    # Group by paper
+    editions_by_paper = {}
+    for e in incomplete:
+        if e.paper_id not in editions_by_paper:
+            editions_by_paper[e.paper_id] = []
+        editions_by_paper[e.paper_id].append(e)
+
+    # Build response
+    papers_with_incomplete = []
+    for paper_id, editions in editions_by_paper.items():
+        # Get paper info
+        paper_result = await db.execute(select(Paper).where(Paper.id == paper_id))
+        paper = paper_result.scalar_one_or_none()
+
+        total_missing = sum((e.citation_count or 0) - (e.harvested_citation_count or 0) for e in editions)
+        total_expected = sum(e.citation_count or 0 for e in editions)
+
+        papers_with_incomplete.append({
+            "paper_id": paper_id,
+            "paper_title": paper.title if paper else f"Paper #{paper_id}",
+            "editions_count": len(editions),
+            "total_missing_citations": total_missing,
+            "total_expected_citations": total_expected,
+            "completion_percent": round((total_expected - total_missing) / total_expected * 100, 1) if total_expected > 0 else 0,
+            "editions": [
+                {
+                    "edition_id": e.id,
+                    "title": e.title[:60] if e.title else "Unknown",
+                    "language": e.language,
+                    "citation_count": e.citation_count,
+                    "harvested_count": e.harvested_citation_count or 0,
+                    "missing": (e.citation_count or 0) - (e.harvested_citation_count or 0),
+                    "stall_count": e.harvest_stall_count or 0,
+                    "last_harvested": e.last_harvested_at.isoformat() if e.last_harvested_at else None,
+                }
+                for e in editions
+            ]
+        })
+
+    # Sort by total missing (most work needed first)
+    papers_with_incomplete.sort(key=lambda x: x["total_missing_citations"], reverse=True)
+
+    return {
+        "total_papers_with_incomplete": len(papers_with_incomplete),
+        "total_editions_with_incomplete": len(incomplete),
+        "total_missing_citations": sum(p["total_missing_citations"] for p in papers_with_incomplete),
+        "papers": papers_with_incomplete
+    }
+
+
+@app.post("/api/incomplete-harvests/queue-all")
+async def queue_all_incomplete_harvests(
+    db: AsyncSession = Depends(get_db)
+):
+    """Manually trigger queueing of jobs for all incomplete harvests.
+
+    Creates one job per paper with incomplete editions. This is useful when
+    auto-resume isn't picking things up due to timing or other issues.
+    """
+    from app.services.job_worker import find_incomplete_harvests
+
+    incomplete = await find_incomplete_harvests(db)
+
+    if not incomplete:
+        return {
+            "status": "ok",
+            "message": "No incomplete harvests found",
+            "jobs_queued": 0
+        }
+
+    # Group by paper
+    editions_by_paper = {}
+    for e in incomplete:
+        if e.paper_id not in editions_by_paper:
+            editions_by_paper[e.paper_id] = []
+        editions_by_paper[e.paper_id].append(e)
+
+    # Create jobs
+    jobs_created = []
+    for paper_id, editions in editions_by_paper.items():
+        total_missing = sum((e.citation_count or 0) - (e.harvested_citation_count or 0) for e in editions)
+
+        job = Job(
+            job_type="extract_citations",
+            status="pending",
+            paper_id=paper_id,
+            progress=0,
+            progress_message=f"Queued: {len(editions)} editions, {total_missing:,} citations remaining",
+        )
+        db.add(job)
+        jobs_created.append({
+            "paper_id": paper_id,
+            "editions_count": len(editions),
+            "missing_citations": total_missing
+        })
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "message": f"Queued {len(jobs_created)} jobs for incomplete harvests",
+        "jobs_queued": len(jobs_created),
+        "jobs": jobs_created
+    }

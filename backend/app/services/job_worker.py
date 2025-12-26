@@ -478,10 +478,10 @@ async def auto_retry_failed_fetches(db: AsyncSession) -> int:
 
 
 # Auto-resume settings
-AUTO_RESUME_MIN_MISSING = 100  # Only resume if at least this many citations missing
-AUTO_RESUME_MIN_PERCENT = 0.10  # Or at least 10% missing
-AUTO_RESUME_CHECK_INTERVAL = 60  # Seconds between auto-resume checks
-AUTO_RESUME_MAX_STALL_COUNT = 3  # Stop auto-resume after this many consecutive zero-progress jobs
+AUTO_RESUME_MIN_MISSING = 50  # Only resume if at least this many citations missing (lowered from 100)
+AUTO_RESUME_MIN_PERCENT = 0.05  # Or at least 5% missing (lowered from 10%)
+AUTO_RESUME_CHECK_INTERVAL = 15  # Seconds between auto-resume checks (lowered from 60)
+AUTO_RESUME_MAX_STALL_COUNT = 5  # Stop auto-resume after this many consecutive zero-progress jobs (increased from 3)
 _last_auto_resume_check = None
 
 
@@ -1986,6 +1986,70 @@ async def worker_loop():
     except Exception as e:
         log_now(f"[Worker] ZOMBIE DETECTION ERROR: {e}")
 
+    # ORPHAN DETECTION: Find editions with partial harvests but no resume state
+    # This catches cases where jobs crashed without saving progress
+    try:
+        async with async_session() as db:
+            # Find year-by-year editions (>1000 citations) with partial harvests but no resume state
+            orphan_result = await db.execute(
+                select(Edition)
+                .where(
+                    Edition.selected == True,
+                    Edition.scholar_id.isnot(None),
+                    Edition.citation_count > YEAR_BY_YEAR_THRESHOLD,  # Should use year-by-year
+                    Edition.harvested_citation_count > 100,  # Has some progress
+                    Edition.harvested_citation_count < Edition.citation_count,  # Not complete
+                    or_(
+                        Edition.harvest_resume_state.is_(None),  # No resume state
+                        Edition.harvest_resume_state == ""
+                    )
+                )
+            )
+            orphan_editions = list(orphan_result.scalars().all())
+
+            if orphan_editions:
+                log_now(f"[Worker] ORPHAN DETECTION: Found {len(orphan_editions)} editions with partial harvest but no resume state")
+
+                for edition in orphan_editions:
+                    log_now(f"[Worker] ORPHAN: Edition {edition.id} - {edition.harvested_citation_count}/{edition.citation_count} harvested, rebuilding state...")
+
+                    # Reconstruct completed years from existing citations
+                    year_counts_result = await db.execute(
+                        select(Citation.year, func.count(Citation.id).label('count'))
+                        .where(Citation.edition_id == edition.id)
+                        .where(Citation.year.isnot(None))
+                        .group_by(Citation.year)
+                    )
+                    year_counts = {row.year: row.count for row in year_counts_result.fetchall()}
+
+                    # Years with significant citations (>50) are likely complete
+                    completed_years = [year for year, count in year_counts.items() if count >= 50]
+
+                    if completed_years:
+                        reconstructed_state = {
+                            "mode": "year_by_year",
+                            "current_year": None,
+                            "current_page": 0,
+                            "completed_years": sorted(completed_years, reverse=True),
+                            "reconstructed": True,
+                            "reconstructed_at": datetime.utcnow().isoformat(),
+                        }
+                        await db.execute(
+                            update(Edition)
+                            .where(Edition.id == edition.id)
+                            .values(harvest_resume_state=json.dumps(reconstructed_state))
+                        )
+                        log_now(f"[Worker] ORPHAN: Edition {edition.id} - Reconstructed {len(completed_years)} completed years")
+                    else:
+                        log_now(f"[Worker] ORPHAN: Edition {edition.id} - No year data found, will scan from scratch")
+
+                await db.commit()
+                log_now(f"[Worker] ORPHAN DETECTION: Rebuilt resume states for {len(orphan_editions)} editions")
+            else:
+                log_now("[Worker] ORPHAN DETECTION: No orphaned editions found")
+    except Exception as e:
+        log_now(f"[Worker] ORPHAN DETECTION ERROR: {e}")
+
     while _worker_running:
         try:
             # Calculate how many slots are available
@@ -2012,11 +2076,15 @@ async def worker_loop():
                                 await asyncio.sleep(0.5)  # Small stagger to avoid race conditions
 
                         await asyncio.sleep(2)  # Brief pause before checking for more
-                    else:
-                        # No pending jobs - check for incomplete harvests to auto-resume
+
+                    # ALWAYS check for incomplete harvests if we have spare capacity
+                    # This runs even when there are some pending jobs, ensuring we don't miss orphaned work
+                    remaining_slots = MAX_CONCURRENT_JOBS - len(_running_jobs) - len(pending_jobs)
+                    if remaining_slots > 0:
                         try:
                             resumed = await auto_resume_incomplete_harvests(db)
                             if resumed > 0:
+                                log_now(f"[Worker] Auto-resumed {resumed} incomplete harvests with {remaining_slots} spare slots")
                                 continue  # Immediately process the new jobs
                         except Exception as e:
                             log_now(f"[Worker] Auto-resume check failed: {e}")
@@ -2029,7 +2097,8 @@ async def worker_loop():
                         except Exception as e:
                             log_now(f"[Worker] Auto-retry check failed: {e}")
 
-                        # Still no jobs, wait before checking again
+                    # If no pending jobs at all, wait before checking again
+                    if not pending_jobs:
                         await asyncio.sleep(5)
             else:
                 # All slots full, wait for one to free up
