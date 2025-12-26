@@ -1594,6 +1594,275 @@ button:disabled {
   color: var(--warning);
 }
 
+/* Stage Badges Row */
+.stage-badge-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.stage-badge {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stage-badge.stage-init {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+  border: 1px solid var(--accent);
+  color: var(--accent-hover);
+}
+
+.stage-badge.stage-yby-init {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.15));
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: var(--warning);
+}
+
+.stage-badge.stage-yby {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(22, 163, 74, 0.15));
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: var(--success);
+}
+
+.stage-badge.stage-std {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+.strategy-badge {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(219, 39, 119, 0.15));
+  border: 1px solid rgba(236, 72, 153, 0.4);
+  color: #f472b6;
+}
+
+/* Year Progress Row */
+.year-progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(22, 163, 74, 0.05));
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.year-current {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.year-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.year-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.year-range {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.year-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.year-completed {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.year-sep {
+  color: var(--text-secondary);
+}
+
+.year-total {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.year-remaining {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-left: 0.25rem;
+}
+
+/* Year Target Row */
+.year-target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.target-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.target-value {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.partition-note {
+  font-size: 0.75rem;
+  color: #f472b6;
+  font-style: italic;
+}
+
+/* Stat Box Variations */
+.stat-box.saved .stat-value {
+  color: var(--success);
+}
+
+.stat-box.target .stat-value {
+  color: var(--accent);
+}
+
+.stat-box.previous .stat-value {
+  color: var(--warning);
+}
+
+.stat-box.page .stat-value {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+/* Editions Summary */
+.editions-summary {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 8px;
+}
+
+.editions-header {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.editions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.edition-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.ed-num {
+  color: var(--text-secondary);
+  min-width: 1.5rem;
+}
+
+.ed-lang {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.ed-count {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ed-had {
+  color: var(--warning);
+  font-size: 0.75rem;
+}
+
+.editions-more {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding-left: 0.5rem;
+}
+
+/* Toggle Details Button */
+.btn-toggle-details {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.btn-toggle-details:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* Raw Details Section */
+.raw-details {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: #0d0d0d;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.raw-details-header {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.raw-details-json {
+  margin: 0;
+  padding: 0.75rem;
+  background: #050505;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.7rem;
+  color: #22c55e;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* Job Message for non-harvest jobs */
 .job-message {
   color: var(--text-secondary);

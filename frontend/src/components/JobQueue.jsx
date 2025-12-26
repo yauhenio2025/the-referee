@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
@@ -7,6 +8,7 @@ import { api } from '../lib/api'
  */
 export default function JobQueue() {
   const queryClient = useQueryClient()
+  const [expandedJobs, setExpandedJobs] = useState(new Set())
 
   const { data: jobs, isLoading } = useQuery({
     queryKey: ['jobs'],
@@ -146,6 +148,18 @@ export default function JobQueue() {
     return `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`
   }
 
+  const toggleJobDetails = (jobId) => {
+    setExpandedJobs(prev => {
+      const next = new Set(prev)
+      if (next.has(jobId)) {
+        next.delete(jobId)
+      } else {
+        next.add(jobId)
+      }
+      return next
+    })
+  }
+
   if (isLoading) return <div className="loading">Loading jobs...</div>
 
   // Separate running/pending from completed
@@ -167,7 +181,7 @@ export default function JobQueue() {
               {activeJobs.map(job => {
                 const params = parseParams(job)
                 const details = params.progress_details || {}
-                const isHarvesting = details.stage === 'harvesting'
+                const hasDetails = details.stage && ['initializing', 'year_by_year_init', 'harvesting'].includes(details.stage)
 
                 return (
                   <div key={job.id} className={`job-card status-${job.status}`}>
@@ -201,48 +215,120 @@ export default function JobQueue() {
                       </div>
                     </div>
 
-                    {/* Detailed Progress Info for Harvest Jobs */}
-                    {isHarvesting && (
+                    {/* Detailed Progress Info for Citation Extraction Jobs */}
+                    {hasDetails && (
                       <div className="harvest-details">
-                        <div className="detail-row edition-info">
-                          <span className="detail-label">Edition:</span>
-                          <span className="detail-value">
-                            {details.edition_index}/{details.editions_total} - {details.edition_title}
-                            {details.edition_language && <span className="lang-badge">{details.edition_language}</span>}
-                          </span>
+                        {/* Stage Badge */}
+                        <div className="stage-badge-row">
+                          {details.stage === 'initializing' && (
+                            <span className="stage-badge stage-init">⚙️ Initializing</span>
+                          )}
+                          {details.stage === 'year_by_year_init' && (
+                            <span className="stage-badge stage-yby-init">🗓️ Year-by-Year Setup</span>
+                          )}
+                          {details.stage === 'harvesting' && details.harvest_mode === 'year_by_year' && (
+                            <span className="stage-badge stage-yby">🗓️ Year-by-Year Harvest</span>
+                          )}
+                          {details.stage === 'harvesting' && details.harvest_mode === 'standard' && (
+                            <span className="stage-badge stage-std">📥 Standard Harvest</span>
+                          )}
+                          {details.year_harvest_strategy === 'partition' && (
+                            <span className="strategy-badge">⚡ Partition Mode</span>
+                          )}
                         </div>
 
+                        {/* Edition Info */}
+                        {details.edition_index && (
+                          <div className="detail-row edition-info">
+                            <span className="detail-label">Edition:</span>
+                            <span className="detail-value">
+                              {details.edition_index}/{details.editions_total} - {details.edition_title}
+                              {details.edition_language && <span className="lang-badge">{details.edition_language}</span>}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Year Progress (for year-by-year mode) */}
+                        {details.harvest_mode === 'year_by_year' && details.current_year && (
+                          <div className="year-progress-row">
+                            <div className="year-current">
+                              <span className="year-label">Processing:</span>
+                              <span className="year-value">{details.current_year}</span>
+                              <span className="year-range">
+                                ({details.year_range_start} → {details.year_range_end})
+                              </span>
+                            </div>
+                            <div className="year-stats">
+                              <span className="year-completed">{details.years_completed || 0} done</span>
+                              <span className="year-sep">/</span>
+                              <span className="year-total">{details.years_total || '?'} years</span>
+                              {details.years_remaining > 0 && (
+                                <span className="year-remaining">({details.years_remaining} left)</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Year Expected Citations (for current year) */}
+                        {details.year_expected_citations > 0 && (
+                          <div className="year-target-row">
+                            <span className="target-label">Year {details.current_year} target:</span>
+                            <span className="target-value">{details.year_expected_citations?.toLocaleString()}</span>
+                            {details.year_harvest_strategy === 'partition' && (
+                              <span className="partition-note">(using partition strategy)</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Main Stats Grid */}
                         <div className="detail-stats">
-                          <div className="stat-box">
+                          <div className="stat-box saved">
                             <span className="stat-value">{details.citations_saved?.toLocaleString() || 0}</span>
-                            <span className="stat-label">Saved</span>
+                            <span className="stat-label">New Saved</span>
                           </div>
-                          <div className="stat-box">
-                            <span className="stat-value">{details.edition_citation_count?.toLocaleString() || '?'}</span>
-                            <span className="stat-label">Total (Est.)</span>
+                          <div className="stat-box target">
+                            <span className="stat-value">{details.target_citations_total?.toLocaleString() || details.edition_citation_count?.toLocaleString() || '?'}</span>
+                            <span className="stat-label">Target Total</span>
                           </div>
-                          <div className="stat-box">
-                            <span className="stat-value">Page {details.current_page || 1}</span>
-                            <span className="stat-label">Current</span>
+                          <div className="stat-box previous">
+                            <span className="stat-value">{details.previously_harvested?.toLocaleString() || 0}</span>
+                            <span className="stat-label">Already Had</span>
                           </div>
-                          {details.current_year && (
-                            <div className="stat-box year-box">
-                              <span className="stat-value">{details.current_year}</span>
-                              <span className="stat-label">Year</span>
+                          {details.current_page && (
+                            <div className="stat-box page">
+                              <span className="stat-value">Page {details.current_page}</span>
+                              <span className="stat-label">Current</span>
                             </div>
                           )}
                         </div>
 
-                        {details.harvest_mode === 'year_by_year' && (
-                          <div className="harvest-mode-badge">
-                            🗓️ Year-by-year mode (large edition)
+                        {/* Editions Info (for initializing stage) */}
+                        {details.editions_info && details.editions_info.length > 0 && (
+                          <div className="editions-summary">
+                            <div className="editions-header">
+                              Editions to process: {details.editions_total}
+                              {details.skipped_editions > 0 && ` (${details.skipped_editions} skipped)`}
+                            </div>
+                            <div className="editions-list">
+                              {details.editions_info.slice(0, 3).map((ed, idx) => (
+                                <div key={ed.id} className="edition-preview">
+                                  <span className="ed-num">{idx + 1}.</span>
+                                  <span className="ed-lang">[{ed.language}]</span>
+                                  <span className="ed-count">{ed.citation_count?.toLocaleString() || '?'} cit.</span>
+                                  {ed.harvested > 0 && <span className="ed-had">(had {ed.harvested})</span>}
+                                </div>
+                              ))}
+                              {details.editions_info.length > 3 && (
+                                <div className="editions-more">+{details.editions_info.length - 3} more</div>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* Simple Progress Message for non-harvest jobs */}
-                    {!isHarvesting && job.progress_message && (
+                    {/* Simple Progress Message for jobs without details */}
+                    {!hasDetails && job.progress_message && (
                       <div className="job-message">{job.progress_message}</div>
                     )}
 
@@ -273,8 +359,34 @@ export default function JobQueue() {
                             Cancel
                           </button>
                         )}
+                        <button
+                          onClick={() => toggleJobDetails(job.id)}
+                          className="btn-toggle-details"
+                          title="Show/hide raw job details"
+                        >
+                          {expandedJobs.has(job.id) ? '▼ Hide' : '▶ Raw'}
+                        </button>
                       </div>
                     </div>
+
+                    {/* Expandable Raw Details */}
+                    {expandedJobs.has(job.id) && (
+                      <div className="raw-details">
+                        <div className="raw-details-header">Raw Job Data (for debugging)</div>
+                        <pre className="raw-details-json">
+                          {JSON.stringify({
+                            job_id: job.id,
+                            status: job.status,
+                            progress: job.progress,
+                            progress_message: job.progress_message,
+                            params: params,
+                            started_at: job.started_at,
+                            completed_at: job.completed_at,
+                            error: job.error,
+                          }, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 )
               })}

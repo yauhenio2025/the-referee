@@ -826,7 +826,35 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         raise ValueError(f"No valid editions to process (all {len(skipped_editions)} skipped)")
 
     log_now(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
-    await update_job_progress(db, job.id, 5, f"Processing {len(valid_editions)} editions...")
+
+    # Calculate totals for progress tracking
+    total_target_citations = sum(e.citation_count or 0 for e in valid_editions)
+    total_previously_harvested = len(existing_scholar_ids)
+
+    # Initial detailed progress
+    await update_job_progress(
+        db, job.id, 5,
+        f"Processing {len(valid_editions)} editions...",
+        details={
+            "stage": "initializing",
+            "editions_total": len(valid_editions),
+            "editions_processed": 0,
+            "target_citations_total": total_target_citations,
+            "previously_harvested": total_previously_harvested,
+            "citations_saved": 0,
+            "skipped_editions": len(skipped_editions),
+            "editions_info": [
+                {
+                    "id": e.id,
+                    "title": e.title[:60] if e.title else "Unknown",
+                    "language": e.language,
+                    "citation_count": e.citation_count,
+                    "harvested": e.harvested_citation_count or 0,
+                }
+                for e in valid_editions
+            ],
+        }
+    )
 
     # Get existing citations to avoid duplicates (refreshed after each save)
     async def get_existing_scholar_ids():
@@ -986,6 +1014,26 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             if edition.citation_count and edition.citation_count > YEAR_BY_YEAR_THRESHOLD:
                 log_now(f"[EDITION {i+1}] 🗓️ YEAR-BY-YEAR MODE: {edition.citation_count} citations > {YEAR_BY_YEAR_THRESHOLD} threshold")
 
+                # Update progress with edition details
+                await update_job_progress(
+                    db, job.id, 8 + (i / total_editions) * 10,
+                    f"Edition {i+1}/{total_editions}: Year-by-year mode ({edition.citation_count:,} citations)",
+                    details={
+                        "stage": "year_by_year_init",
+                        "edition_index": i + 1,
+                        "editions_total": total_editions,
+                        "edition_id": edition.id,
+                        "edition_title": edition.title[:80] if edition.title else "Unknown",
+                        "edition_language": edition.language,
+                        "edition_citation_count": edition.citation_count,
+                        "edition_harvested": edition.harvested_citation_count or 0,
+                        "harvest_mode": "year_by_year",
+                        "citations_saved": total_new_citations,
+                        "target_citations_total": total_target_citations,
+                        "previously_harvested": total_previously_harvested,
+                    }
+                )
+
                 # For refresh mode, use year_low_param or edition's last harvest year
                 # Otherwise, go back to 1990
                 if is_refresh and year_low_param:
@@ -1128,6 +1176,41 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     if total_this_year > 0:
                         await create_or_update_harvest_target(db, edition.id, year, total_this_year)
 
+                    # Calculate year progress for dashboard
+                    total_years = current_year - min_year + 1
+                    years_completed_count = len(completed_years)
+                    years_remaining = total_years - years_completed_count
+                    harvest_strategy = "partition" if total_this_year > 1000 else "normal"
+
+                    # Update progress with detailed year info for dashboard
+                    year_progress_pct = 10 + (i / total_editions) * 40 + ((current_year - year) / total_years) * 40
+                    await update_job_progress(
+                        db, job.id, min(year_progress_pct, 95),
+                        f"Edition {i+1}/{total_editions}, Year {year}: {total_this_year:,} citations",
+                        details={
+                            "stage": "harvesting",
+                            "edition_index": i + 1,
+                            "editions_total": total_editions,
+                            "edition_id": edition.id,
+                            "edition_title": edition.title[:80] if edition.title else "Unknown",
+                            "edition_language": edition.language,
+                            "edition_citation_count": edition.citation_count,
+                            "edition_harvested": edition.harvested_citation_count or 0,
+                            "harvest_mode": "year_by_year",
+                            "current_year": year,
+                            "year_range_start": current_year,
+                            "year_range_end": min_year,
+                            "years_total": total_years,
+                            "years_completed": years_completed_count,
+                            "years_remaining": years_remaining,
+                            "year_expected_citations": total_this_year,
+                            "year_harvest_strategy": harvest_strategy,
+                            "citations_saved": total_new_citations,
+                            "target_citations_total": total_target_citations,
+                            "previously_harvested": total_previously_harvested,
+                        }
+                    )
+
                     # Track pages for this year
                     year_pages_succeeded = 0
                     year_pages_failed = 0
@@ -1264,6 +1347,29 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 # Record expected count for standard harvest (year=None means "all years")
                 if edition.citation_count and edition.citation_count > 0:
                     await create_or_update_harvest_target(db, edition.id, None, edition.citation_count)
+
+                # Update progress for standard mode dashboard
+                std_progress_pct = 10 + (i / total_editions) * 80
+                await update_job_progress(
+                    db, job.id, min(std_progress_pct, 95),
+                    f"Edition {i+1}/{total_editions}: Harvesting {edition.citation_count or '?':,} citations",
+                    details={
+                        "stage": "harvesting",
+                        "edition_index": i + 1,
+                        "editions_total": total_editions,
+                        "edition_id": edition.id,
+                        "edition_title": edition.title[:80] if edition.title else "Unknown",
+                        "edition_language": edition.language,
+                        "edition_citation_count": edition.citation_count,
+                        "edition_harvested": edition.harvested_citation_count or 0,
+                        "harvest_mode": "standard",
+                        "is_refresh": is_refresh,
+                        "year_low": effective_year_low,
+                        "citations_saved": total_new_citations,
+                        "target_citations_total": total_target_citations,
+                        "previously_harvested": total_previously_harvested,
+                    }
+                )
 
                 result = await scholar_service.get_cited_by(
                     scholar_id=edition.scholar_id,
