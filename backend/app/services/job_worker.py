@@ -1852,6 +1852,34 @@ async def worker_loop():
 
     log_now(f"[Worker] Starting parallel job worker (max {MAX_CONCURRENT_JOBS} concurrent jobs)")
 
+    # ZOMBIE JOB DETECTION: Reset any "running" jobs to "pending"
+    # Since this worker just started, any "running" jobs are zombies from a previous worker
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(Job).where(Job.status == "running")
+            )
+            zombie_jobs = result.scalars().all()
+
+            if zombie_jobs:
+                zombie_count = len(zombie_jobs)
+                zombie_ids = [j.id for j in zombie_jobs]
+                log_now(f"[Worker] ZOMBIE DETECTION: Found {zombie_count} jobs stuck in 'running' state")
+                log_now(f"[Worker] ZOMBIE DETECTION: Job IDs: {zombie_ids}")
+
+                # Reset them to pending so they get picked up again
+                await db.execute(
+                    update(Job)
+                    .where(Job.status == "running")
+                    .values(status="pending", started_at=None)
+                )
+                await db.commit()
+                log_now(f"[Worker] ZOMBIE DETECTION: Reset {zombie_count} zombie jobs to 'pending'")
+            else:
+                log_now("[Worker] ZOMBIE DETECTION: No zombie jobs found - clean startup")
+    except Exception as e:
+        log_now(f"[Worker] ZOMBIE DETECTION ERROR: {e}")
+
     while _worker_running:
         try:
             # Calculate how many slots are available
