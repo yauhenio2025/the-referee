@@ -481,6 +481,7 @@ async def auto_retry_failed_fetches(db: AsyncSession) -> int:
 AUTO_RESUME_MIN_MISSING = 100  # Only resume if at least this many citations missing
 AUTO_RESUME_MIN_PERCENT = 0.10  # Or at least 10% missing
 AUTO_RESUME_CHECK_INTERVAL = 60  # Seconds between auto-resume checks
+AUTO_RESUME_MAX_STALL_COUNT = 3  # Stop auto-resume after this many consecutive zero-progress jobs
 _last_auto_resume_check = None
 
 
@@ -495,6 +496,7 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     - Gap is significant (at least AUTO_RESUME_MIN_MISSING or AUTO_RESUME_MIN_PERCENT)
     - No pending/running extract_citations job for that paper
     - Paper is not paused (harvest_paused = False)
+    - Harvest is not stalled (harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT)
     """
     from sqlalchemy import and_, or_, not_, exists
     from sqlalchemy.orm import joinedload
@@ -532,7 +534,12 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
             # No active job for this paper
             Edition.paper_id.notin_(papers_with_jobs),
             # Paper is not paused
-            Edition.paper_id.notin_(paused_papers)
+            Edition.paper_id.notin_(paused_papers),
+            # Harvest is not stalled (too many zero-progress jobs)
+            or_(
+                Edition.harvest_stall_count.is_(None),
+                Edition.harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT
+            )
         )
         .order_by(
             # Prioritize: larger gaps first
@@ -1322,6 +1329,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
     # Update paper-level aggregate harvest stats
     await update_paper_harvest_stats(db, paper_id)
+
+    # Track harvest stall for auto-resume detection
+    # If no new citations were found, this might be a stalled harvest (can't progress further)
+    for edition in valid_editions:
+        if total_new_citations == 0:
+            # No progress - increment stall count
+            current_stall = edition.harvest_stall_count or 0
+            edition.harvest_stall_count = current_stall + 1
+            if edition.harvest_stall_count >= AUTO_RESUME_MAX_STALL_COUNT:
+                log_now(f"[STALL] Edition {edition.id} has stalled after {edition.harvest_stall_count} consecutive zero-progress jobs")
+        else:
+            # Made progress - reset stall count
+            edition.harvest_stall_count = 0
+    await db.commit()
 
     # Clear resume state on successful completion
     if params.get("resume_state"):

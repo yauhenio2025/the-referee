@@ -90,6 +90,10 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Initialize database on startup, start background worker"""
     await init_db()
+
+    # Run pending migrations
+    await run_migrations()
+
     # Start background job worker
     from .services.job_worker import start_worker
     start_worker()
@@ -97,6 +101,25 @@ async def lifespan(app: FastAPI):
     # Stop worker on shutdown
     from .services.job_worker import stop_worker
     stop_worker()
+
+
+async def run_migrations():
+    """Run pending database migrations on startup"""
+    from sqlalchemy import text
+    from .database import async_engine
+
+    async with async_engine.begin() as conn:
+        # Check if harvest_stall_count column exists
+        result = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'editions' AND column_name = 'harvest_stall_count'
+        """))
+        if not result.fetchone():
+            logger.info("Adding harvest_stall_count column to editions table...")
+            await conn.execute(text("""
+                ALTER TABLE editions ADD COLUMN harvest_stall_count INTEGER DEFAULT 0
+            """))
+            logger.info("✓ harvest_stall_count column added successfully")
 
 
 app = FastAPI(
@@ -1756,16 +1779,52 @@ async def list_jobs(
     limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
-    """List jobs with parsed params"""
-    query = select(Job).order_by(Job.created_at.desc()).limit(limit)
+    """List jobs with parsed params.
+
+    IMPORTANT: Always returns ALL active (running/pending) jobs first,
+    regardless of when they were created. This ensures the UI can display
+    all jobs being processed. Recent completed/failed jobs fill the remaining limit.
+    """
+    from sqlalchemy import or_
+
+    # If filtering by specific status, use the original simple query
     if status:
-        query = query.where(Job.status == status)
-    if job_type:
-        query = query.where(Job.job_type == job_type)
-    if paper_id:
-        query = query.where(Job.paper_id == paper_id)
-    result = await db.execute(query)
-    jobs = result.scalars().all()
+        query = select(Job).where(Job.status == status).order_by(Job.created_at.desc()).limit(limit)
+        if job_type:
+            query = query.where(Job.job_type == job_type)
+        if paper_id:
+            query = query.where(Job.paper_id == paper_id)
+        result = await db.execute(query)
+        jobs = list(result.scalars().all())
+    else:
+        # First: Get ALL active jobs (running/pending) - no limit!
+        active_query = select(Job).where(
+            Job.status.in_(["running", "pending"])
+        ).order_by(Job.created_at.desc())
+        if job_type:
+            active_query = active_query.where(Job.job_type == job_type)
+        if paper_id:
+            active_query = active_query.where(Job.paper_id == paper_id)
+        active_result = await db.execute(active_query)
+        active_jobs = list(active_result.scalars().all())
+
+        # Second: Get recent non-active jobs to fill remaining limit
+        remaining_limit = max(0, limit - len(active_jobs))
+        if remaining_limit > 0:
+            inactive_query = select(Job).where(
+                ~Job.status.in_(["running", "pending"])
+            ).order_by(Job.created_at.desc()).limit(remaining_limit)
+            if job_type:
+                inactive_query = inactive_query.where(Job.job_type == job_type)
+            if paper_id:
+                inactive_query = inactive_query.where(Job.paper_id == paper_id)
+            inactive_result = await db.execute(inactive_query)
+            inactive_jobs = list(inactive_result.scalars().all())
+        else:
+            inactive_jobs = []
+
+        # Combine: active jobs first, then recent inactive
+        jobs = active_jobs + inactive_jobs
 
     # Parse params for each job
     response = []

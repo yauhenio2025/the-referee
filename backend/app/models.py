@@ -175,6 +175,10 @@ class Edition(Base):
     # Allows proper resume without re-fetching already-processed years
     harvest_resume_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
 
+    # Stall detection - consecutive jobs with zero new citations
+    # Used to prevent infinite auto-resume loops when harvest can't progress further
+    harvest_stall_count: Mapped[int] = mapped_column(Integer, default=0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
