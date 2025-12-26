@@ -3916,3 +3916,90 @@ async def queue_all_incomplete_harvests(
         "jobs_queued": len(jobs_created),
         "jobs": jobs_created
     }
+
+
+class TargetedYearHarvestRequest(BaseModel):
+    year_start: int
+    year_end: int
+
+
+@app.post("/api/papers/{paper_id}/harvest-years")
+async def harvest_specific_years(
+    paper_id: int,
+    request: TargetedYearHarvestRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Harvest citations for a specific year range only.
+
+    This is useful when:
+    - Initial harvest stopped at 1990 but work is older
+    - Some years were skipped or failed
+    - You want to fill in gaps without re-harvesting everything
+
+    The endpoint updates the edition's resume_state to mark all years
+    OUTSIDE the requested range as "completed", then queues a harvest job.
+    """
+    # Validate paper exists
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Get selected editions with scholar_id
+    editions_result = await db.execute(
+        select(Edition)
+        .where(Edition.paper_id == paper_id)
+        .where(Edition.selected == True)
+        .where(Edition.scholar_id.isnot(None))
+    )
+    editions = editions_result.scalars().all()
+
+    if not editions:
+        raise HTTPException(status_code=400, detail="No selected editions with scholar_id found")
+
+    current_year = datetime.now().year
+
+    # Build completed_years list (all years EXCEPT the requested range)
+    # This tells the harvester to skip these years
+    completed_years = []
+    for year in range(1950, current_year + 1):
+        if year < request.year_start or year > request.year_end:
+            completed_years.append(year)
+
+    # Update each edition's resume_state
+    editions_updated = []
+    for edition in editions:
+        resume_state = {
+            "mode": "year_by_year",
+            "completed_years": completed_years,
+            "current_year": request.year_end,  # Start from end of range and go backwards
+            "current_page": 0
+        }
+        edition.harvest_resume_state = json.dumps(resume_state)
+        editions_updated.append({
+            "id": edition.id,
+            "title": edition.title,
+            "will_harvest_years": list(range(request.year_start, request.year_end + 1))
+        })
+
+    # Queue harvest job
+    job = Job(
+        job_type="extract_citations",
+        status="pending",
+        paper_id=paper_id,
+        progress=0,
+        progress_message=f"Queued: targeted harvest for years {request.year_start}-{request.year_end}",
+    )
+    db.add(job)
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "message": f"Queued targeted harvest for years {request.year_start}-{request.year_end}",
+        "paper_id": paper_id,
+        "year_range": [request.year_start, request.year_end],
+        "editions_updated": editions_updated,
+        "job_id": job.id
+    }
