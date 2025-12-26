@@ -1043,7 +1043,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 )
 
                 # For refresh mode, use year_low_param or edition's last harvest year
-                # Otherwise, go back to 1990
+                # Otherwise, determine min_year dynamically based on edition/paper publication year
                 if is_refresh and year_low_param:
                     min_year = year_low_param
                     log_now(f"[EDITION {i+1}] REFRESH: Will fetch from {current_year} backwards to {min_year} (from params)")
@@ -1051,7 +1051,25 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     min_year = edition.last_harvest_year
                     log_now(f"[EDITION {i+1}] REFRESH: Will fetch from {current_year} backwards to {min_year} (from edition last harvest)")
                 else:
-                    min_year = 1990  # Full harvest - go back to 1990
+                    # Determine min_year dynamically:
+                    # 1. Use edition's year if it's a plausible original publication year
+                    #    (must be > 1900 AND at least 10 years old - recent years are likely reprint metadata)
+                    # 2. Fall back to paper's year if available
+                    # 3. Default to 1950 for very old or unknown works
+                    edition_pub_year = edition.year
+                    paper_pub_year = paper.year if hasattr(paper, 'year') else None
+                    min_valid_pub_year = current_year - 10  # Years within last 10 years are suspect
+
+                    if edition_pub_year and 1900 < edition_pub_year < min_valid_pub_year:
+                        min_year = edition_pub_year
+                        log_now(f"[EDITION {i+1}] Using edition publication year: {min_year}")
+                    elif paper_pub_year and 1900 < paper_pub_year < min_valid_pub_year:
+                        min_year = paper_pub_year
+                        log_now(f"[EDITION {i+1}] Using paper publication year: {min_year}")
+                    else:
+                        min_year = 1950  # Default for older/unknown works (was 1990)
+                        log_now(f"[EDITION {i+1}] No valid publication year found (edition={edition_pub_year}, paper={paper_pub_year}), defaulting to {min_year}")
+
                     log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
                 # Check for existing resume state (year-by-year progress tracking)
