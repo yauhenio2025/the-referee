@@ -68,6 +68,8 @@ async def run_migrations():
         # Soft delete feature: papers can be soft deleted and restored
         "ALTER TABLE papers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL",
         "CREATE INDEX IF NOT EXISTS ix_papers_deleted ON papers(deleted_at)",
+        # Stall detection: track consecutive zero-progress jobs to stop infinite auto-resume loops
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
     ]
 
     async with engine.begin() as conn:

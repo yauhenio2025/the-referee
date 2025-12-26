@@ -91,9 +91,6 @@ async def lifespan(app: FastAPI):
     """Initialize database on startup, start background worker"""
     await init_db()
 
-    # Run pending migrations
-    await run_migrations()
-
     # Start background job worker
     from .services.job_worker import start_worker
     start_worker()
@@ -101,25 +98,6 @@ async def lifespan(app: FastAPI):
     # Stop worker on shutdown
     from .services.job_worker import stop_worker
     stop_worker()
-
-
-async def run_migrations():
-    """Run pending database migrations on startup"""
-    from sqlalchemy import text
-    from .database import async_engine
-
-    async with async_engine.begin() as conn:
-        # Check if harvest_stall_count column exists
-        result = await conn.execute(text("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'editions' AND column_name = 'harvest_stall_count'
-        """))
-        if not result.fetchone():
-            logger.info("Adding harvest_stall_count column to editions table...")
-            await conn.execute(text("""
-                ALTER TABLE editions ADD COLUMN harvest_stall_count INTEGER DEFAULT 0
-            """))
-            logger.info("✓ harvest_stall_count column added successfully")
 
 
 app = FastAPI(
