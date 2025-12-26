@@ -807,17 +807,25 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     if not editions:
         raise ValueError("No editions selected for extraction")
 
-    # Filter out editions without scholar_id or above threshold
+    # Filter out editions without scholar_id, above threshold, zero citations, or already complete
     valid_editions = []
     skipped_editions = []
     for e in editions:
         if not e.scholar_id:
             skipped_editions.append({"id": e.id, "title": e.title, "reason": "no_scholar_id"})
+        elif e.citation_count is None or e.citation_count == 0:
+            skipped_editions.append({"id": e.id, "title": e.title, "reason": "zero_citations"})
         elif e.citation_count > skip_threshold:
             skipped_editions.append({
                 "id": e.id,
                 "title": e.title,
                 "reason": f"too_many_citations ({e.citation_count} > {skip_threshold})"
+            })
+        elif (e.harvested_citation_count or 0) >= e.citation_count:
+            skipped_editions.append({
+                "id": e.id,
+                "title": e.title,
+                "reason": f"already_complete ({e.harvested_citation_count}/{e.citation_count})"
             })
         else:
             valid_editions.append(e)
