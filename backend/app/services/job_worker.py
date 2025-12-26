@@ -827,7 +827,16 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
     log_now(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
 
-    # Calculate totals for progress tracking
+    # Get existing citations to avoid duplicates (refreshed after each save)
+    async def get_existing_scholar_ids():
+        result = await db.execute(
+            select(Citation.scholar_id).where(Citation.paper_id == paper_id)
+        )
+        return {r[0] for r in result.fetchall() if r[0]}
+
+    existing_scholar_ids = await get_existing_scholar_ids()
+
+    # Calculate totals for progress tracking (AFTER existing_scholar_ids is fetched)
     total_target_citations = sum(e.citation_count or 0 for e in valid_editions)
     total_previously_harvested = len(existing_scholar_ids)
 
@@ -855,15 +864,6 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             ],
         }
     )
-
-    # Get existing citations to avoid duplicates (refreshed after each save)
-    async def get_existing_scholar_ids():
-        result = await db.execute(
-            select(Citation.scholar_id).where(Citation.paper_id == paper_id)
-        )
-        return {r[0] for r in result.fetchall() if r[0]}
-
-    existing_scholar_ids = await get_existing_scholar_ids()
 
     # Stats tracking
     total_new_citations = 0
