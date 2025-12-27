@@ -943,11 +943,15 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     continue
 
                 if scholar_id in existing_scholar_ids:
-                    # Already exists - could update intersection count here if needed
+                    # Already exists in memory - skip
                     total_updated_citations += 1
                 else:
-                    # NEW citation - save immediately
-                    citation = Citation(
+                    # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
+                    # even if concurrent jobs have the same citation
+                    from sqlalchemy import text
+                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                    stmt = pg_insert(Citation).values(
                         paper_id=paper_id,
                         edition_id=edition.id,
                         scholar_id=scholar_id,
@@ -959,11 +963,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         link=paper_data.get("link"),
                         citation_count=paper_data.get("citationCount", 0),
                         intersection_count=1,
+                    ).on_conflict_do_nothing(
+                        index_elements=['paper_id', 'scholar_id']
                     )
-                    db.add(citation)
+                    result = await db.execute(stmt)
+
+                    # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
+                    if result.rowcount > 0:
+                        new_count += 1
+                        total_new_citations += 1
+                    else:
+                        # Duplicate detected by database - already exists from concurrent job
+                        total_updated_citations += 1
+
                     existing_scholar_ids.add(scholar_id)
-                    new_count += 1
-                    total_new_citations += 1
 
             # COMMIT IMMEDIATELY after each page
             await db.commit()
