@@ -632,11 +632,16 @@ async def harvest_partition(
     2. Harvest exclusion set (items WITHOUT those terms)
     3. Harvest inclusion set (items WITH at least one term)
     4. If inclusion set > 1000, recursively partition
+
+    TRANSACTION HANDLING:
+    - We commit after creating PartitionRun to ensure traceability persists even if harvest fails
+    - We commit periodically during term testing to save progress
+    - On any error, we rollback to recover the transaction state
     """
     indent = "  " * depth
     log_now(f"{indent}=== PARTITION depth={depth}, year={year}, total={total_for_year} ===")
 
-    # Create partition run record
+    # Create partition run record and COMMIT immediately to ensure traceability persists
     partition_run = await create_partition_run(
         db=db,
         edition_id=edition_id,
@@ -647,6 +652,14 @@ async def harvest_partition(
         base_query=base_query,
         depth=depth
     )
+    # Commit the partition run creation immediately so it's visible even if harvest fails
+    try:
+        await db.commit()
+        log_now(f"{indent}Committed PartitionRun #{partition_run.id}")
+    except Exception as commit_err:
+        log_now(f"{indent}Failed to commit PartitionRun: {commit_err}", "error")
+        await db.rollback()
+        raise
 
     stats = {
         "partition_run_id": partition_run.id,
@@ -693,15 +706,28 @@ async def harvest_partition(
     # CRITICAL: We do NOT proceed to harvesting unless this succeeds
     log_now(f"{indent}Step 1: Finding exclusion set...")
 
-    excluded_terms, exclusion_count, terms_success = await find_exclusion_set(
-        db=db,
-        partition_run=partition_run,
-        scholar_service=scholar_service,
-        scholar_id=scholar_id,
-        year=year,
-        edition_title=edition_title,
-        initial_count=total_for_year
-    )
+    try:
+        excluded_terms, exclusion_count, terms_success = await find_exclusion_set(
+            db=db,
+            partition_run=partition_run,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            year=year,
+            edition_title=edition_title,
+            initial_count=total_for_year
+        )
+        # Commit term discovery results before starting harvest
+        await db.commit()
+        log_now(f"{indent}Committed term discovery results")
+    except Exception as term_err:
+        log_now(f"{indent}Term discovery error: {term_err}", "error")
+        try:
+            await db.rollback()
+            log_now(f"{indent}Rolled back transaction after term discovery error")
+        except Exception:
+            pass
+        stats["error"] = f"Term discovery exception: {term_err}"
+        return stats
 
     if not terms_success:
         log_now(f"{indent}FAILED: Could not reduce below {GOOGLE_SCHOLAR_LIMIT}, final count: {exclusion_count}", "error")
@@ -713,6 +739,7 @@ async def harvest_partition(
             await update_partition_status(db, partition_run, "failed",
                 error_message=f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}",
                 error_stage="term_discovery")
+            await db.commit()  # Commit the failed status
             return stats
 
     exclusion_query = partition_run.final_exclusion_query
@@ -728,6 +755,7 @@ async def harvest_partition(
     partition_run.status = "harvesting_exclusion"
     partition_run.exclusion_started_at = datetime.utcnow()
     await db.flush()
+    await db.commit()
 
     try:
         exclusion_new, exclusion_total, query_record = await execute_harvest_query(
@@ -746,13 +774,24 @@ async def harvest_partition(
         stats["exclusion_harvested"] = exclusion_new
         partition_run.exclusion_harvested = exclusion_new
         partition_run.exclusion_completed_at = datetime.utcnow()
+        await db.commit()  # Commit exclusion harvest progress
         log_now(f"{indent}Exclusion set harvested: {exclusion_new} new citations")
 
     except Exception as e:
         log_now(f"{indent}Exclusion harvest failed: {e}", "error")
-        await update_partition_status(db, partition_run, "failed",
-            error_message=str(e),
-            error_stage="exclusion_harvest")
+        try:
+            await db.rollback()  # Rollback to recover transaction state
+            log_now(f"{indent}Rolled back after exclusion harvest error")
+        except Exception:
+            pass
+        # Try to update the partition status with the error
+        try:
+            await update_partition_status(db, partition_run, "failed",
+                error_message=str(e),
+                error_stage="exclusion_harvest")
+            await db.commit()
+        except Exception:
+            pass
         return stats
 
     # Rate limit between phases
@@ -768,21 +807,30 @@ async def harvest_partition(
     log_now(f"{indent}Step 3: Checking inclusion set...")
     log_now(f"{indent}Query: {inclusion_query[:100]}...")
 
-    inclusion_count, query_record = await execute_count_query(
-        db=db,
-        partition_run=partition_run,
-        scholar_service=scholar_service,
-        scholar_id=scholar_id,
-        year=year,
-        query_suffix=inclusion_query,
-        query_type="inclusion_count",
-        purpose="Count inclusion set"
-    )
+    try:
+        inclusion_count, query_record = await execute_count_query(
+            db=db,
+            partition_run=partition_run,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            year=year,
+            query_suffix=inclusion_query,
+            query_type="inclusion_count",
+            purpose="Count inclusion set"
+        )
 
-    partition_run.inclusion_set_count = inclusion_count
-    await db.flush()
+        partition_run.inclusion_set_count = inclusion_count
+        await db.commit()  # Commit the inclusion count
 
-    log_now(f"{indent}Inclusion set has {inclusion_count} results")
+        log_now(f"{indent}Inclusion set has {inclusion_count} results")
+    except Exception as count_err:
+        log_now(f"{indent}Inclusion count failed: {count_err}", "error")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        stats["error"] = f"Inclusion count failed: {count_err}"
+        return stats
 
     # Step 4: Handle inclusion set
     if inclusion_count == 0:
@@ -797,6 +845,7 @@ async def harvest_partition(
         partition_run.status = "harvesting_inclusion"
         partition_run.inclusion_started_at = datetime.utcnow()
         await db.flush()
+        await db.commit()
 
         try:
             inclusion_new, inclusion_total, query_record = await execute_harvest_query(
@@ -816,13 +865,23 @@ async def harvest_partition(
             partition_run.inclusion_harvested = inclusion_new
             partition_run.inclusion_completed_at = datetime.utcnow()
             partition_run.status = "completed"
+            await db.commit()  # Commit inclusion harvest results
             log_now(f"{indent}Inclusion set harvested: {inclusion_new} new citations")
 
         except Exception as e:
             log_now(f"{indent}Inclusion harvest failed: {e}", "error")
-            await update_partition_status(db, partition_run, "failed",
-                error_message=str(e),
-                error_stage="inclusion_harvest")
+            try:
+                await db.rollback()
+                log_now(f"{indent}Rolled back after inclusion harvest error")
+            except Exception:
+                pass
+            try:
+                await update_partition_status(db, partition_run, "failed",
+                    error_message=str(e),
+                    error_stage="inclusion_harvest")
+                await db.commit()
+            except Exception:
+                pass
 
     else:
         # Inclusion set also >1000, need to recursively partition
@@ -830,34 +889,59 @@ async def harvest_partition(
 
         partition_run.status = "needs_recursive"
         await db.flush()
+        await db.commit()
 
-        # Recursive call with inclusion_query as base
-        sub_result = await harvest_partition(
-            db=db,
-            scholar_service=scholar_service,
-            edition_id=edition_id,
-            scholar_id=scholar_id,
-            year=year,
-            edition_title=edition_title,
-            paper_id=paper_id,
-            existing_scholar_ids=existing_scholar_ids,
-            on_page_complete=on_page_complete,
-            total_for_year=inclusion_count,
-            job_id=job_id,
-            parent_partition_id=partition_run.id,
-            base_query=inclusion_query,
-            depth=depth + 1
-        )
+        try:
+            # Recursive call with inclusion_query as base
+            sub_result = await harvest_partition(
+                db=db,
+                scholar_service=scholar_service,
+                edition_id=edition_id,
+                scholar_id=scholar_id,
+                year=year,
+                edition_title=edition_title,
+                paper_id=paper_id,
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                total_for_year=inclusion_count,
+                job_id=job_id,
+                parent_partition_id=partition_run.id,
+                base_query=inclusion_query,
+                depth=depth + 1
+            )
 
-        stats["inclusion_harvested"] = sub_result.get("total_new", 0)
-        partition_run.inclusion_harvested = stats["inclusion_harvested"]
-        partition_run.status = "completed"
+            stats["inclusion_harvested"] = sub_result.get("total_new", 0)
+            partition_run.inclusion_harvested = stats["inclusion_harvested"]
+            partition_run.status = "completed"
+        except Exception as recursive_err:
+            log_now(f"{indent}Recursive partition failed: {recursive_err}", "error")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            try:
+                await update_partition_status(db, partition_run, "failed",
+                    error_message=str(recursive_err),
+                    error_stage="recursive_partition")
+                await db.commit()
+            except Exception:
+                pass
+            return stats
 
     # Finalize
-    partition_run.total_harvested = partition_run.exclusion_harvested + partition_run.inclusion_harvested
+    partition_run.total_harvested = (partition_run.exclusion_harvested or 0) + (partition_run.inclusion_harvested or 0)
     partition_run.total_new_unique = stats["exclusion_harvested"] + stats["inclusion_harvested"]
     partition_run.completed_at = datetime.utcnow()
-    await db.flush()
+
+    try:
+        await db.commit()  # Final commit
+        log_now(f"{indent}Committed final partition results")
+    except Exception as final_err:
+        log_now(f"{indent}Failed to commit final results: {final_err}", "warning")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     stats["total_new"] = partition_run.total_new_unique
     stats["success"] = True
