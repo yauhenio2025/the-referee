@@ -374,3 +374,274 @@ class HarvestTarget(Base):
     __table_args__ = (
         Index("ix_harvest_targets_edition_year", "edition_id", "year", unique=True),
     )
+
+
+# ============== PARTITION HARVEST TRACEABILITY ==============
+# Complete tracking of overflow year harvesting using partition strategy
+
+
+class PartitionRun(Base):
+    """
+    Master record for a partition harvest attempt on an overflow year.
+
+    Tracks the complete lifecycle of partitioning a year with >1000 citations:
+    1. Initial detection of overflow
+    2. Term discovery phase (finding exclusions)
+    3. Exclusion set harvest
+    4. Inclusion set harvest (or recursive partition)
+    5. Final results
+    """
+    __tablename__ = "partition_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # What we're partitioning
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    year: Mapped[int] = mapped_column(Integer, index=True)
+
+    # Parent partition (for recursive partitioning)
+    parent_partition_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("partition_runs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    depth: Mapped[int] = mapped_column(Integer, default=0)  # 0 = top level, 1+ = recursive
+
+    # Base query constraint (for recursive partitions, this is the inclusion query from parent)
+    base_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Initial state
+    initial_count: Mapped[int] = mapped_column(Integer)  # What Scholar reported before partitioning
+    target_threshold: Mapped[int] = mapped_column(Integer, default=950)  # Target to get below
+
+    # Status tracking
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    # Statuses: pending, finding_terms, terms_found, terms_failed,
+    #           harvesting_exclusion, harvesting_inclusion,
+    #           needs_recursive, completed, failed, aborted
+
+    # Term discovery results
+    terms_tried_count: Mapped[int] = mapped_column(Integer, default=0)
+    terms_kept_count: Mapped[int] = mapped_column(Integer, default=0)
+    final_exclusion_terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    final_exclusion_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exclusion_set_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Count after exclusions
+
+    # Inclusion set info
+    final_inclusion_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    inclusion_set_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Harvest results
+    exclusion_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    inclusion_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    total_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    total_new_unique: Mapped[int] = mapped_column(Integer, default=0)  # After dedup
+
+    # Error tracking
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_stage: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Timing
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    terms_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    terms_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    exclusion_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    exclusion_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    inclusion_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    inclusion_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    term_attempts: Mapped[List["PartitionTermAttempt"]] = relationship(
+        "PartitionTermAttempt", back_populates="partition_run", cascade="all, delete-orphan"
+    )
+    queries: Mapped[List["PartitionQuery"]] = relationship(
+        "PartitionQuery", back_populates="partition_run", cascade="all, delete-orphan"
+    )
+    llm_calls: Mapped[List["PartitionLLMCall"]] = relationship(
+        "PartitionLLMCall", back_populates="partition_run", cascade="all, delete-orphan"
+    )
+    child_partitions: Mapped[List["PartitionRun"]] = relationship(
+        "PartitionRun", back_populates="parent_partition",
+        foreign_keys="PartitionRun.parent_partition_id"
+    )
+    parent_partition: Mapped[Optional["PartitionRun"]] = relationship(
+        "PartitionRun", back_populates="child_partitions",
+        remote_side="PartitionRun.id", foreign_keys="PartitionRun.parent_partition_id"
+    )
+
+    __table_args__ = (
+        Index("ix_partition_runs_edition_year", "edition_id", "year"),
+        Index("ix_partition_runs_status", "status"),
+    )
+
+
+class PartitionTermAttempt(Base):
+    """
+    Record of every term we attempted to use as an exclusion.
+
+    Tracks what terms were suggested by LLM, what count reduction they achieved,
+    and whether we kept them in the final exclusion set.
+    """
+    __tablename__ = "partition_term_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    partition_run_id: Mapped[int] = mapped_column(
+        ForeignKey("partition_runs.id", ondelete="CASCADE"), index=True
+    )
+
+    # The term
+    term: Mapped[str] = mapped_column(String(100), index=True)
+    order_tried: Mapped[int] = mapped_column(Integer)  # 1, 2, 3... in order tried
+
+    # Source of this term
+    source: Mapped[str] = mapped_column(String(20))  # 'llm', 'fallback', 'manual', 'domain'
+    llm_call_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("partition_llm_calls.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # What query we used to test this term
+    test_query: Mapped[str] = mapped_column(Text)  # Full query with all exclusions including this one
+
+    # Results
+    count_before: Mapped[int] = mapped_column(Integer)  # Count before adding this term
+    count_after: Mapped[int] = mapped_column(Integer)  # Count after adding this term
+    reduction: Mapped[int] = mapped_column(Integer)  # count_before - count_after
+    reduction_percent: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Decision
+    kept: Mapped[bool] = mapped_column(Boolean, default=False)  # Did we keep this term?
+    skip_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Why skipped if not kept
+
+    # Timing
+    tested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Time to get count
+
+    # Relationship
+    partition_run: Mapped["PartitionRun"] = relationship(
+        "PartitionRun", back_populates="term_attempts"
+    )
+
+    __table_args__ = (
+        Index("ix_partition_term_partition_term", "partition_run_id", "term"),
+    )
+
+
+class PartitionQuery(Base):
+    """
+    Record of every Google Scholar query executed during partition harvesting.
+
+    This gives us complete visibility into what queries were run, what they returned,
+    and whether they succeeded or failed.
+    """
+    __tablename__ = "partition_queries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    partition_run_id: Mapped[int] = mapped_column(
+        ForeignKey("partition_runs.id", ondelete="CASCADE"), index=True
+    )
+
+    # Query details
+    query_type: Mapped[str] = mapped_column(String(30), index=True)
+    # Types: 'initial_count', 'term_test', 'exclusion_harvest', 'inclusion_harvest', 'recursive_count'
+
+    scholar_id: Mapped[str] = mapped_column(String(50))
+    year: Mapped[int] = mapped_column(Integer)
+    additional_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # The -intitle or OR query
+    full_constructed_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # For reference
+
+    # Purpose (human-readable)
+    purpose: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # e.g., "Testing exclusion of 'analysis'", "Harvesting exclusion set", etc.
+
+    # Expected vs actual
+    expected_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Total results Scholar reports
+
+    # Harvest results (for harvest queries)
+    pages_requested: Mapped[int] = mapped_column(Integer, default=0)
+    pages_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    pages_succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    pages_failed: Mapped[int] = mapped_column(Integer, default=0)
+    citations_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    citations_new: Mapped[int] = mapped_column(Integer, default=0)  # After dedup
+    citations_duplicate: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # Statuses: pending, running, completed, failed, partial
+
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timing
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Relationship
+    partition_run: Mapped["PartitionRun"] = relationship(
+        "PartitionRun", back_populates="queries"
+    )
+
+    __table_args__ = (
+        Index("ix_partition_queries_type", "query_type"),
+        Index("ix_partition_queries_status", "status"),
+    )
+
+
+class PartitionLLMCall(Base):
+    """
+    Record of every LLM call made to suggest exclusion terms.
+
+    Complete audit trail of what we asked the LLM and what it returned.
+    """
+    __tablename__ = "partition_llm_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    partition_run_id: Mapped[int] = mapped_column(
+        ForeignKey("partition_runs.id", ondelete="CASCADE"), index=True
+    )
+
+    # Call details
+    call_number: Mapped[int] = mapped_column(Integer)  # 1st, 2nd, 3rd call for this partition
+    purpose: Mapped[str] = mapped_column(String(100))  # 'initial_suggestions', 'more_terms', etc.
+
+    # Model info
+    model: Mapped[str] = mapped_column(String(100))
+
+    # Prompt (full text)
+    prompt: Mapped[str] = mapped_column(Text)
+
+    # Context provided to LLM
+    edition_title: Mapped[str] = mapped_column(String(500))
+    year: Mapped[int] = mapped_column(Integer)
+    current_count: Mapped[int] = mapped_column(Integer)
+    already_excluded_terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+
+    # Response
+    raw_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    terms_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # Statuses: pending, completed, failed, parse_error
+
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Usage stats
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Timing
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Relationship
+    partition_run: Mapped["PartitionRun"] = relationship(
+        "PartitionRun", back_populates="llm_calls"
+    )
+
+    __table_args__ = (
+        Index("ix_partition_llm_calls_partition", "partition_run_id"),
+    )

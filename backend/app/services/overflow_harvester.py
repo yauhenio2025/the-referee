@@ -1,17 +1,25 @@
 """
-Overflow Harvester Service - Partition Strategy
+Overflow Harvester Service - Partition Strategy with FULL TRACEABILITY
 
 Handles the case when a single year has >1000 citations, exceeding Google Scholar's
-limit per query. Uses a PARTITION strategy to guarantee complete coverage:
+limit per query. Uses a PARTITION strategy to guarantee complete coverage.
+
+CRITICAL: This module now persists EVERYTHING to the database:
+- Every partition attempt (PartitionRun)
+- Every term we try to exclude (PartitionTermAttempt)
+- Every query we execute (PartitionQuery)
+- Every LLM call for term suggestions (PartitionLLMCall)
 
 Strategy:
 1. Detect overflow (>1000 results for a year)
-2. LLM suggests common terms to exclude based on the topic/domain
-3. Keep adding -intitle:"term" exclusions until result count < 1000
-4. Harvest the exclusion set (items WITHOUT those terms)
-5. Build OR inclusion query: intitle:"term1" OR intitle:"term2" OR ...
-6. Harvest the inclusion set (items WITH at least one term)
-7. If inclusion set >1000, recursively partition it
+2. Create PartitionRun record (status: pending)
+3. LLM suggests common terms to exclude - ALL calls logged to PartitionLLMCall
+4. Test each term with -intitle:"term" - EACH test logged to PartitionTermAttempt
+5. CRITICAL: Do NOT start harvesting until exclusion_set_count < 1000
+6. Harvest the exclusion set - Logged to PartitionQuery
+7. Build OR inclusion query and get count
+8. If inclusion_set_count < 1000: harvest it - Logged to PartitionQuery
+9. If inclusion_set_count >= 1000: RECURSIVELY partition (create child PartitionRun)
 
 This guarantees: exclusion_set + inclusion_set = all_items
 """
@@ -19,18 +27,21 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime
-from typing import Dict, Any, List, Set, Optional, Callable
-from sqlalchemy import select, func
+from typing import Dict, Any, List, Set, Optional, Callable, Tuple
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Citation
+from ..models import PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall, Citation
 
 logger = logging.getLogger(__name__)
 
 # Constants
 GOOGLE_SCHOLAR_LIMIT = 1000
 TARGET_THRESHOLD = 950  # Aim to get below this to have safety margin
+MAX_RECURSION_DEPTH = 3
+MAX_TERM_ATTEMPTS = 30  # Max terms to try before giving up
 LLM_MODEL = "claude-sonnet-4-5-20250929"
 
 
@@ -42,49 +53,77 @@ def log_now(msg: str, level: str = "info"):
     sys.stdout.flush()
 
 
-async def get_result_count_for_query(
-    scholar_service,
-    scholar_id: str,
-    year: int,
-    query_suffix: str = ""
-) -> int:
-    """
-    Get the result count for a query WITHOUT harvesting.
-    Makes a single page request to get the total count.
-    """
-    # Use the scholar service to make a single request
-    # We'll fetch just page 0 with max_results=10 to get the count
-    result = await scholar_service.get_cited_by(
-        scholar_id=scholar_id,
-        max_results=10,  # Just get first page
-        year_low=year,
-        year_high=year,
-        additional_query=query_suffix if query_suffix else None,
-    )
+# ============== PARTITION RUN MANAGEMENT ==============
 
-    return result.get('totalResults', 0) if isinstance(result, dict) else 0
+
+async def create_partition_run(
+    db: AsyncSession,
+    edition_id: int,
+    job_id: Optional[int],
+    year: int,
+    initial_count: int,
+    parent_partition_id: Optional[int] = None,
+    base_query: Optional[str] = None,
+    depth: int = 0
+) -> PartitionRun:
+    """Create a new PartitionRun record to track this partition attempt."""
+    run = PartitionRun(
+        edition_id=edition_id,
+        job_id=job_id,
+        year=year,
+        initial_count=initial_count,
+        parent_partition_id=parent_partition_id,
+        base_query=base_query,
+        depth=depth,
+        status="pending",
+        target_threshold=TARGET_THRESHOLD,
+    )
+    db.add(run)
+    await db.flush()  # Get the ID
+    log_now(f"Created PartitionRun #{run.id} for year {year}, initial_count={initial_count}, depth={depth}")
+    return run
+
+
+async def update_partition_status(
+    db: AsyncSession,
+    run: PartitionRun,
+    status: str,
+    error_message: Optional[str] = None,
+    error_stage: Optional[str] = None
+):
+    """Update the status of a partition run."""
+    run.status = status
+    if error_message:
+        run.error_message = error_message
+    if error_stage:
+        run.error_stage = error_stage
+    if status == "completed":
+        run.completed_at = datetime.utcnow()
+    await db.flush()
+    log_now(f"PartitionRun #{run.id} status -> {status}")
+
+
+# ============== LLM CALLS WITH FULL LOGGING ==============
 
 
 async def suggest_exclusion_terms_llm(
+    db: AsyncSession,
+    partition_run: PartitionRun,
     edition_title: str,
     year: int,
     current_count: int,
-    already_excluded: List[str] = None
-) -> List[str]:
+    already_excluded: List[str] = None,
+    call_number: int = 1
+) -> Tuple[List[str], Optional[PartitionLLMCall]]:
     """
     Use LLM to suggest terms to exclude from titles to reduce result count.
 
-    Returns list of terms to try excluding, ordered by expected impact.
+    EVERYTHING is logged to PartitionLLMCall.
+
+    Returns tuple of (terms_list, llm_call_record)
     """
     import anthropic
     import os
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        log_now("No ANTHROPIC_API_KEY - using fallback terms", "warning")
-        return get_fallback_exclusion_terms(edition_title)
-
-    client = anthropic.Anthropic(api_key=api_key)
 
     already_excluded = already_excluded or []
     excluded_str = ", ".join([f'"{t}"' for t in already_excluded]) if already_excluded else "none yet"
@@ -96,7 +135,7 @@ YEAR: {year}
 CURRENT RESULT COUNT: {current_count}
 TERMS ALREADY EXCLUDED: {excluded_str}
 
-YOUR TASK: Suggest 10-15 single-word terms that are likely to appear frequently in titles of papers citing this work. These should be:
+YOUR TASK: Suggest 15-20 single-word terms that are likely to appear frequently in titles of papers citing this work. These should be:
 
 1. Common academic/domain terms related to the paper's topic
 2. Generic scholarly terms (like "analysis", "theory", "study")
@@ -109,14 +148,45 @@ IMPORTANT:
 - Return terms that are NOT already excluded
 - Order by expected frequency (most common first)
 - Include both domain-specific and generic academic terms
+- Be creative - think about what words commonly appear in academic paper titles
 
 OUTPUT FORMAT: Return a JSON array of strings, nothing else.
-Example: ["corporate", "governance", "firm", "organization", "management", "theory", "analysis", "study", "business", "market"]
+Example: ["corporate", "governance", "firm", "organization", "management", "theory", "analysis", "study", "business", "market", "social", "political", "cultural", "economic", "power"]
 
 Return ONLY the JSON array:"""
 
+    # Create LLM call record BEFORE making the call
+    llm_call = PartitionLLMCall(
+        partition_run_id=partition_run.id,
+        call_number=call_number,
+        purpose="suggest_exclusion_terms",
+        model=LLM_MODEL,
+        prompt=prompt,
+        edition_title=edition_title[:500],
+        year=year,
+        current_count=current_count,
+        already_excluded_terms=json.dumps(already_excluded) if already_excluded else None,
+        status="pending",
+        started_at=datetime.utcnow(),
+    )
+    db.add(llm_call)
+    await db.flush()
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        log_now("No ANTHROPIC_API_KEY - using fallback terms", "warning")
+        llm_call.status = "failed"
+        llm_call.error_message = "No ANTHROPIC_API_KEY"
+        llm_call.completed_at = datetime.utcnow()
+        await db.flush()
+        terms = get_fallback_exclusion_terms(edition_title, already_excluded)
+        return terms, llm_call
+
     try:
-        log_now(f"Calling LLM for exclusion term suggestions...")
+        client = anthropic.Anthropic(api_key=api_key)
+        start_time = time.time()
+
+        log_now(f"LLM call #{call_number} for PartitionRun #{partition_run.id}...")
 
         response = client.messages.create(
             model=LLM_MODEL,
@@ -124,24 +194,48 @@ Return ONLY the JSON array:"""
             messages=[{"role": "user", "content": prompt}]
         )
 
+        latency_ms = int((time.time() - start_time) * 1000)
         response_text = response.content[0].text.strip()
 
-        # Extract JSON from response
+        # Update LLM call record with response
+        llm_call.raw_response = response_text
+        llm_call.latency_ms = latency_ms
+        llm_call.input_tokens = response.usage.input_tokens if hasattr(response, 'usage') else None
+        llm_call.output_tokens = response.usage.output_tokens if hasattr(response, 'usage') else None
+        llm_call.completed_at = datetime.utcnow()
+
+        # Parse JSON from response
         json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
         if json_match:
             response_text = json_match.group(0)
 
-        terms = json.loads(response_text)
+        try:
+            terms = json.loads(response_text)
+            # Filter out already excluded terms
+            terms = [t for t in terms if isinstance(t, str) and t.lower() not in [e.lower() for e in already_excluded]]
 
-        # Filter out already excluded terms
-        terms = [t for t in terms if t.lower() not in [e.lower() for e in already_excluded]]
+            llm_call.parsed_terms = json.dumps(terms)
+            llm_call.terms_count = len(terms)
+            llm_call.status = "completed"
 
-        log_now(f"LLM suggested {len(terms)} terms: {terms[:5]}...")
-        return terms
+            log_now(f"LLM suggested {len(terms)} terms: {terms[:5]}...")
+            await db.flush()
+            return terms, llm_call
+
+        except json.JSONDecodeError as e:
+            llm_call.status = "parse_error"
+            llm_call.error_message = f"JSON parse error: {e}"
+            await db.flush()
+            log_now(f"LLM response parse error: {e}", "warning")
+            return get_fallback_exclusion_terms(edition_title, already_excluded), llm_call
 
     except Exception as e:
-        log_now(f"LLM term suggestion failed: {e}, using fallback", "warning")
-        return get_fallback_exclusion_terms(edition_title, already_excluded)
+        llm_call.status = "failed"
+        llm_call.error_message = str(e)[:1000]
+        llm_call.completed_at = datetime.utcnow()
+        await db.flush()
+        log_now(f"LLM call failed: {e}", "warning")
+        return get_fallback_exclusion_terms(edition_title, already_excluded), llm_call
 
 
 def get_fallback_exclusion_terms(edition_title: str, already_excluded: List[str] = None) -> List[str]:
@@ -155,7 +249,9 @@ def get_fallback_exclusion_terms(edition_title: str, already_excluded: List[str]
         "role", "case", "empirical", "development", "performance", "management",
         "relationship", "strategy", "value", "market", "social", "economic",
         "political", "organizational", "institutional", "financial", "corporate",
-        "governance", "firm", "business", "industry", "policy", "regulation"
+        "governance", "firm", "business", "industry", "policy", "regulation",
+        "culture", "cultural", "identity", "discourse", "power", "media",
+        "urban", "space", "global", "international", "national", "local"
     ]
 
     # Extract potential domain terms from the title
@@ -166,51 +262,291 @@ def get_fallback_exclusion_terms(edition_title: str, already_excluded: List[str]
     all_terms = domain_terms[:10] + generic_terms
     filtered = [t for t in all_terms if t.lower() not in already_excluded]
 
-    return filtered[:20]
+    return filtered[:25]
+
+
+# ============== QUERY EXECUTION WITH FULL LOGGING ==============
+
+
+async def execute_count_query(
+    db: AsyncSession,
+    partition_run: PartitionRun,
+    scholar_service,
+    scholar_id: str,
+    year: int,
+    query_suffix: str,
+    query_type: str,
+    purpose: str
+) -> Tuple[int, PartitionQuery]:
+    """
+    Execute a count query and log it to PartitionQuery.
+
+    Returns tuple of (count, query_record)
+    """
+    # Create query record
+    query_record = PartitionQuery(
+        partition_run_id=partition_run.id,
+        query_type=query_type,
+        scholar_id=scholar_id,
+        year=year,
+        additional_query=query_suffix if query_suffix else None,
+        purpose=purpose,
+        status="pending",
+        started_at=datetime.utcnow(),
+    )
+    db.add(query_record)
+    await db.flush()
+
+    try:
+        start_time = time.time()
+
+        result = await scholar_service.get_cited_by(
+            scholar_id=scholar_id,
+            max_results=10,  # Just first page for count
+            year_low=year,
+            year_high=year,
+            additional_query=query_suffix if query_suffix else None,
+        )
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        count = result.get('totalResults', 0) if isinstance(result, dict) else 0
+
+        query_record.actual_count = count
+        query_record.latency_ms = latency_ms
+        query_record.status = "completed"
+        query_record.completed_at = datetime.utcnow()
+        await db.flush()
+
+        return count, query_record
+
+    except Exception as e:
+        query_record.status = "failed"
+        query_record.error_message = str(e)[:1000]
+        query_record.completed_at = datetime.utcnow()
+        await db.flush()
+        raise
+
+
+async def execute_harvest_query(
+    db: AsyncSession,
+    partition_run: PartitionRun,
+    scholar_service,
+    scholar_id: str,
+    year: int,
+    query_suffix: str,
+    query_type: str,
+    purpose: str,
+    existing_scholar_ids: Set[str],
+    on_page_complete: Callable,
+    max_results: int = GOOGLE_SCHOLAR_LIMIT
+) -> Tuple[int, int, PartitionQuery]:
+    """
+    Execute a harvest query and log it to PartitionQuery.
+
+    Returns tuple of (citations_new, citations_total, query_record)
+    """
+    # Create query record
+    query_record = PartitionQuery(
+        partition_run_id=partition_run.id,
+        query_type=query_type,
+        scholar_id=scholar_id,
+        year=year,
+        additional_query=query_suffix if query_suffix else None,
+        purpose=purpose,
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db.add(query_record)
+    await db.flush()
+
+    start_count = len(existing_scholar_ids)
+
+    try:
+        start_time = time.time()
+
+        result = await scholar_service.get_cited_by(
+            scholar_id=scholar_id,
+            max_results=max_results,
+            year_low=year,
+            year_high=year,
+            additional_query=query_suffix if query_suffix else None,
+            on_page_complete=on_page_complete,
+        )
+
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        new_count = len(existing_scholar_ids) - start_count
+
+        if isinstance(result, dict):
+            query_record.actual_count = result.get('totalResults', 0)
+            query_record.pages_fetched = result.get('pages_fetched', 0)
+            query_record.pages_succeeded = result.get('pages_succeeded', 0)
+            query_record.pages_failed = result.get('pages_failed', 0)
+
+        query_record.citations_new = new_count
+        query_record.citations_harvested = result.get('pages_fetched', 0) * 10 if isinstance(result, dict) else 0
+        query_record.latency_ms = latency_ms
+        query_record.status = "completed"
+        query_record.completed_at = datetime.utcnow()
+        await db.flush()
+
+        return new_count, query_record.citations_harvested, query_record
+
+    except Exception as e:
+        query_record.status = "failed"
+        query_record.error_message = str(e)[:1000]
+        query_record.completed_at = datetime.utcnow()
+        await db.flush()
+        raise
+
+
+# ============== TERM TESTING WITH FULL LOGGING ==============
+
+
+async def test_exclusion_term(
+    db: AsyncSession,
+    partition_run: PartitionRun,
+    scholar_service,
+    scholar_id: str,
+    year: int,
+    term: str,
+    current_exclusions: List[str],
+    count_before: int,
+    order_tried: int,
+    source: str,
+    llm_call_id: Optional[int] = None
+) -> Tuple[int, bool, PartitionTermAttempt]:
+    """
+    Test adding a term to the exclusion list.
+
+    Returns tuple of (new_count, kept, term_attempt_record)
+    """
+    # Build test query
+    test_exclusions = current_exclusions + [term]
+    test_query = " ".join([f'-intitle:"{t}"' for t in test_exclusions])
+
+    # Create term attempt record
+    term_attempt = PartitionTermAttempt(
+        partition_run_id=partition_run.id,
+        term=term,
+        order_tried=order_tried,
+        source=source,
+        llm_call_id=llm_call_id,
+        test_query=test_query,
+        count_before=count_before,
+        count_after=0,
+        reduction=0,
+        reduction_percent=0.0,
+        kept=False,
+    )
+    db.add(term_attempt)
+    await db.flush()
+
+    try:
+        start_time = time.time()
+
+        count_after, query_record = await execute_count_query(
+            db=db,
+            partition_run=partition_run,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            year=year,
+            query_suffix=test_query,
+            query_type="term_test",
+            purpose=f"Testing exclusion of '{term}'"
+        )
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        reduction = count_before - count_after
+        reduction_pct = (reduction / count_before * 100) if count_before > 0 else 0
+
+        term_attempt.count_after = count_after
+        term_attempt.reduction = reduction
+        term_attempt.reduction_percent = reduction_pct
+        term_attempt.latency_ms = latency_ms
+
+        # Decide whether to keep this term
+        kept = count_after < count_before  # Only keep if it actually reduces count
+        term_attempt.kept = kept
+
+        if not kept:
+            term_attempt.skip_reason = "no_reduction" if reduction == 0 else "negative_reduction"
+
+        await db.flush()
+
+        log_now(f"  Term '{term}': {count_before} -> {count_after} (reduction: {reduction}, {'KEPT' if kept else 'SKIPPED'})")
+
+        return count_after, kept, term_attempt
+
+    except Exception as e:
+        term_attempt.skip_reason = f"error: {str(e)[:80]}"
+        await db.flush()
+        log_now(f"  Term '{term}': ERROR - {e}", "warning")
+        return count_before, False, term_attempt
+
+
+# ============== MAIN PARTITION LOGIC ==============
 
 
 async def find_exclusion_set(
+    db: AsyncSession,
+    partition_run: PartitionRun,
     scholar_service,
     scholar_id: str,
     year: int,
     edition_title: str,
-    initial_count: int,
-    max_iterations: int = 20
-) -> Dict[str, Any]:
+    initial_count: int
+) -> Tuple[List[str], int, bool]:
     """
-    Find a set of exclusion terms that brings the result count below 1000.
+    Find a set of exclusion terms that brings the result count below TARGET_THRESHOLD.
 
-    Returns:
-        {
-            "excluded_terms": ["term1", "term2", ...],
-            "exclusion_query": "-intitle:\"term1\" -intitle:\"term2\" ...",
-            "result_count": 892,
-            "success": True
-        }
+    CRITICAL: This function will NOT return success=True unless we actually get below threshold.
+
+    Returns tuple of (excluded_terms, final_count, success)
     """
     log_now(f"Finding exclusion set for year {year} (initial count: {initial_count})")
 
+    partition_run.status = "finding_terms"
+    partition_run.terms_started_at = datetime.utcnow()
+    await db.flush()
+
     excluded_terms = []
     current_count = initial_count
+    term_order = 0
+    llm_call_number = 0
 
     # Get initial term suggestions from LLM
-    suggested_terms = await suggest_exclusion_terms_llm(
-        edition_title, year, current_count, excluded_terms
+    llm_call_number += 1
+    suggested_terms, llm_call = await suggest_exclusion_terms_llm(
+        db=db,
+        partition_run=partition_run,
+        edition_title=edition_title,
+        year=year,
+        current_count=current_count,
+        already_excluded=excluded_terms,
+        call_number=llm_call_number
     )
 
     term_index = 0
 
-    for iteration in range(max_iterations):
+    for iteration in range(MAX_TERM_ATTEMPTS):
         if current_count < TARGET_THRESHOLD:
-            log_now(f"✓ Achieved target: {current_count} < {TARGET_THRESHOLD}")
+            log_now(f"SUCCESS: Achieved target: {current_count} < {TARGET_THRESHOLD}")
             break
 
         # Get next term to try
         if term_index >= len(suggested_terms):
             # Need more terms from LLM
-            log_now(f"Requesting more terms from LLM...")
-            more_terms = await suggest_exclusion_terms_llm(
-                edition_title, year, current_count, excluded_terms
+            log_now(f"Requesting more terms from LLM (iteration {iteration})...")
+            llm_call_number += 1
+            more_terms, llm_call = await suggest_exclusion_terms_llm(
+                db=db,
+                partition_run=partition_run,
+                edition_title=edition_title,
+                year=year,
+                current_count=current_count,
+                already_excluded=excluded_terms,
+                call_number=llm_call_number
             )
             if not more_terms:
                 log_now(f"No more terms available, stopping at {current_count}")
@@ -219,42 +555,48 @@ async def find_exclusion_set(
 
         next_term = suggested_terms[term_index]
         term_index += 1
+        term_order += 1
 
-        # Build test query with this term added
-        test_excluded = excluded_terms + [next_term]
-        test_query = " ".join([f'-intitle:"{t}"' for t in test_excluded])
+        # Test this term
+        new_count, kept, term_attempt = await test_exclusion_term(
+            db=db,
+            partition_run=partition_run,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            year=year,
+            term=next_term,
+            current_exclusions=excluded_terms,
+            count_before=current_count,
+            order_tried=term_order,
+            source="llm" if llm_call else "fallback",
+            llm_call_id=llm_call.id if llm_call else None
+        )
 
-        # Get result count
-        try:
-            new_count = await get_result_count_for_query(
-                scholar_service, scholar_id, year, test_query
-            )
+        if kept:
+            excluded_terms.append(next_term)
+            current_count = new_count
 
-            reduction = current_count - new_count
-            log_now(f"  [{iteration+1}] Adding -{next_term}: {current_count} → {new_count} (reduction: {reduction})")
+        # Rate limit
+        await asyncio.sleep(1)
 
-            if new_count < current_count:
-                # Term was useful, keep it
-                excluded_terms.append(next_term)
-                current_count = new_count
-            else:
-                log_now(f"    Skipping '{next_term}' - no reduction")
+    # Update partition run with term discovery results
+    partition_run.terms_tried_count = term_order
+    partition_run.terms_kept_count = len(excluded_terms)
+    partition_run.final_exclusion_terms = json.dumps(excluded_terms)
+    partition_run.final_exclusion_query = " ".join([f'-intitle:"{t}"' for t in excluded_terms])
+    partition_run.exclusion_set_count = current_count
+    partition_run.terms_completed_at = datetime.utcnow()
 
-            # Rate limit
-            await asyncio.sleep(1)
+    success = current_count < GOOGLE_SCHOLAR_LIMIT
+    if success:
+        partition_run.status = "terms_found"
+    else:
+        partition_run.status = "terms_failed"
+        partition_run.error_message = f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}. Final count: {current_count}"
 
-        except Exception as e:
-            log_now(f"    Error testing '{next_term}': {e}", "warning")
-            continue
+    await db.flush()
 
-    exclusion_query = " ".join([f'-intitle:"{t}"' for t in excluded_terms])
-
-    return {
-        "excluded_terms": excluded_terms,
-        "exclusion_query": exclusion_query,
-        "result_count": current_count,
-        "success": current_count < GOOGLE_SCHOLAR_LIMIT
-    }
+    return excluded_terms, current_count, success
 
 
 def build_inclusion_query(excluded_terms: List[str]) -> str:
@@ -265,8 +607,8 @@ def build_inclusion_query(excluded_terms: List[str]) -> str:
 
 
 async def harvest_partition(
-    scholar_service,
     db: AsyncSession,
+    scholar_service,
     edition_id: int,
     scholar_id: str,
     year: int,
@@ -275,11 +617,15 @@ async def harvest_partition(
     existing_scholar_ids: Set[str],
     on_page_complete: Callable,
     total_for_year: int,
-    depth: int = 0,
-    max_depth: int = 3
+    job_id: Optional[int] = None,
+    parent_partition_id: Optional[int] = None,
+    base_query: Optional[str] = None,
+    depth: int = 0
 ) -> Dict[str, Any]:
     """
     Recursively partition and harvest citations for a year with >1000 results.
+
+    EVERYTHING is logged to the database.
 
     Uses the exclusion/inclusion partition strategy:
     1. Find terms to exclude until count < 1000
@@ -288,125 +634,207 @@ async def harvest_partition(
     4. If inclusion set > 1000, recursively partition
     """
     indent = "  " * depth
-    log_now(f"{indent}═══ PARTITION depth={depth}, year={year}, total={total_for_year} ═══")
+    log_now(f"{indent}=== PARTITION depth={depth}, year={year}, total={total_for_year} ===")
 
-    if depth >= max_depth:
-        log_now(f"{indent}Max depth reached, harvesting what we can", "warning")
-        # Just harvest up to 1000
-        result = await scholar_service.get_cited_by(
-            scholar_id=scholar_id,
-            max_results=GOOGLE_SCHOLAR_LIMIT,
-            year_low=year,
-            year_high=year,
-            on_page_complete=on_page_complete,
-        )
-        return {
-            "depth": depth,
-            "harvested": result.get('pages_fetched', 0) * 10,
-            "truncated": True
-        }
+    # Create partition run record
+    partition_run = await create_partition_run(
+        db=db,
+        edition_id=edition_id,
+        job_id=job_id,
+        year=year,
+        initial_count=total_for_year,
+        parent_partition_id=parent_partition_id,
+        base_query=base_query,
+        depth=depth
+    )
 
     stats = {
+        "partition_run_id": partition_run.id,
         "depth": depth,
         "year": year,
         "initial_count": total_for_year,
         "exclusion_harvested": 0,
         "inclusion_harvested": 0,
         "total_new": 0,
-        "partitions": []
+        "success": False
     }
 
-    # Step 1: Find exclusion terms to get below 1000
-    log_now(f"{indent}Step 1: Finding exclusion set...")
-    exclusion_result = await find_exclusion_set(
-        scholar_service, scholar_id, year, edition_title, total_for_year
-    )
+    if depth >= MAX_RECURSION_DEPTH:
+        log_now(f"{indent}Max depth reached, harvesting what we can", "warning")
+        partition_run.status = "failed"
+        partition_run.error_message = f"Max recursion depth ({MAX_RECURSION_DEPTH}) reached"
+        partition_run.error_stage = "depth_limit"
+        await db.flush()
 
-    if not exclusion_result["success"]:
-        log_now(f"{indent}Could not reduce below 1000, harvesting partial", "warning")
-        # Harvest what we can with current exclusions
-        if exclusion_result["exclusion_query"]:
-            result = await scholar_service.get_cited_by(
+        # Just harvest up to 1000
+        try:
+            new_count, total_harvested, query_record = await execute_harvest_query(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
                 scholar_id=scholar_id,
-                max_results=GOOGLE_SCHOLAR_LIMIT,
-                year_low=year,
-                year_high=year,
-                additional_query=exclusion_result["exclusion_query"],
+                year=year,
+                query_suffix=base_query,
+                query_type="depth_limit_harvest",
+                purpose=f"Fallback harvest at max depth (base: {base_query[:50] if base_query else 'none'}...)",
+                existing_scholar_ids=existing_scholar_ids,
                 on_page_complete=on_page_complete,
             )
-            stats["exclusion_harvested"] = result.get('pages_fetched', 0) * 10
+            stats["total_new"] = new_count
+            partition_run.total_harvested = total_harvested
+            partition_run.total_new_unique = new_count
+        except Exception as e:
+            log_now(f"{indent}Fallback harvest failed: {e}", "error")
+
+        await db.flush()
         return stats
 
-    excluded_terms = exclusion_result["excluded_terms"]
-    exclusion_query = exclusion_result["exclusion_query"]
+    # Step 1: Find exclusion terms to get below 1000
+    # CRITICAL: We do NOT proceed to harvesting unless this succeeds
+    log_now(f"{indent}Step 1: Finding exclusion set...")
 
-    log_now(f"{indent}Exclusion set: {len(excluded_terms)} terms, {exclusion_result['result_count']} results")
+    excluded_terms, exclusion_count, terms_success = await find_exclusion_set(
+        db=db,
+        partition_run=partition_run,
+        scholar_service=scholar_service,
+        scholar_id=scholar_id,
+        year=year,
+        edition_title=edition_title,
+        initial_count=total_for_year
+    )
+
+    if not terms_success:
+        log_now(f"{indent}FAILED: Could not reduce below {GOOGLE_SCHOLAR_LIMIT}, final count: {exclusion_count}", "error")
+        stats["error"] = f"Term discovery failed. Count still at {exclusion_count}"
+        # We still try to harvest the exclusion set we have
+        if exclusion_count < 2000:  # Don't completely give up
+            log_now(f"{indent}Attempting partial harvest anyway...")
+        else:
+            await update_partition_status(db, partition_run, "failed",
+                error_message=f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}",
+                error_stage="term_discovery")
+            return stats
+
+    exclusion_query = partition_run.final_exclusion_query
+    if base_query:
+        exclusion_query = f"{base_query} {exclusion_query}"
+
+    log_now(f"{indent}Exclusion set: {len(excluded_terms)} terms, {exclusion_count} results")
     log_now(f"{indent}Terms: {excluded_terms}")
 
     # Step 2: Harvest the EXCLUSION set (items WITHOUT those terms)
-    log_now(f"{indent}Step 2: Harvesting exclusion set ({exclusion_result['result_count']} items)...")
+    log_now(f"{indent}Step 2: Harvesting exclusion set ({exclusion_count} items)...")
 
-    start_count = len(existing_scholar_ids)
+    partition_run.status = "harvesting_exclusion"
+    partition_run.exclusion_started_at = datetime.utcnow()
+    await db.flush()
 
-    result = await scholar_service.get_cited_by(
-        scholar_id=scholar_id,
-        max_results=GOOGLE_SCHOLAR_LIMIT,
-        year_low=year,
-        year_high=year,
-        additional_query=exclusion_query,
-        on_page_complete=on_page_complete,
-    )
+    try:
+        exclusion_new, exclusion_total, query_record = await execute_harvest_query(
+            db=db,
+            partition_run=partition_run,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            year=year,
+            query_suffix=exclusion_query,
+            query_type="exclusion_harvest",
+            purpose=f"Harvest exclusion set ({len(excluded_terms)} terms excluded)",
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+        )
 
-    exclusion_new = len(existing_scholar_ids) - start_count
-    stats["exclusion_harvested"] = exclusion_new
-    log_now(f"{indent}✓ Exclusion set harvested: {exclusion_new} new citations")
+        stats["exclusion_harvested"] = exclusion_new
+        partition_run.exclusion_harvested = exclusion_new
+        partition_run.exclusion_completed_at = datetime.utcnow()
+        log_now(f"{indent}Exclusion set harvested: {exclusion_new} new citations")
+
+    except Exception as e:
+        log_now(f"{indent}Exclusion harvest failed: {e}", "error")
+        await update_partition_status(db, partition_run, "failed",
+            error_message=str(e),
+            error_stage="exclusion_harvest")
+        return stats
 
     # Rate limit between phases
     await asyncio.sleep(3)
 
     # Step 3: Build and check INCLUSION query (items WITH at least one term)
     inclusion_query = build_inclusion_query(excluded_terms)
+    if base_query:
+        inclusion_query = f"({inclusion_query}) {base_query}"
+
+    partition_run.final_inclusion_query = inclusion_query
+
     log_now(f"{indent}Step 3: Checking inclusion set...")
     log_now(f"{indent}Query: {inclusion_query[:100]}...")
 
-    inclusion_count = await get_result_count_for_query(
-        scholar_service, scholar_id, year, inclusion_query
+    inclusion_count, query_record = await execute_count_query(
+        db=db,
+        partition_run=partition_run,
+        scholar_service=scholar_service,
+        scholar_id=scholar_id,
+        year=year,
+        query_suffix=inclusion_query,
+        query_type="inclusion_count",
+        purpose="Count inclusion set"
     )
+
+    partition_run.inclusion_set_count = inclusion_count
+    await db.flush()
 
     log_now(f"{indent}Inclusion set has {inclusion_count} results")
 
     # Step 4: Handle inclusion set
     if inclusion_count == 0:
         log_now(f"{indent}Inclusion set empty, done!")
+        partition_run.status = "completed"
+        partition_run.inclusion_harvested = 0
 
     elif inclusion_count < GOOGLE_SCHOLAR_LIMIT:
         # Can harvest directly
         log_now(f"{indent}Step 4: Harvesting inclusion set ({inclusion_count} items)...")
 
-        start_count = len(existing_scholar_ids)
+        partition_run.status = "harvesting_inclusion"
+        partition_run.inclusion_started_at = datetime.utcnow()
+        await db.flush()
 
-        result = await scholar_service.get_cited_by(
-            scholar_id=scholar_id,
-            max_results=GOOGLE_SCHOLAR_LIMIT,
-            year_low=year,
-            year_high=year,
-            additional_query=inclusion_query,
-            on_page_complete=on_page_complete,
-        )
+        try:
+            inclusion_new, inclusion_total, query_record = await execute_harvest_query(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                year=year,
+                query_suffix=inclusion_query,
+                query_type="inclusion_harvest",
+                purpose=f"Harvest inclusion set ({inclusion_count} items)",
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+            )
 
-        inclusion_new = len(existing_scholar_ids) - start_count
-        stats["inclusion_harvested"] = inclusion_new
-        log_now(f"{indent}✓ Inclusion set harvested: {inclusion_new} new citations")
+            stats["inclusion_harvested"] = inclusion_new
+            partition_run.inclusion_harvested = inclusion_new
+            partition_run.inclusion_completed_at = datetime.utcnow()
+            partition_run.status = "completed"
+            log_now(f"{indent}Inclusion set harvested: {inclusion_new} new citations")
+
+        except Exception as e:
+            log_now(f"{indent}Inclusion harvest failed: {e}", "error")
+            await update_partition_status(db, partition_run, "failed",
+                error_message=str(e),
+                error_stage="inclusion_harvest")
 
     else:
         # Inclusion set also >1000, need to recursively partition
-        log_now(f"{indent}Step 4: Inclusion set too large ({inclusion_count}), recursively partitioning...")
+        log_now(f"{indent}Step 4: Inclusion set too large ({inclusion_count}), RECURSIVELY PARTITIONING...")
 
-        # For recursive partition, we need to work within the inclusion set
-        # We'll add the inclusion query as a base and then add more exclusions
-        sub_result = await harvest_partition_with_base(
-            scholar_service=scholar_service,
+        partition_run.status = "needs_recursive"
+        await db.flush()
+
+        # Recursive call with inclusion_query as base
+        sub_result = await harvest_partition(
             db=db,
+            scholar_service=scholar_service,
             edition_id=edition_id,
             scholar_id=scholar_id,
             year=year,
@@ -415,161 +843,33 @@ async def harvest_partition(
             existing_scholar_ids=existing_scholar_ids,
             on_page_complete=on_page_complete,
             total_for_year=inclusion_count,
+            job_id=job_id,
+            parent_partition_id=partition_run.id,
             base_query=inclusion_query,
-            depth=depth + 1,
-            max_depth=max_depth
+            depth=depth + 1
         )
 
-        stats["partitions"].append(sub_result)
         stats["inclusion_harvested"] = sub_result.get("total_new", 0)
+        partition_run.inclusion_harvested = stats["inclusion_harvested"]
+        partition_run.status = "completed"
 
-    stats["total_new"] = stats["exclusion_harvested"] + stats["inclusion_harvested"]
+    # Finalize
+    partition_run.total_harvested = partition_run.exclusion_harvested + partition_run.inclusion_harvested
+    partition_run.total_new_unique = stats["exclusion_harvested"] + stats["inclusion_harvested"]
+    partition_run.completed_at = datetime.utcnow()
+    await db.flush()
 
-    log_now(f"{indent}═══ PARTITION COMPLETE: {stats['total_new']} total new citations ═══")
+    stats["total_new"] = partition_run.total_new_unique
+    stats["success"] = True
 
-    return stats
-
-
-async def harvest_partition_with_base(
-    scholar_service,
-    db: AsyncSession,
-    edition_id: int,
-    scholar_id: str,
-    year: int,
-    edition_title: str,
-    paper_id: int,
-    existing_scholar_ids: Set[str],
-    on_page_complete: Callable,
-    total_for_year: int,
-    base_query: str,
-    depth: int = 0,
-    max_depth: int = 3
-) -> Dict[str, Any]:
-    """
-    Partition within an existing query constraint (for recursive partitioning).
-    Similar to harvest_partition but adds exclusions ON TOP of base_query.
-    """
-    indent = "  " * depth
-    log_now(f"{indent}═══ SUB-PARTITION depth={depth}, total={total_for_year} ═══")
-    log_now(f"{indent}Base query: {base_query[:80]}...")
-
-    if depth >= max_depth:
-        log_now(f"{indent}Max depth reached, harvesting what we can", "warning")
-        result = await scholar_service.get_cited_by(
-            scholar_id=scholar_id,
-            max_results=GOOGLE_SCHOLAR_LIMIT,
-            year_low=year,
-            year_high=year,
-            additional_query=base_query,
-            on_page_complete=on_page_complete,
-        )
-        return {"depth": depth, "harvested": result.get('pages_fetched', 0) * 10, "truncated": True}
-
-    stats = {
-        "depth": depth,
-        "initial_count": total_for_year,
-        "exclusion_harvested": 0,
-        "inclusion_harvested": 0,
-        "total_new": 0
-    }
-
-    # Find additional exclusion terms
-    # Get terms to exclude within this subset
-    additional_terms = await suggest_exclusion_terms_llm(
-        edition_title, year, total_for_year, []
-    )
-
-    # Test adding exclusions until we're below 1000
-    excluded_terms = []
-    current_count = total_for_year
-
-    for term in additional_terms:
-        if current_count < TARGET_THRESHOLD:
-            break
-
-        test_exclusions = " ".join([f'-intitle:"{t}"' for t in excluded_terms + [term]])
-        test_query = f"{base_query} {test_exclusions}"
-
-        try:
-            new_count = await get_result_count_for_query(
-                scholar_service, scholar_id, year, test_query
-            )
-
-            if new_count < current_count:
-                excluded_terms.append(term)
-                current_count = new_count
-                log_now(f"{indent}  Adding -{term}: {current_count}")
-
-            await asyncio.sleep(1)
-
-        except Exception as e:
-            log_now(f"{indent}  Error: {e}", "warning")
-            continue
-
-    if current_count >= GOOGLE_SCHOLAR_LIMIT:
-        log_now(f"{indent}Could not reduce below 1000, harvesting partial", "warning")
-        # Just harvest what we can
-        result = await scholar_service.get_cited_by(
-            scholar_id=scholar_id,
-            max_results=GOOGLE_SCHOLAR_LIMIT,
-            year_low=year,
-            year_high=year,
-            additional_query=base_query,
-            on_page_complete=on_page_complete,
-        )
-        stats["total_new"] = len(existing_scholar_ids)
-        return stats
-
-    # Harvest exclusion set within base query
-    exclusion_additions = " ".join([f'-intitle:"{t}"' for t in excluded_terms])
-    full_exclusion_query = f"{base_query} {exclusion_additions}"
-
-    log_now(f"{indent}Harvesting exclusion subset ({current_count} items)...")
-    start_count = len(existing_scholar_ids)
-
-    result = await scholar_service.get_cited_by(
-        scholar_id=scholar_id,
-        max_results=GOOGLE_SCHOLAR_LIMIT,
-        year_low=year,
-        year_high=year,
-        additional_query=full_exclusion_query,
-        on_page_complete=on_page_complete,
-    )
-
-    stats["exclusion_harvested"] = len(existing_scholar_ids) - start_count
-
-    await asyncio.sleep(3)
-
-    # Harvest inclusion subset (items matching base_query AND containing excluded terms)
-    if excluded_terms:
-        inclusion_part = " OR ".join([f'intitle:"{t}"' for t in excluded_terms])
-        # We need items that match base_query AND have at least one excluded term
-        # Since base_query is already an OR of terms, we need to be careful
-        # Actually we can just harvest the original base_query and deduplicate
-
-        log_now(f"{indent}Harvesting remaining from base query...")
-        start_count = len(existing_scholar_ids)
-
-        # This will get duplicates but they'll be filtered by existing_scholar_ids
-        result = await scholar_service.get_cited_by(
-            scholar_id=scholar_id,
-            max_results=GOOGLE_SCHOLAR_LIMIT,
-            year_low=year,
-            year_high=year,
-            additional_query=base_query,  # Just the base, let dedup handle it
-            on_page_complete=on_page_complete,
-        )
-
-        stats["inclusion_harvested"] = len(existing_scholar_ids) - start_count
-
-    stats["total_new"] = stats["exclusion_harvested"] + stats["inclusion_harvested"]
+    log_now(f"{indent}=== PARTITION COMPLETE: {stats['total_new']} total new citations ===")
 
     return stats
 
 
 async def detect_and_handle_overflow(
-    scholar_service,
     db: AsyncSession,
+    scholar_service,
     edition_id: int,
     scholar_id: str,
     year: int,
@@ -577,7 +877,8 @@ async def detect_and_handle_overflow(
     paper_id: int,
     existing_scholar_ids: Set[str],
     on_page_complete: Callable,
-    year_result: Dict[str, Any]
+    year_result: Dict[str, Any],
+    job_id: Optional[int] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Check if a year has overflow and handle it using partition strategy.
@@ -592,12 +893,12 @@ async def detect_and_handle_overflow(
         # No overflow, we got everything
         return None
 
-    log_now(f"🚨 OVERFLOW DETECTED: Year {year} has {total_results} citations, only fetched {papers_fetched}")
+    log_now(f"OVERFLOW DETECTED: Year {year} has {total_results} citations, only fetched {papers_fetched}")
 
     # Use partition strategy to get the rest
     return await harvest_partition(
-        scholar_service=scholar_service,
         db=db,
+        scholar_service=scholar_service,
         edition_id=edition_id,
         scholar_id=scholar_id,
         year=year,
@@ -606,4 +907,5 @@ async def detect_and_handle_overflow(
         existing_scholar_ids=existing_scholar_ids,
         on_page_complete=on_page_complete,
         total_for_year=total_results,
+        job_id=job_id,
     )

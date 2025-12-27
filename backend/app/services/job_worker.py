@@ -1269,8 +1269,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
                         try:
                             partition_stats = await harvest_partition(
-                                scholar_service=scholar_service,
                                 db=db,
+                                scholar_service=scholar_service,
                                 edition_id=edition.id,
                                 scholar_id=edition.scholar_id,
                                 year=year,
@@ -1279,6 +1279,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 existing_scholar_ids=existing_scholar_ids,
                                 on_page_complete=save_page_citations_with_year_state,
                                 total_for_year=total_this_year,
+                                job_id=job.id,
                             )
 
                             year_citations = partition_stats.get("total_new", 0)

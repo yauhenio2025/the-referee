@@ -4148,3 +4148,192 @@ async def refresh_citation_counts(
         updated = result.rowcount
         await db.commit()
         return {"status": "ok", "message": f"Refreshed citation counts for {updated} papers"}
+
+
+@app.get("/api/admin/partition-runs")
+async def get_partition_runs(
+    edition_id: int = None,
+    paper_id: int = None,
+    status: str = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get partition run history for traceability."""
+    from sqlalchemy import select
+    from .models import PartitionRun, Edition
+
+    query = select(PartitionRun).order_by(PartitionRun.created_at.desc())
+
+    if edition_id:
+        query = query.where(PartitionRun.edition_id == edition_id)
+    if paper_id:
+        # Join to get edition's paper
+        query = query.join(Edition).where(Edition.paper_id == paper_id)
+    if status:
+        query = query.where(PartitionRun.status == status)
+
+    query = query.limit(limit)
+    result = await db.execute(query)
+    runs = result.scalars().all()
+
+    return {
+        "partition_runs": [
+            {
+                "id": r.id,
+                "edition_id": r.edition_id,
+                "job_id": r.job_id,
+                "year": r.year,
+                "depth": r.depth,
+                "status": r.status,
+                "initial_count": r.initial_count,
+                "exclusion_set_count": r.exclusion_set_count,
+                "inclusion_set_count": r.inclusion_set_count,
+                "terms_tried_count": r.terms_tried_count,
+                "terms_kept_count": r.terms_kept_count,
+                "final_exclusion_terms": json.loads(r.final_exclusion_terms) if r.final_exclusion_terms else None,
+                "exclusion_harvested": r.exclusion_harvested,
+                "inclusion_harvested": r.inclusion_harvested,
+                "total_harvested": r.total_harvested,
+                "total_new_unique": r.total_new_unique,
+                "error_message": r.error_message,
+                "error_stage": r.error_stage,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in runs
+        ]
+    }
+
+
+@app.get("/api/admin/partition-runs/{run_id}")
+async def get_partition_run_details(run_id: int, db: AsyncSession = Depends(get_db)):
+    """Get full details of a partition run including terms, queries, and LLM calls."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from .models import PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall
+
+    # Get the run
+    result = await db.execute(select(PartitionRun).where(PartitionRun.id == run_id))
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Partition run not found")
+
+    # Get related records
+    terms_result = await db.execute(
+        select(PartitionTermAttempt)
+        .where(PartitionTermAttempt.partition_run_id == run_id)
+        .order_by(PartitionTermAttempt.order_tried)
+    )
+    terms = terms_result.scalars().all()
+
+    queries_result = await db.execute(
+        select(PartitionQuery)
+        .where(PartitionQuery.partition_run_id == run_id)
+        .order_by(PartitionQuery.started_at)
+    )
+    queries = queries_result.scalars().all()
+
+    llm_calls_result = await db.execute(
+        select(PartitionLLMCall)
+        .where(PartitionLLMCall.partition_run_id == run_id)
+        .order_by(PartitionLLMCall.call_number)
+    )
+    llm_calls = llm_calls_result.scalars().all()
+
+    return {
+        "partition_run": {
+            "id": run.id,
+            "edition_id": run.edition_id,
+            "job_id": run.job_id,
+            "year": run.year,
+            "depth": run.depth,
+            "parent_partition_id": run.parent_partition_id,
+            "base_query": run.base_query,
+            "status": run.status,
+            "initial_count": run.initial_count,
+            "target_threshold": run.target_threshold,
+            "final_exclusion_query": run.final_exclusion_query,
+            "final_inclusion_query": run.final_inclusion_query,
+            "exclusion_set_count": run.exclusion_set_count,
+            "inclusion_set_count": run.inclusion_set_count,
+            "terms_tried_count": run.terms_tried_count,
+            "terms_kept_count": run.terms_kept_count,
+            "final_exclusion_terms": json.loads(run.final_exclusion_terms) if run.final_exclusion_terms else None,
+            "exclusion_harvested": run.exclusion_harvested,
+            "inclusion_harvested": run.inclusion_harvested,
+            "total_harvested": run.total_harvested,
+            "total_new_unique": run.total_new_unique,
+            "error_message": run.error_message,
+            "error_stage": run.error_stage,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "terms_started_at": run.terms_started_at.isoformat() if run.terms_started_at else None,
+            "terms_completed_at": run.terms_completed_at.isoformat() if run.terms_completed_at else None,
+            "exclusion_started_at": run.exclusion_started_at.isoformat() if run.exclusion_started_at else None,
+            "exclusion_completed_at": run.exclusion_completed_at.isoformat() if run.exclusion_completed_at else None,
+            "inclusion_started_at": run.inclusion_started_at.isoformat() if run.inclusion_started_at else None,
+            "inclusion_completed_at": run.inclusion_completed_at.isoformat() if run.inclusion_completed_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        },
+        "term_attempts": [
+            {
+                "id": t.id,
+                "term": t.term,
+                "order_tried": t.order_tried,
+                "source": t.source,
+                "count_before": t.count_before,
+                "count_after": t.count_after,
+                "reduction": t.reduction,
+                "reduction_percent": t.reduction_percent,
+                "kept": t.kept,
+                "skip_reason": t.skip_reason,
+                "latency_ms": t.latency_ms,
+                "tested_at": t.tested_at.isoformat() if t.tested_at else None,
+            }
+            for t in terms
+        ],
+        "queries": [
+            {
+                "id": q.id,
+                "query_type": q.query_type,
+                "scholar_id": q.scholar_id,
+                "year": q.year,
+                "additional_query": q.additional_query,
+                "purpose": q.purpose,
+                "expected_count": q.expected_count,
+                "actual_count": q.actual_count,
+                "pages_requested": q.pages_requested,
+                "pages_succeeded": q.pages_succeeded,
+                "pages_failed": q.pages_failed,
+                "citations_found": q.citations_found,
+                "citations_new": q.citations_new,
+                "status": q.status,
+                "error_message": q.error_message,
+                "started_at": q.started_at.isoformat() if q.started_at else None,
+                "completed_at": q.completed_at.isoformat() if q.completed_at else None,
+                "latency_ms": q.latency_ms,
+            }
+            for q in queries
+        ],
+        "llm_calls": [
+            {
+                "id": c.id,
+                "call_number": c.call_number,
+                "purpose": c.purpose,
+                "model": c.model,
+                "edition_title": c.edition_title,
+                "year": c.year,
+                "current_count": c.current_count,
+                "already_excluded_terms": json.loads(c.already_excluded_terms) if c.already_excluded_terms else None,
+                "parsed_terms": json.loads(c.parsed_terms) if c.parsed_terms else None,
+                "terms_count": c.terms_count,
+                "status": c.status,
+                "error_message": c.error_message,
+                "input_tokens": c.input_tokens,
+                "output_tokens": c.output_tokens,
+                "started_at": c.started_at.isoformat() if c.started_at else None,
+                "completed_at": c.completed_at.isoformat() if c.completed_at else None,
+                "latency_ms": c.latency_ms,
+            }
+            for c in llm_calls
+        ],
+    }

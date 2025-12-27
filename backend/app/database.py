@@ -78,6 +78,16 @@ async def run_migrations():
         #   ) AND scholar_id IS NOT NULL;
         #   CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique
         #     ON citations(paper_id, scholar_id) WHERE scholar_id IS NOT NULL;
+
+        # Partition harvest traceability: new tables created by SQLAlchemy metadata
+        # partition_runs, partition_term_attempts, partition_queries, partition_llm_calls
+        # These track EVERY aspect of overflow year harvesting for complete auditability
+        # Additional indexes for querying partition data
+        "CREATE INDEX IF NOT EXISTS ix_partition_runs_edition_year ON partition_runs(edition_id, year)",
+        "CREATE INDEX IF NOT EXISTS ix_partition_runs_status ON partition_runs(status)",
+        "CREATE INDEX IF NOT EXISTS ix_partition_term_attempts_run ON partition_term_attempts(partition_run_id)",
+        "CREATE INDEX IF NOT EXISTS ix_partition_queries_run ON partition_queries(partition_run_id)",
+        "CREATE INDEX IF NOT EXISTS ix_partition_llm_calls_run ON partition_llm_calls(partition_run_id)",
     ]
 
     async with engine.begin() as conn:
