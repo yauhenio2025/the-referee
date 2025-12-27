@@ -4003,3 +4003,70 @@ async def harvest_specific_years(
         "editions_updated": editions_updated,
         "job_id": job.id
     }
+
+
+# ============== Admin: Citation Deduplication ==============
+
+@app.post("/api/admin/deduplicate-citations")
+async def deduplicate_citations(
+    batch_size: int = 1000,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Remove duplicate citations (same paper_id + scholar_id).
+    Keeps the oldest citation (lowest id) for each unique pair.
+    Runs in batches to avoid long-running transactions.
+    """
+    from sqlalchemy import text
+
+    # Count duplicates first
+    count_result = await db.execute(text("""
+        SELECT COUNT(*) FROM citations c1
+        WHERE scholar_id IS NOT NULL
+        AND EXISTS (
+            SELECT 1 FROM citations c2
+            WHERE c2.paper_id = c1.paper_id
+            AND c2.scholar_id = c1.scholar_id
+            AND c2.id < c1.id
+        )
+    """))
+    total_duplicates = count_result.scalar()
+
+    if total_duplicates == 0:
+        return {"status": "ok", "message": "No duplicates found", "deleted": 0}
+
+    # Delete in batches
+    deleted_total = 0
+    batches = 0
+    max_batches = 100  # Safety limit
+
+    while batches < max_batches:
+        result = await db.execute(text(f"""
+            DELETE FROM citations WHERE id IN (
+                SELECT c1.id FROM citations c1
+                WHERE c1.scholar_id IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM citations c2
+                    WHERE c2.paper_id = c1.paper_id
+                    AND c2.scholar_id = c1.scholar_id
+                    AND c2.id < c1.id
+                )
+                LIMIT {batch_size}
+            )
+        """))
+        deleted = result.rowcount
+        await db.commit()
+
+        if deleted == 0:
+            break
+
+        deleted_total += deleted
+        batches += 1
+
+    return {
+        "status": "ok",
+        "message": f"Deleted {deleted_total} duplicate citations in {batches} batches",
+        "deleted": deleted_total,
+        "batches": batches,
+        "initial_duplicates": total_duplicates
+    }
