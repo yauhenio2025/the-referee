@@ -71,15 +71,12 @@ async def run_migrations():
         # Stall detection: track consecutive zero-progress jobs to stop infinite auto-resume loops
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
         # Citation deduplication: unique constraint to prevent duplicate citations
-        # First, remove duplicates (keep the oldest one for each paper_id + scholar_id)
-        """DELETE FROM citations
-           WHERE id NOT IN (
-               SELECT MIN(id)
-               FROM citations
-               WHERE scholar_id IS NOT NULL
-               GROUP BY paper_id, scholar_id
-           ) AND scholar_id IS NOT NULL""",
-        # Now add the unique constraint
+        # NOTE: The DELETE is skipped during startup (too slow). Run manually if needed:
+        #   DELETE FROM citations WHERE id NOT IN (
+        #     SELECT MIN(id) FROM citations WHERE scholar_id IS NOT NULL
+        #     GROUP BY paper_id, scholar_id
+        #   ) AND scholar_id IS NOT NULL;
+        # The unique constraint will fail if duplicates exist - that's OK, UPSERT logic handles it
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique ON citations(paper_id, scholar_id) WHERE scholar_id IS NOT NULL",
     ]
 
