@@ -4070,3 +4070,81 @@ async def deduplicate_citations(
         "batches": batches,
         "initial_duplicates": total_duplicates
     }
+
+
+@app.post("/api/admin/create-citation-unique-index")
+async def create_citation_unique_index(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create unique index on citations(paper_id, scholar_id).
+    This is required for UPSERT ON CONFLICT logic to work properly.
+    Run this AFTER deduplication is complete.
+    """
+    from sqlalchemy import text
+
+    # Check if index already exists
+    check_result = await db.execute(text("""
+        SELECT 1 FROM pg_indexes
+        WHERE indexname = 'ix_citations_paper_scholar_unique'
+    """))
+    if check_result.scalar():
+        return {"status": "ok", "message": "Index already exists"}
+
+    # Create the unique partial index (only for non-null scholar_ids)
+    # Note: Cannot use CONCURRENTLY inside a transaction, so we use regular CREATE INDEX
+    # This will briefly lock the table but is safe since we've already deduplicated
+    try:
+        await db.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique
+            ON citations(paper_id, scholar_id) WHERE scholar_id IS NOT NULL
+        """))
+        await db.commit()
+        return {"status": "ok", "message": "Unique index created successfully"}
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/admin/refresh-citation-counts")
+async def refresh_citation_counts(
+    paper_id: int = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Refresh cached total_harvested_citations for papers.
+    If paper_id is provided, only refresh that paper.
+    Otherwise refresh all papers.
+    """
+    from sqlalchemy import text
+
+    if paper_id:
+        # Single paper refresh
+        result = await db.execute(text("""
+            UPDATE papers SET total_harvested_citations = (
+                SELECT COUNT(*) FROM citations WHERE paper_id = :paper_id
+            )
+            WHERE id = :paper_id
+            RETURNING id, total_harvested_citations
+        """), {"paper_id": paper_id})
+        row = result.fetchone()
+        await db.commit()
+
+        if row:
+            return {
+                "status": "ok",
+                "paper_id": row[0],
+                "total_harvested_citations": row[1]
+            }
+        return {"status": "error", "message": f"Paper {paper_id} not found"}
+    else:
+        # Refresh all papers
+        result = await db.execute(text("""
+            UPDATE papers p SET total_harvested_citations = (
+                SELECT COUNT(*) FROM citations c WHERE c.paper_id = p.id
+            )
+            RETURNING id
+        """))
+        updated = result.rowcount
+        await db.commit()
+        return {"status": "ok", "message": f"Refreshed citation counts for {updated} papers"}
