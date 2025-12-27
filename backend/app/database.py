@@ -70,7 +70,7 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_papers_deleted ON papers(deleted_at)",
         # Stall detection: track consecutive zero-progress jobs to stop infinite auto-resume loops
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
-        # Citation deduplication: handled by UPSERT logic in job_worker.py
+        # Citation deduplication: handled by UPSERT logic in job_worker.py (v2)
         # Run these manually after clearing duplicates:
         #   DELETE FROM citations WHERE id NOT IN (
         #     SELECT MIN(id) FROM citations WHERE scholar_id IS NOT NULL
