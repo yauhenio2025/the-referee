@@ -461,12 +461,16 @@ class PartitionRun(Base):
         "PartitionLLMCall", back_populates="partition_run", cascade="all, delete-orphan"
     )
     child_partitions: Mapped[List["PartitionRun"]] = relationship(
-        "PartitionRun", back_populates="parent_partition",
-        foreign_keys="PartitionRun.parent_partition_id"
+        "PartitionRun",
+        back_populates="parent_partition",
+        primaryjoin="PartitionRun.parent_partition_id == PartitionRun.id",
+        foreign_keys="[PartitionRun.parent_partition_id]"
     )
     parent_partition: Mapped[Optional["PartitionRun"]] = relationship(
-        "PartitionRun", back_populates="child_partitions",
-        remote_side="PartitionRun.id", foreign_keys="PartitionRun.parent_partition_id"
+        "PartitionRun",
+        back_populates="child_partitions",
+        primaryjoin="PartitionRun.id == foreign(PartitionRun.parent_partition_id)",
+        remote_side="[PartitionRun.id]"
     )
 
     __table_args__ = (
