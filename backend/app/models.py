@@ -473,10 +473,8 @@ class PartitionRun(Base):
         remote_side="[PartitionRun.id]"
     )
 
-    __table_args__ = (
-        Index("ix_partition_runs_edition_year", "edition_id", "year"),
-        Index("ix_partition_runs_status", "status"),
-    )
+    # NOTE: Indexes ix_partition_runs_edition_year and ix_partition_runs_status
+    # already exist in production - don't define in __table_args__
 
 
 class PartitionTermAttempt(Base):
@@ -525,9 +523,7 @@ class PartitionTermAttempt(Base):
         "PartitionRun", back_populates="term_attempts"
     )
 
-    __table_args__ = (
-        Index("ix_partition_term_partition_term", "partition_run_id", "term"),
-    )
+    # NOTE: Index ix_partition_term_partition_term already exists in production
 
 
 class PartitionQuery(Base):
@@ -586,10 +582,8 @@ class PartitionQuery(Base):
         "PartitionRun", back_populates="queries"
     )
 
-    __table_args__ = (
-        Index("ix_partition_queries_type", "query_type"),
-        Index("ix_partition_queries_status", "status"),
-    )
+    # NOTE: Indexes ix_partition_queries_type and ix_partition_queries_status
+    # already exist in production
 
 
 class PartitionLLMCall(Base):
@@ -646,6 +640,4 @@ class PartitionLLMCall(Base):
         "PartitionRun", back_populates="llm_calls"
     )
 
-    __table_args__ = (
-        Index("ix_partition_llm_calls_partition", "partition_run_id"),
-    )
+    # NOTE: Index ix_partition_llm_calls_partition already exists in production
