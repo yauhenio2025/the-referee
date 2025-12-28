@@ -24,6 +24,10 @@ export default function Citations({ paper, onBack }) {
   const [showAllVenues, setShowAllVenues] = useState(false) // Expand venues list
   const [hideReviewed, setHideReviewed] = useState(false) // Hide reviewed/seen citations
   const [showAllEditions, setShowAllEditions] = useState(false) // Expand editions list (Tufte collapse)
+  // Gap analysis state
+  const [gapAnalysis, setGapAnalysis] = useState(null)
+  const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false)
+  const [showGapModal, setShowGapModal] = useState(false)
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -154,6 +158,27 @@ export default function Citations({ paper, onBack }) {
     }
     setPendingCitationSeed(null)
   }, [pendingCitationSeed, createSeedFromCitation])
+
+  // AI Gap Analysis for specific edition
+  const analyzeEditionGaps = useCallback(async (editionId) => {
+    setIsAnalyzingGaps(true)
+    setGapAnalysis(null)
+    try {
+      const result = await api.analyzeHarvestGaps(paper.id, editionId)
+      setGapAnalysis(result)
+      setShowGapModal(true)
+      if (result.gaps?.length > 0) {
+        toast.info(`Found ${result.gaps.length} harvest gaps for this edition`)
+      } else {
+        toast.success('No harvest gaps detected for this edition!')
+      }
+    } catch (error) {
+      console.error('Gap analysis failed:', error)
+      toast.error(`Gap analysis failed: ${error.message}`)
+    } finally {
+      setIsAnalyzingGaps(false)
+    }
+  }, [paper.id, toast])
 
   // Extract unique editions from citations (by edition_id)
   const editionGroups = useMemo(() => {
@@ -323,6 +348,17 @@ export default function Citations({ paper, onBack }) {
             </>
           )}
         </div>
+        {/* Find Gaps button - only shown when specific edition is selected */}
+        {selectedEditionInfo && (
+          <button
+            onClick={() => analyzeEditionGaps(selectedEdition)}
+            disabled={isAnalyzingGaps}
+            className="btn-gap-analysis"
+            title={`Analyze harvest gaps for ${selectedEditionInfo.language} edition`}
+          >
+            {isAnalyzingGaps ? '🔍 Analyzing...' : '🔍 Find Gaps with AI'}
+          </button>
+        )}
       </header>
 
       {isLoading ? (
@@ -631,6 +667,141 @@ export default function Citations({ paper, onBack }) {
         title="Track Citing Paper"
         subtitle="This citing paper is interesting - track its citations as a new seed in:"
       />
+
+      {/* AI Gap Analysis Modal */}
+      {showGapModal && gapAnalysis && (
+        <div className="modal-overlay" onClick={() => setShowGapModal(false)}>
+          <div className="modal gap-analysis-modal" onClick={e => e.stopPropagation()}>
+            <h3>
+              🔍 Gap Analysis: {gapAnalysis.edition_language || 'All'} Edition
+            </h3>
+            {gapAnalysis.edition_title && (
+              <p className="edition-subtitle">{truncate(gapAnalysis.edition_title, 80)}</p>
+            )}
+
+            {/* Summary Stats */}
+            <div className="gap-summary">
+              <div className="gap-stat">
+                <span className="stat-value">{gapAnalysis.total_harvested_citations?.toLocaleString() || 0}</span>
+                <span className="stat-label">Harvested</span>
+              </div>
+              <div className="gap-stat">
+                <span className="stat-value">{gapAnalysis.total_expected_citations?.toLocaleString() || 0}</span>
+                <span className="stat-label">Expected</span>
+              </div>
+              <div className="gap-stat missing">
+                <span className="stat-value">{gapAnalysis.total_missing_citations?.toLocaleString() || 0}</span>
+                <span className="stat-label">Missing</span>
+              </div>
+              <div className="gap-stat">
+                <span className="stat-value">{gapAnalysis.completion_percent?.toFixed(1) || 0}%</span>
+                <span className="stat-label">Complete</span>
+              </div>
+            </div>
+
+            {/* AI Summary */}
+            {gapAnalysis.ai_summary && (
+              <div className="ai-summary">
+                <h4>AI Summary</h4>
+                <p>{gapAnalysis.ai_summary}</p>
+              </div>
+            )}
+
+            {/* AI Recommendations */}
+            {gapAnalysis.ai_recommendations && (
+              <div className="ai-recommendations">
+                <h4>Recommendations</h4>
+                <div className="recommendations-text">{gapAnalysis.ai_recommendations}</div>
+              </div>
+            )}
+
+            {/* Gaps List */}
+            {gapAnalysis.gaps?.length > 0 && (
+              <div className="gaps-list">
+                <h4>Detected Gaps ({gapAnalysis.gaps.length})</h4>
+                <table className="gaps-table">
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>Type</th>
+                      <th>Year</th>
+                      <th>Description</th>
+                      <th>Missing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gapAnalysis.gaps.slice(0, 20).map((gap, i) => (
+                      <tr key={i} className={`severity-${gap.severity}`}>
+                        <td>
+                          <span className={`severity-badge ${gap.severity}`}>
+                            {gap.severity === 'critical' && '🔴'}
+                            {gap.severity === 'high' && '🟠'}
+                            {gap.severity === 'medium' && '🟡'}
+                            {gap.severity === 'low' && '🟢'}
+                          </span>
+                        </td>
+                        <td>{gap.gap_type?.replace('_', ' ')}</td>
+                        <td>{gap.year || '–'}</td>
+                        <td className="gap-desc">{gap.description}</td>
+                        <td>{gap.missing_count > 0 ? gap.missing_count.toLocaleString() : '–'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {gapAnalysis.gaps.length > 20 && (
+                  <p className="more-gaps">...and {gapAnalysis.gaps.length - 20} more gaps</p>
+                )}
+              </div>
+            )}
+
+            {/* No Gaps Message */}
+            {(!gapAnalysis.gaps || gapAnalysis.gaps.length === 0) && (
+              <div className="no-gaps">
+                ✓ No harvest gaps detected for this edition. Citation collection appears complete!
+              </div>
+            )}
+
+            {/* Recommended Fixes */}
+            {gapAnalysis.recommended_fixes?.length > 0 && (
+              <div className="recommended-fixes">
+                <h4>Recommended Actions</h4>
+                <div className="fixes-list">
+                  {gapAnalysis.recommended_fixes.slice(0, 5).map((fix, i) => (
+                    <div key={i} className="fix-item">
+                      <span className="fix-priority">#{fix.priority}</span>
+                      <span className="fix-desc">{fix.description}</span>
+                      {fix.estimated_citations > 0 && (
+                        <span className="fix-estimate">~{fix.estimated_citations.toLocaleString()} citations</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="modal-footer">
+              <button onClick={() => setShowGapModal(false)}>Close</button>
+              {gapAnalysis.gaps?.length > 0 && (
+                <button
+                  onClick={async () => {
+                    setShowGapModal(false)
+                    try {
+                      const result = await api.verifyRepairHarvest(paper.id)
+                      toast.success(`🔧 Repair job queued (#${result.job_id})`)
+                      queryClient.invalidateQueries(['jobs'])
+                    } catch (error) {
+                      toast.error(`Failed to start repair: ${error.message}`)
+                    }
+                  }}
+                  className="btn-primary"
+                >
+                  🔧 Fix All Gaps
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -5093,6 +5093,13 @@ button:disabled {
   overflow-y: auto;
 }
 
+.gap-analysis-modal .edition-subtitle {
+  margin: -0.5rem 0 1rem 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
 .gap-summary {
   display: flex;
   gap: 1rem;

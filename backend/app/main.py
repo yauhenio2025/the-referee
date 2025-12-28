@@ -3170,6 +3170,7 @@ async def trigger_retry_failed_fetches(
 @app.get("/api/papers/{paper_id}/analyze-gaps", response_model=AIGapAnalysisResponse)
 async def analyze_harvest_gaps_with_ai(
     paper_id: int,
+    edition_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Analyze harvest gaps for a paper using AI.
@@ -3179,6 +3180,10 @@ async def analyze_harvest_gaps_with_ai(
     2. Identifies gaps: missing years, incomplete years, failed pages
     3. Uses LLM to generate human-readable analysis and recommendations
     4. Returns actionable fixes with API endpoints to execute them
+
+    Args:
+        paper_id: Paper ID
+        edition_id: Optional - if provided, analyze gaps for this specific edition only
     """
     import anthropic
     import asyncio
@@ -3192,14 +3197,30 @@ async def analyze_harvest_gaps_with_ai(
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    # Get all selected editions
-    editions_result = await db.execute(
-        select(Edition).where(
-            Edition.paper_id == paper_id,
-            Edition.selected == True
+    # Get editions - either specific edition or all selected editions
+    if edition_id:
+        # Analyze specific edition
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper_id,
+                Edition.id == edition_id
+            )
         )
-    )
-    editions = list(editions_result.scalars().all())
+        editions = list(editions_result.scalars().all())
+        if not editions:
+            raise HTTPException(status_code=404, detail=f"Edition {edition_id} not found for paper {paper_id}")
+        analyzing_single_edition = True
+    else:
+        # Analyze all selected editions
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper_id,
+                Edition.selected == True
+            )
+        )
+        editions = list(editions_result.scalars().all())
+        analyzing_single_edition = False
+
     edition_ids = [e.id for e in editions]
     edition_map = {e.id: e for e in editions}
 
@@ -3393,12 +3414,22 @@ async def analyze_harvest_gaps_with_ai(
                 for f in recommended_fixes[:10]  # Limit to top 10 fixes
             ]) or "No fixes needed."
 
-            prompt = f"""Analyze this citation harvest report for the academic paper "{paper.title}" and provide:
+            # Build context header based on single/multiple edition analysis
+            if analyzing_single_edition:
+                edition = editions[0]
+                context_header = f"""Analyze this citation harvest report for the {edition.language or 'Unknown'} edition "{edition.title}" of the academic paper "{paper.title}".
+This is an analysis of ONE SPECIFIC EDITION (not all editions of the work)."""
+            else:
+                context_header = f"""Analyze this citation harvest report for the academic paper "{paper.title}" (across all {len(editions)} selected editions)."""
+
+            prompt = f"""{context_header}
+
+Provide:
 1. A brief summary of the harvest status (2-3 sentences)
 2. Specific recommendations for filling gaps (bullet points)
 
 HARVEST STATUS:
-- Total editions selected: {len(editions)}
+- Editions analyzed: {len(editions)}{f" ({editions[0].language} edition)" if analyzing_single_edition else ""}
 - Total expected citations (from Google Scholar): {total_expected}
 - Total harvested (unique citations in DB): {total_harvested}
 - Missing: {total_missing} ({100 - completion_percent:.1f}% gap)
@@ -3443,21 +3474,30 @@ RECOMMENDATIONS:
         else:
             ai_recommendations = "Harvest appears complete. No action needed."
 
-    return AIGapAnalysisResponse(
-        paper_id=paper_id,
-        paper_title=paper.title,
-        analysis_timestamp=datetime.utcnow(),
-        total_editions=len(editions),
-        selected_editions=len(editions),
-        total_expected_citations=total_expected,
-        total_harvested_citations=total_harvested,
-        total_missing_citations=total_missing,
-        completion_percent=completion_percent,
-        gaps=gaps,
-        recommended_fixes=recommended_fixes,
-        ai_summary=ai_summary,
-        ai_recommendations=ai_recommendations,
-    )
+    # Build response with edition info if analyzing single edition
+    response_kwargs = {
+        "paper_id": paper_id,
+        "paper_title": paper.title,
+        "analysis_timestamp": datetime.utcnow(),
+        "total_editions": len(editions),
+        "selected_editions": len(editions),
+        "total_expected_citations": total_expected,
+        "total_harvested_citations": total_harvested,
+        "total_missing_citations": total_missing,
+        "completion_percent": completion_percent,
+        "gaps": gaps,
+        "recommended_fixes": recommended_fixes,
+        "ai_summary": ai_summary,
+        "ai_recommendations": ai_recommendations,
+    }
+
+    if analyzing_single_edition:
+        edition = editions[0]
+        response_kwargs["edition_id"] = edition.id
+        response_kwargs["edition_title"] = edition.title
+        response_kwargs["edition_language"] = edition.language
+
+    return AIGapAnalysisResponse(**response_kwargs)
 
 
 # ============== Verify and Repair Harvest ==============

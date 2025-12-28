@@ -545,9 +545,11 @@ class RefereeAPI {
    * Analyze harvest gaps for a paper using AI.
    * Returns gaps, recommended fixes, and AI-generated summary.
    * @param {number} paperId - Paper ID
+   * @param {number} editionId - Optional edition ID to analyze gaps for specific edition only
    */
-  async analyzeHarvestGaps(paperId) {
-    return this.request(`/api/papers/${paperId}/analyze-gaps`);
+  async analyzeHarvestGaps(paperId, editionId = null) {
+    const params = editionId ? `?edition_id=${editionId}` : '';
+    return this.request(`/api/papers/${paperId}/analyze-gaps${params}`);
   }
 }
 

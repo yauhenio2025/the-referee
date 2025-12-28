@@ -526,6 +526,10 @@ class AIGapAnalysisResponse(BaseModel):
     paper_id: int
     paper_title: str
     analysis_timestamp: datetime
+    # Edition scope - null means all editions, otherwise specific edition
+    edition_id: Optional[int] = None
+    edition_title: Optional[str] = None
+    edition_language: Optional[str] = None
     # Summary stats
     total_editions: int = 0
     selected_editions: int = 0
