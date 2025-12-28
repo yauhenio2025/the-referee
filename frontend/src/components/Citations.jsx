@@ -305,8 +305,23 @@ export default function Citations({ paper, onBack }) {
       <header className="citations-header">
         <button onClick={onBack} className="btn-text">← Back</button>
         <div className="citations-title">
-          <h2>Citations for: {paper.title}</h2>
-          <span className="meta">{citations?.length || 0} total citations extracted</span>
+          {selectedEditionInfo ? (
+            <>
+              <h2>Citations for: {selectedEditionInfo.title}</h2>
+              <span className="meta edition-specific">
+                {selectedEditionInfo.count.toLocaleString()} citations from {selectedEditionInfo.language} edition
+                <span className="total-context"> (of {citations?.length.toLocaleString() || 0} across all editions)</span>
+              </span>
+            </>
+          ) : (
+            <>
+              <h2>Citations for work: {paper.title}</h2>
+              <span className="meta">
+                {citations?.length.toLocaleString() || 0} citations
+                {editionGroups.length > 1 && ` across all ${editionGroups.length} editions`}
+              </span>
+            </>
+          )}
         </div>
       </header>
 

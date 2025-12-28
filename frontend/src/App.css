@@ -3691,6 +3691,17 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+.citations-title .meta.edition-specific {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.citations-title .meta .total-context {
+  color: var(--text-secondary);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
 /* Citations Search & Facets */
 .citations-search-facets {
   background: var(--bg-card);
