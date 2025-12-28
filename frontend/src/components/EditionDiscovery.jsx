@@ -356,6 +356,7 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [partitionTestProgress, setPartitionTestProgress] = useState(null)
   const [gapAnalysis, setGapAnalysis] = useState(null) // AI Gap Analysis results
   const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false)
+  const [analyzingEditionId, setAnalyzingEditionId] = useState(null) // Track which edition is being analyzed
   const [showGapModal, setShowGapModal] = useState(false)
 
   // Poll for job status updates
@@ -629,15 +630,18 @@ export default function EditionDiscovery({ paper, onBack }) {
   }, [toast])
 
   // AI Gap Analysis - analyze harvest gaps using LLM
-  const analyzeGaps = useCallback(async () => {
+  // If editionId is provided, analyze only that edition; otherwise analyze all selected editions
+  const analyzeGaps = useCallback(async (editionId = null) => {
     setIsAnalyzingGaps(true)
+    setAnalyzingEditionId(editionId)
     setGapAnalysis(null)
     try {
-      const result = await api.analyzeHarvestGaps(paper.id)
+      const result = await api.analyzeHarvestGaps(paper.id, editionId)
       setGapAnalysis(result)
       setShowGapModal(true)
       if (result.gaps?.length > 0) {
-        toast.info(`🔍 Found ${result.gaps.length} harvest gaps`)
+        const editionLabel = result.edition_language ? `${result.edition_language} edition` : 'selected editions'
+        toast.info(`🔍 Found ${result.gaps.length} harvest gaps for ${editionLabel}`)
       } else {
         toast.success('✓ No harvest gaps detected!')
       }
@@ -646,6 +650,7 @@ export default function EditionDiscovery({ paper, onBack }) {
       toast.error(`Gap analysis failed: ${error.message}`)
     } finally {
       setIsAnalyzingGaps(false)
+      setAnalyzingEditionId(null)
     }
   }, [paper.id, toast])
 
@@ -829,12 +834,12 @@ export default function EditionDiscovery({ paper, onBack }) {
         {/* AI Gap Analysis button - show when any edition has been selected */}
         {editions?.length > 0 && (
           <button
-            onClick={analyzeGaps}
+            onClick={() => analyzeGaps(null)}
             disabled={isAnalyzingGaps}
             className="btn-gap-analysis"
-            title="Use AI to analyze harvest completeness and find missing citations"
+            title="Use AI to analyze harvest completeness across ALL selected editions. For single-edition analysis, use 🔍 on each row."
           >
-            {isAnalyzingGaps ? '🔍 Analyzing...' : '🔍 Find Gaps with AI'}
+            {isAnalyzingGaps ? '🔍 Analyzing...' : '🔍 Find All Gaps'}
           </button>
         )}
       </div>
@@ -1019,6 +1024,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
+              onAnalyzeGaps={analyzeGaps}
+              analyzingEditionId={analyzingEditionId}
             />
           )}
 
@@ -1042,6 +1049,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
+              onAnalyzeGaps={analyzeGaps}
+              analyzingEditionId={analyzingEditionId}
             />
           )}
 
@@ -1065,6 +1074,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onExclude={(ids) => excludeEditions.mutate({ ids, excluded: true })}
               onAddAsSeed={handleAddAsSeedWithDossier}
               onSelectAndHarvest={selectAndHarvest}
+              onAnalyzeGaps={analyzeGaps}
+              analyzingEditionId={analyzingEditionId}
             />
           )}
 
@@ -1087,6 +1098,8 @@ export default function EditionDiscovery({ paper, onBack }) {
               onViewCitations={viewCitationsForEdition}
               onInclude={(ids) => excludeEditions.mutate({ ids, excluded: false })}
               isExcludedGroup={true}
+              onAnalyzeGaps={analyzeGaps}
+              analyzingEditionId={analyzingEditionId}
             />
           )}
         </div>
@@ -1253,6 +1266,14 @@ export default function EditionDiscovery({ paper, onBack }) {
         <div className="modal-overlay" onClick={() => setShowGapModal(false)}>
           <div className="modal gap-analysis-modal" onClick={e => e.stopPropagation()}>
             <h3>🔍 Harvest Gap Analysis</h3>
+            {gapAnalysis.edition_id ? (
+              <p className="edition-subtitle">
+                {gapAnalysis.edition_language} edition
+                {gapAnalysis.edition_title && `: ${gapAnalysis.edition_title.substring(0, 60)}...`}
+              </p>
+            ) : (
+              <p className="edition-subtitle">All selected editions combined</p>
+            )}
 
             {/* Summary Stats */}
             <div className="gap-summary">
@@ -1404,7 +1425,9 @@ function EditionGroup({
   onAddAsSeed,
   onInclude,
   onSelectAndHarvest,
-  isExcludedGroup = false
+  isExcludedGroup = false,
+  onAnalyzeGaps,
+  analyzingEditionId
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
@@ -1534,6 +1557,8 @@ function EditionGroup({
                   onAddAsSeed={onAddAsSeed}
                   onInclude={onInclude}
                   isExcludedGroup={isExcludedGroup}
+                  onAnalyzeGaps={onAnalyzeGaps}
+                  isAnalyzingGaps={analyzingEditionId === ed.id}
                 />
               ))}
             </tbody>
@@ -1560,7 +1585,9 @@ function EditionRow({
   onExclude,
   onAddAsSeed,
   onInclude,
-  isExcludedGroup = false
+  isExcludedGroup = false,
+  onAnalyzeGaps,
+  isAnalyzingGaps = false
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
@@ -1647,6 +1674,18 @@ function EditionRow({
             title={isHarvesting ? 'Harvesting...' : `Harvest ${edition.citation_count.toLocaleString()} citations`}
           >
             {isHarvesting ? '⏳' : '📥'}
+          </button>
+        )}
+
+        {/* Find Gaps button - only show if edition has been harvested */}
+        {hasHarvested && onAnalyzeGaps && !isExcludedGroup && (
+          <button
+            className={`btn-icon btn-gaps ${isAnalyzingGaps ? 'analyzing' : ''}`}
+            onClick={() => onAnalyzeGaps(edition.id)}
+            disabled={isAnalyzingGaps}
+            title={isAnalyzingGaps ? 'Analyzing gaps...' : `Find gaps for ${edition.language || 'this'} edition`}
+          >
+            {isAnalyzingGaps ? '⏳' : '🔍'}
           </button>
         )}
 

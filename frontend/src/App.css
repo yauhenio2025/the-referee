@@ -5086,6 +5086,29 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Inline gap analysis button for edition rows */
+.btn-gaps {
+  padding: 2px 6px;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.btn-gaps:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  transform: scale(1.05);
+}
+
+.btn-gaps:disabled,
+.btn-gaps.analyzing {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 /* Gap Analysis Modal */
 .gap-analysis-modal {
   max-width: 700px;
