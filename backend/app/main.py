@@ -3253,10 +3253,19 @@ async def analyze_harvest_gaps_with_ai(
     )
     failed_fetches = list(failed_result.scalars().all())
 
+    # Get ACTUAL harvested citation counts by querying the database
+    # (don't use cached harvested_citation_count which can be stale)
+    citation_counts_result = await db.execute(
+        select(Citation.edition_id, func.count(Citation.id).label('count'))
+        .where(Citation.edition_id.in_(edition_ids))
+        .group_by(Citation.edition_id)
+    )
+    harvested_map = {row.edition_id: row.count for row in citation_counts_result}
+
     # Build analysis data - use edition's current citation_count (from Scholar) as expected
-    # and harvested_citation_count (actual unique citations in DB) as actual
+    # and actual DB citation count as harvested
     total_expected = sum(e.citation_count or 0 for e in editions)
-    total_harvested = sum(e.harvested_citation_count or 0 for e in editions)
+    total_harvested = sum(harvested_map.get(e.id, 0) for e in editions)
     total_missing = total_expected - total_harvested
     completion_percent = (total_harvested / total_expected * 100) if total_expected > 0 else 0
 
