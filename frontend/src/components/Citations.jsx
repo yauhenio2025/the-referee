@@ -23,6 +23,7 @@ export default function Citations({ paper, onBack }) {
   const [showAllAuthors, setShowAllAuthors] = useState(false) // Expand authors list
   const [showAllVenues, setShowAllVenues] = useState(false) // Expand venues list
   const [hideReviewed, setHideReviewed] = useState(false) // Hide reviewed/seen citations
+  const [showAllEditions, setShowAllEditions] = useState(false) // Expand editions list (Tufte collapse)
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -318,32 +319,92 @@ export default function Citations({ paper, onBack }) {
         </div>
       ) : (
         <>
-          {/* Edition Filter */}
+          {/* Edition Filter - Tufte-style ranked bar chart */}
           {editionGroups.length > 0 && (
-            <div className="edition-filter">
-              <span className="label">Filter by Edition:</span>
-              <div className="edition-buttons">
+            <div className="edition-filter-tufte">
+              <div className="edition-filter-header">
+                <span className="label">Filter by Edition:</span>
+                <span className="total-count">{citations.length.toLocaleString()} citations</span>
+              </div>
+
+              <div className="edition-list">
+                {/* All Editions row */}
                 <button
-                  className={`edition-btn ${selectedEdition === null ? 'active' : ''}`}
+                  className={`edition-row ${selectedEdition === null ? 'selected' : ''}`}
                   onClick={() => handleEditionSelect(null)}
                 >
-                  All Editions ({citations.length})
+                  <span className="edition-selector">
+                    <span className={`radio ${selectedEdition === null ? 'checked' : ''}`} />
+                  </span>
+                  <span className="edition-label">
+                    <span className="edition-name">All Editions</span>
+                  </span>
+                  <span className="edition-bar-container">
+                    <span
+                      className="edition-bar edition-bar-total"
+                      style={{ width: '100%' }}
+                    />
+                  </span>
+                  <span className="edition-value">{citations.length.toLocaleString()}</span>
                 </button>
-                {editionGroups.map(edition => (
-                  <button
-                    key={edition.id || 'unknown'}
-                    className={`edition-btn ${selectedEdition === edition.id ? 'active' : ''}`}
-                    onClick={() => handleEditionSelect(edition.id)}
-                    title={edition.title}
-                  >
-                    <span className="edition-flag">{getLangEmoji(edition.language)}</span>
-                    <span className="edition-info">
-                      <span className="edition-lang">{edition.language}</span>
-                      <span className="edition-title">{truncate(edition.title, 40)}</span>
-                    </span>
-                    <span className="edition-count">{edition.count}</span>
-                  </button>
-                ))}
+
+                <div className="edition-divider" />
+
+                {/* Individual editions - sorted by count, collapsible */}
+                {(() => {
+                  const INITIAL_SHOW = 6
+                  const displayEditions = showAllEditions
+                    ? editionGroups
+                    : editionGroups.slice(0, INITIAL_SHOW)
+                  const hiddenCount = editionGroups.length - INITIAL_SHOW
+                  const maxCount = editionGroups[0]?.count || 1
+
+                  return (
+                    <>
+                      {displayEditions.map((edition) => {
+                        const barWidth = (edition.count / maxCount) * 100
+                        const isSelected = selectedEdition === edition.id
+
+                        return (
+                          <button
+                            key={edition.id || 'unknown'}
+                            className={`edition-row ${isSelected ? 'selected' : ''}`}
+                            onClick={() => handleEditionSelect(edition.id)}
+                          >
+                            <span className="edition-selector">
+                              <span className={`radio ${isSelected ? 'checked' : ''}`} />
+                            </span>
+                            <span className="edition-label">
+                              <span className="edition-lang-tag">{edition.language}</span>
+                              <span className="edition-name" title={edition.title}>
+                                {edition.title}
+                              </span>
+                            </span>
+                            <span className="edition-bar-container">
+                              <span
+                                className="edition-bar"
+                                style={{ width: `${barWidth}%` }}
+                              />
+                            </span>
+                            <span className="edition-value">{edition.count.toLocaleString()}</span>
+                          </button>
+                        )
+                      })}
+
+                      {/* Show more/less toggle */}
+                      {hiddenCount > 0 && (
+                        <button
+                          className="edition-show-more"
+                          onClick={() => setShowAllEditions(!showAllEditions)}
+                        >
+                          {showAllEditions
+                            ? '− Show fewer editions'
+                            : `+ ${hiddenCount} more editions`}
+                        </button>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
           )}
