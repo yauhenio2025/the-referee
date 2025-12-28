@@ -5160,7 +5160,7 @@ button:disabled {
 .ai-recommendations {
   margin-bottom: 1.5rem;
   padding: 1rem;
-  background: #f8f9ff;
+  background: var(--bg-secondary);
   border-radius: 8px;
   border-left: 3px solid var(--primary);
 }
@@ -5240,9 +5240,9 @@ button:disabled {
 .no-gaps {
   padding: 2rem;
   text-align: center;
-  background: #f0fdf4;
+  background: var(--bg-secondary);
   border-radius: 8px;
-  color: #22c55e;
+  color: var(--success);
   font-weight: 500;
 }
 
