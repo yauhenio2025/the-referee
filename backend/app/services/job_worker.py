@@ -932,54 +932,64 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             new_count = 0
             skipped_no_id = 0
-            for idx, paper_data in enumerate(papers):
-                if not isinstance(paper_data, dict):
-                    log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
-                    continue
 
-                scholar_id = paper_data.get("scholarId")
-                if not scholar_id:
-                    skipped_no_id += 1
-                    continue
+            try:
+                for idx, paper_data in enumerate(papers):
+                    if not isinstance(paper_data, dict):
+                        log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
+                        continue
 
-                if scholar_id in existing_scholar_ids:
-                    # Already exists in memory - skip
-                    total_updated_citations += 1
-                else:
-                    # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
-                    # even if concurrent jobs have the same citation
-                    from sqlalchemy import text
-                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+                    scholar_id = paper_data.get("scholarId")
+                    if not scholar_id:
+                        skipped_no_id += 1
+                        continue
 
-                    stmt = pg_insert(Citation).values(
-                        paper_id=paper_id,
-                        edition_id=edition.id,
-                        scholar_id=scholar_id,
-                        title=paper_data.get("title", "Unknown"),
-                        authors=paper_data.get("authorsRaw"),
-                        year=paper_data.get("year"),
-                        venue=paper_data.get("venue"),
-                        abstract=paper_data.get("abstract"),
-                        link=paper_data.get("link"),
-                        citation_count=paper_data.get("citationCount", 0),
-                        intersection_count=1,
-                    ).on_conflict_do_nothing(
-                        index_elements=['paper_id', 'scholar_id']
-                    )
-                    result = await db.execute(stmt)
-
-                    # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
-                    if result.rowcount > 0:
-                        new_count += 1
-                        total_new_citations += 1
-                    else:
-                        # Duplicate detected by database - already exists from concurrent job
+                    if scholar_id in existing_scholar_ids:
+                        # Already exists in memory - skip
                         total_updated_citations += 1
+                    else:
+                        # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
+                        # even if concurrent jobs have the same citation
+                        from sqlalchemy import text
+                        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-                    existing_scholar_ids.add(scholar_id)
+                        stmt = pg_insert(Citation).values(
+                            paper_id=paper_id,
+                            edition_id=edition.id,
+                            scholar_id=scholar_id,
+                            title=paper_data.get("title", "Unknown"),
+                            authors=paper_data.get("authorsRaw"),
+                            year=paper_data.get("year"),
+                            venue=paper_data.get("venue"),
+                            abstract=paper_data.get("abstract"),
+                            link=paper_data.get("link"),
+                            citation_count=paper_data.get("citationCount", 0),
+                            intersection_count=1,
+                        ).on_conflict_do_nothing(
+                            index_elements=['paper_id', 'scholar_id']
+                        )
+                        result = await db.execute(stmt)
 
-            # COMMIT IMMEDIATELY after each page
-            await db.commit()
+                        # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
+                        if result.rowcount > 0:
+                            new_count += 1
+                            total_new_citations += 1
+                        else:
+                            # Duplicate detected by database - already exists from concurrent job
+                            total_updated_citations += 1
+
+                        existing_scholar_ids.add(scholar_id)
+
+                # COMMIT IMMEDIATELY after each page
+                await db.commit()
+            except Exception as insert_err:
+                log_now(f"[CALLBACK] ✗ Error inserting citations: {insert_err}")
+                try:
+                    await db.rollback()
+                    log_now(f"[CALLBACK] Rolled back transaction after insert error")
+                except Exception as rollback_err:
+                    log_now(f"[CALLBACK] Failed to rollback: {rollback_err}")
+                raise  # Re-raise to be handled by caller
             log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
             # Update job progress with current state for resume
@@ -1457,6 +1467,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[EDITION {i+1}] Error message: {e}")
             log_now(f"[EDITION {i+1}] Traceback: {traceback.format_exc()}")
             log_now(f"[EDITION {i+1}] Continuing with next edition. {total_new_citations} citations saved so far.")
+
+            # CRITICAL: Rollback any aborted transaction before attempting recovery operations
+            try:
+                await db.rollback()
+                log_now(f"[EDITION {i+1}] Rolled back transaction to recover session state")
+            except Exception as rollback_err:
+                log_now(f"[EDITION {i+1}] Rollback failed: {rollback_err}")
+
             # Still update harvest stats for partial progress - citations already saved to DB
             try:
                 await update_edition_harvest_stats(db, edition.id)
