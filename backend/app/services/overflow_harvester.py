@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 GOOGLE_SCHOLAR_LIMIT = 1000
-TARGET_THRESHOLD = 950  # Aim to get below this to have safety margin
+TARGET_THRESHOLD = 850  # Aim to get well below limit - Google Scholar counts fluctuate wildly!
 MAX_RECURSION_DEPTH = 3
 MAX_TERM_ATTEMPTS = 200  # Safety limit - keep trying until below 1000
 MAX_CONSECUTIVE_ZERO_REDUCTIONS = 15  # Give up if 15 terms in a row have 0 reduction
@@ -129,30 +129,32 @@ async def suggest_exclusion_terms_llm(
     already_excluded = already_excluded or []
     excluded_str = ", ".join([f'"{t}"' for t in already_excluded]) if already_excluded else "none yet"
 
-    prompt = f"""You are helping harvest academic citations from Google Scholar. We have a paper with {current_count} citations in year {year}, exceeding the 1000 result limit. We need to partition the results by excluding common title terms.
+    prompt = f"""You are helping harvest academic citations from Google Scholar. We have a paper with {current_count} citations in year {year}, exceeding the 1000 result limit. We need to QUICKLY reduce the count below 1000 by excluding common title terms.
 
 SEED PAPER: "{edition_title}"
 YEAR: {year}
 CURRENT RESULT COUNT: {current_count}
+TARGET: Get below 1000 as FAST as possible
 TERMS ALREADY EXCLUDED: {excluded_str}
 
-YOUR TASK: Suggest 15-20 single-word terms that are likely to appear frequently in titles of papers citing this work. These should be:
+YOUR TASK: Suggest 25-30 HIGH-FREQUENCY single-word terms. PRIORITIZE terms that will exclude the MOST papers per term. Think about:
 
-1. Common academic/domain terms related to the paper's topic
-2. Generic scholarly terms (like "analysis", "theory", "study")
-3. Key concepts from the paper's domain
+1. EXTREMELY common academic words that appear in almost every paper title (the, of, and, in, for, on, to, with, from, by, an, as - NO, these are too short. Think: study, analysis, research, review, case, approach, perspective, between, through, toward, understanding, examining, exploring, impact, effect, role, development, practice, process, system, using, based, new, modern, contemporary)
 
-We will use these as -intitle:"term" exclusions to reduce the result count below 1000.
+2. Domain-specific BROAD terms from this paper's field that will match MANY papers (for postmodernism/cultural theory: cultural, culture, social, political, economic, theory, critical, modern, contemporary, media, identity, global, discourse, power, narrative, space, history, art, literature, film, urban, aesthetic)
+
+3. AVOID overly specific/niche terms that only match a few papers
+
+GOAL: Each term should ideally exclude 50+ papers. We need to get from {current_count} to below 1000.
 
 IMPORTANT:
 - Return ONLY single words (no phrases)
-- Return terms that are NOT already excluded
-- Order by expected frequency (most common first)
-- Include both domain-specific and generic academic terms
-- Be creative - think about what words commonly appear in academic paper titles
+- Return terms NOT already excluded
+- Order by EXPECTED IMPACT (highest reduction first)
+- Include generic academic terms that appear in MANY titles
 
 OUTPUT FORMAT: Return a JSON array of strings, nothing else.
-Example: ["corporate", "governance", "firm", "organization", "management", "theory", "analysis", "study", "business", "market", "social", "political", "cultural", "economic", "power"]
+Example: ["cultural", "social", "political", "theory", "critical", "modern", "contemporary", "analysis", "study", "identity", "media", "global", "discourse", "power", "narrative", "space", "history", "practice", "development", "economic", "urban", "art", "literature", "perspective", "approach"]
 
 Return ONLY the JSON array:"""
 
@@ -534,7 +536,7 @@ async def find_exclusion_set(
     # CRITICAL: Keep trying until we're below the HARD LIMIT (1000), not the ideal target (950)
     # The target threshold is a safety margin, but if we can't reach it, being below 1000 is still OK
     # Only stop if: (1) we succeed (<1000), (2) LLM gives no terms, or (3) truly stuck
-    while current_count >= GOOGLE_SCHOLAR_LIMIT and term_order < MAX_TERM_ATTEMPTS:
+    while current_count >= TARGET_THRESHOLD and term_order < MAX_TERM_ATTEMPTS:
         # Check if we're stuck (too many consecutive terms with no reduction)
         if consecutive_zero_reductions >= MAX_CONSECUTIVE_ZERO_REDUCTIONS:
             log_now(f"STUCK: {MAX_CONSECUTIVE_ZERO_REDUCTIONS} consecutive terms with 0 reduction. Requesting fresh batch from LLM...")
@@ -592,8 +594,8 @@ async def find_exclusion_set(
         await asyncio.sleep(1)
 
     # Log final status
-    if current_count < GOOGLE_SCHOLAR_LIMIT:
-        log_now(f"SUCCESS: Achieved harvestable count: {current_count} < {GOOGLE_SCHOLAR_LIMIT} after {term_order} attempts")
+    if current_count < TARGET_THRESHOLD:
+        log_now(f"SUCCESS: Achieved harvestable count: {current_count} < {TARGET_THRESHOLD} (target) after {term_order} attempts")
 
     # Update partition run with term discovery results
     partition_run.terms_tried_count = term_order
@@ -603,12 +605,12 @@ async def find_exclusion_set(
     partition_run.exclusion_set_count = current_count
     partition_run.terms_completed_at = datetime.utcnow()
 
-    success = current_count < GOOGLE_SCHOLAR_LIMIT
+    success = current_count < TARGET_THRESHOLD
     if success:
         partition_run.status = "terms_found"
     else:
         partition_run.status = "terms_failed"
-        partition_run.error_message = f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}. Final count: {current_count}"
+        partition_run.error_message = f"Could not reduce count below {TARGET_THRESHOLD}. Final count: {current_count}"
 
     await db.flush()
 
@@ -746,17 +748,17 @@ async def harvest_partition(
         return stats
 
     if not terms_success:
-        log_now(f"{indent}FAILED: Could not reduce below {GOOGLE_SCHOLAR_LIMIT}, final count: {exclusion_count}", "error")
-        stats["error"] = f"Term discovery failed. Count still at {exclusion_count}. Cannot proceed with harvest until below {GOOGLE_SCHOLAR_LIMIT}."
+        log_now(f"{indent}FAILED: Could not reduce below {TARGET_THRESHOLD}, final count: {exclusion_count}", "error")
+        stats["error"] = f"Term discovery failed. Count still at {exclusion_count}. Cannot proceed with harvest until below {TARGET_THRESHOLD}."
 
         # CRITICAL: Do NOT proceed with harvest until we're below 1000
         # Proceeding with partial harvest defeats the entire purpose of the partition strategy
         await update_partition_status(db, partition_run, "failed",
-            error_message=f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}. Final count: {exclusion_count}. Need more effective exclusion terms.",
+            error_message=f"Could not reduce count below {TARGET_THRESHOLD}. Final count: {exclusion_count}. Need more effective exclusion terms.",
             error_stage="term_discovery")
         await db.commit()  # Commit the failed status
 
-        log_now(f"{indent}Harvest BLOCKED - must find terms to reduce below {GOOGLE_SCHOLAR_LIMIT} before scraping", "error")
+        log_now(f"{indent}Harvest BLOCKED - must find terms to reduce below {TARGET_THRESHOLD} before scraping", "error")
         return stats
 
     exclusion_query = partition_run.final_exclusion_query
@@ -765,6 +767,26 @@ async def harvest_partition(
 
     log_now(f"{indent}Exclusion set: {len(excluded_terms)} terms, {exclusion_count} results")
     log_now(f"{indent}Terms: {excluded_terms}")
+
+    # VERIFICATION: Re-check count before harvesting (Google Scholar counts fluctuate!)
+    log_now(f"{indent}Verifying exclusion count before harvest...")
+    verify_result = await scholar_service.get_cited_by(
+        scholar_id=scholar_id,
+        max_results=10,
+        year_low=year,
+        year_high=year,
+        additional_query=exclusion_query,
+    )
+    verified_count = verify_result.get('totalResults', 0)
+
+    if verified_count != exclusion_count:
+        log_now(f"{indent}WARNING: Count changed! Was {exclusion_count}, now {verified_count}", "warn")
+        exclusion_count = verified_count
+        partition_run.exclusion_set_count = verified_count
+
+    if verified_count >= GOOGLE_SCHOLAR_LIMIT:
+        log_now(f"{indent}ERROR: Verified count {verified_count} >= {GOOGLE_SCHOLAR_LIMIT}! Google Scholar lied to us.", "error")
+        log_now(f"{indent}Will harvest what we can (max 1000), but coverage will be incomplete.", "warn")
 
     # Step 2: Harvest the EXCLUSION set (items WITHOUT those terms)
     log_now(f"{indent}Step 2: Harvesting exclusion set ({exclusion_count} items)...")

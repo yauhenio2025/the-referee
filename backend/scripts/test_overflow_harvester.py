@@ -13,13 +13,14 @@ What it does:
 2. Gets edition details for the specified paper
 3. Calls the REAL harvest_partition() function from overflow_harvester.py
 4. Everything gets saved to the DB (PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall)
-5. Logs EVERYTHING to stdout so you can see exactly what's happening
+5. Logs EVERYTHING to stdout AND a log file for post-mortem analysis
 """
 
 import argparse
 import asyncio
 import os
 import sys
+import logging
 from datetime import datetime
 from typing import Set, Dict, Any, List
 
@@ -33,6 +34,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError
+
+# Global log file handle
+LOG_FILE = None
 
 # Import the REAL overflow harvester
 from app.services.overflow_harvester import (
@@ -45,9 +50,14 @@ from app.models import Citation, Edition, Paper
 
 
 def log(msg: str, level: str = "INFO"):
-    """Log with timestamp - flushes immediately"""
-    ts = datetime.utcnow().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{ts}] [{level:5}] {msg}", flush=True)
+    """Log with timestamp - writes to stdout AND log file"""
+    global LOG_FILE
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    line = f"[{ts}] [{level:5}] {msg}"
+    print(line, flush=True)
+    if LOG_FILE:
+        LOG_FILE.write(line + "\n")
+        LOG_FILE.flush()
 
 
 async def get_edition_for_paper(db: AsyncSession, paper_id: int) -> Dict[str, Any]:
@@ -99,7 +109,7 @@ async def get_year_count(scholar: ScholarSearchService, scholar_id: str, year: i
     return result.get('totalResults', 0)
 
 
-async def run_test(paper_id: int, year: int, dry_run: bool = False):
+async def run_test(paper_id: int, year: int, dry_run: bool = False, log_file_path: str = None):
     """
     Run the REAL overflow harvester test.
 
@@ -107,7 +117,27 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
         paper_id: The paper ID to test (e.g., 71 for Jameson's Postmodernism)
         year: The year to harvest (e.g., 2014)
         dry_run: If True, only check counts but don't actually harvest
+        log_file_path: Path to write detailed log file
     """
+    global LOG_FILE
+
+    # Setup file logging
+    if log_file_path:
+        LOG_FILE = open(log_file_path, 'w')
+        log(f"LOG FILE: {log_file_path}")
+
+    # Also capture ALL Python logging to our log file
+    if LOG_FILE:
+        class LogFileHandler(logging.Handler):
+            def emit(self, record):
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                line = f"[{ts}] [{record.levelname:5}] [{record.name}] {record.getMessage()}"
+                LOG_FILE.write(line + "\n")
+                LOG_FILE.flush()
+
+        root_logger = logging.getLogger()
+        root_logger.addHandler(LogFileHandler())
+
     log("=" * 80)
     log(f"OVERFLOW HARVESTER TEST - Paper ID: {paper_id}, Year: {year}")
     log(f"Dry run: {dry_run}")
@@ -191,15 +221,15 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
             async def on_page_complete(page_num: int, papers: List[Dict]):
                 """Callback for each page of results"""
                 new_count = 0
+                skipped_duplicates = 0
+                committed_count = 0
+
                 for p in papers:
                     pid = p.get("scholarId") or p.get("id")
                     if pid and pid not in existing_ids:
                         existing_ids.add(pid)
-                        citations_collected.append(p)
-                        new_count += 1
 
                         # Save to database
-                        # Note: authors comes as a list from scholar, convert to string
                         authors_raw = p.get("authors")
                         if isinstance(authors_raw, list):
                             authors_str = ", ".join(authors_raw)
@@ -207,7 +237,7 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
                             authors_str = authors_raw
 
                         citation = Citation(
-                            paper_id=paper_id,  # REQUIRED field!
+                            paper_id=paper_id,
                             edition_id=edition_id,
                             scholar_id=pid,
                             title=p.get("title"),
@@ -217,12 +247,20 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
                             citation_count=p.get("citationCount"),
                             link=p.get("link"),
                         )
-                        db.add(citation)
 
-                if new_count > 0:
-                    await db.flush()
+                        try:
+                            db.add(citation)
+                            await db.commit()
+                            citations_collected.append(p)
+                            new_count += 1
+                            committed_count += 1
+                        except IntegrityError:
+                            await db.rollback()
+                            skipped_duplicates += 1
+                            log(f"    DUPLICATE: {pid[:20]}... already in DB", "WARN")
 
-                log(f"  Page {page_num + 1}: {len(papers)} papers, {new_count} new (total collected: {len(citations_collected)})")
+                # Log with explicit commit confirmation
+                log(f"  Page {page_num + 1}: {len(papers)} papers | {committed_count} COMMITTED to DB | {skipped_duplicates} duplicates | Total in DB: {len(citations_collected)}")
 
             # Call the REAL function
             result = await harvest_partition(
@@ -273,6 +311,13 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
 
     await engine.dispose()
 
+    # Close log file
+    if LOG_FILE:
+        log("=" * 80)
+        log("LOG FILE COMPLETE")
+        log("=" * 80)
+        LOG_FILE.close()
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -283,8 +328,8 @@ Examples:
   # Dry run - just check counts
   python scripts/test_overflow_harvester.py --paper-id 71 --year 2014
 
-  # Actually run the harvest
-  python scripts/test_overflow_harvester.py --paper-id 71 --year 2014 --run
+  # Actually run the harvest with logging
+  python scripts/test_overflow_harvester.py --paper-id 71 --year 2014 --run --log harvest.log
 
   # Test a different year
   python scripts/test_overflow_harvester.py --paper-id 71 --year 2013 --run
@@ -296,12 +341,21 @@ Examples:
                         help="Year to harvest (e.g., 2014)")
     parser.add_argument("--run", action="store_true",
                         help="Actually run the harvest (default is dry-run)")
+    parser.add_argument("--log", type=str, default=None,
+                        help="Log file path for detailed output (e.g., harvest.log)")
 
     args = parser.parse_args()
 
     dry_run = not args.run
 
-    asyncio.run(run_test(args.paper_id, args.year, dry_run=dry_run))
+    # Auto-generate log file name if --run but no --log specified
+    log_file = args.log
+    if args.run and not log_file:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f"harvest_p{args.paper_id}_y{args.year}_{timestamp}.log"
+        print(f"Auto-logging to: {log_file}")
+
+    asyncio.run(run_test(args.paper_id, args.year, dry_run=dry_run, log_file_path=log_file))
 
 
 if __name__ == "__main__":
