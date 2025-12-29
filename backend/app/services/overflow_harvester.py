@@ -531,9 +531,10 @@ async def find_exclusion_set(
 
     term_index = 0
 
-    # CRITICAL: Keep trying until we're below target, not until MAX_TERM_ATTEMPTS
-    # Only stop if: (1) we succeed, (2) LLM gives no terms, or (3) stuck with consecutive 0-reduction terms
-    while current_count >= TARGET_THRESHOLD and term_order < MAX_TERM_ATTEMPTS:
+    # CRITICAL: Keep trying until we're below the HARD LIMIT (1000), not the ideal target (950)
+    # The target threshold is a safety margin, but if we can't reach it, being below 1000 is still OK
+    # Only stop if: (1) we succeed (<1000), (2) LLM gives no terms, or (3) truly stuck
+    while current_count >= GOOGLE_SCHOLAR_LIMIT and term_order < MAX_TERM_ATTEMPTS:
         # Check if we're stuck (too many consecutive terms with no reduction)
         if consecutive_zero_reductions >= MAX_CONSECUTIVE_ZERO_REDUCTIONS:
             log_now(f"STUCK: {MAX_CONSECUTIVE_ZERO_REDUCTIONS} consecutive terms with 0 reduction. Requesting fresh batch from LLM...")
@@ -591,8 +592,8 @@ async def find_exclusion_set(
         await asyncio.sleep(1)
 
     # Log final status
-    if current_count < TARGET_THRESHOLD:
-        log_now(f"SUCCESS: Achieved target: {current_count} < {TARGET_THRESHOLD} after {term_order} attempts")
+    if current_count < GOOGLE_SCHOLAR_LIMIT:
+        log_now(f"SUCCESS: Achieved harvestable count: {current_count} < {GOOGLE_SCHOLAR_LIMIT} after {term_order} attempts")
 
     # Update partition run with term discovery results
     partition_run.terms_tried_count = term_order
