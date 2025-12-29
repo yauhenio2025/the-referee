@@ -109,6 +109,8 @@ async def get_year_count(scholar: ScholarSearchService, scholar_id: str, year: i
     return result.get('totalResults', 0)
 
 
+import json as json_module
+
 async def run_test(paper_id: int, year: int, dry_run: bool = False, log_file_path: str = None):
     """
     Run the REAL overflow harvester test.
@@ -150,8 +152,24 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False, log_file_pat
 
     log(f"Database: {db_url[:50]}...")
 
-    # Create async engine and session
-    engine = create_async_engine(db_url, echo=False)
+    # Create async engine with connection pool settings for long-running operations
+    engine = create_async_engine(
+        db_url,
+        echo=False,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,  # Recycle connections every 30 min
+        pool_pre_ping=True,  # Test connections before using
+        connect_args={
+            "server_settings": {
+                "tcp_keepalives_idle": "60",
+                "tcp_keepalives_interval": "10",
+                "tcp_keepalives_count": "5",
+            },
+            "command_timeout": 300,  # 5 min timeout for commands
+        }
+    )
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as db:
@@ -217,50 +235,83 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False, log_file_pat
             log("")
 
             citations_collected = []
+            all_papers_json = []  # Save ALL papers to JSON backup
+
+            # JSON backup file
+            json_backup_path = f"papers_p{paper_id}_y{year}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            log(f"JSON BACKUP: {json_backup_path}")
+
+            def save_json_backup():
+                """Save all papers to JSON file"""
+                with open(json_backup_path, 'w') as f:
+                    json_module.dump({
+                        "paper_id": paper_id,
+                        "edition_id": edition_id,
+                        "year": year,
+                        "total_papers": len(all_papers_json),
+                        "papers": all_papers_json
+                    }, f, indent=2)
 
             async def on_page_complete(page_num: int, papers: List[Dict]):
                 """Callback for each page of results"""
+                nonlocal all_papers_json
                 new_count = 0
                 skipped_duplicates = 0
                 committed_count = 0
+                skipped_no_id = 0
+                skipped_already_seen = 0
+
+                # ALWAYS save ALL papers to JSON backup first
+                for p in papers:
+                    all_papers_json.append(p)
+
+                # Save JSON every page (in case of crash)
+                save_json_backup()
 
                 for p in papers:
                     pid = p.get("scholarId") or p.get("id")
-                    if pid and pid not in existing_ids:
-                        existing_ids.add(pid)
+                    if not pid:
+                        skipped_no_id += 1
+                        log(f"    NO ID: title={p.get('title', '???')[:40]}", "WARN")
+                        continue
+                    if pid in existing_ids:
+                        skipped_already_seen += 1
+                        continue
+                    # New paper - save it
+                    existing_ids.add(pid)
 
-                        # Save to database
-                        authors_raw = p.get("authors")
-                        if isinstance(authors_raw, list):
-                            authors_str = ", ".join(authors_raw)
-                        else:
-                            authors_str = authors_raw
+                    # Save to database
+                    authors_raw = p.get("authors")
+                    if isinstance(authors_raw, list):
+                        authors_str = ", ".join(authors_raw)
+                    else:
+                        authors_str = authors_raw
 
-                        citation = Citation(
-                            paper_id=paper_id,
-                            edition_id=edition_id,
-                            scholar_id=pid,
-                            title=p.get("title"),
-                            authors=authors_str,
-                            year=p.get("year") or year,
-                            venue=p.get("venue"),
-                            citation_count=p.get("citationCount"),
-                            link=p.get("link"),
-                        )
+                    citation = Citation(
+                        paper_id=paper_id,
+                        edition_id=edition_id,
+                        scholar_id=pid,
+                        title=p.get("title"),
+                        authors=authors_str,
+                        year=p.get("year") or year,
+                        venue=p.get("venue"),
+                        citation_count=p.get("citationCount"),
+                        link=p.get("link"),
+                    )
 
-                        try:
-                            db.add(citation)
-                            await db.commit()
-                            citations_collected.append(p)
-                            new_count += 1
-                            committed_count += 1
-                        except IntegrityError:
-                            await db.rollback()
-                            skipped_duplicates += 1
-                            log(f"    DUPLICATE: {pid[:20]}... already in DB", "WARN")
+                    try:
+                        db.add(citation)
+                        await db.commit()
+                        citations_collected.append(p)
+                        new_count += 1
+                        committed_count += 1
+                    except IntegrityError:
+                        await db.rollback()
+                        skipped_duplicates += 1
+                        log(f"    DUPLICATE: {pid[:20]}... already in DB", "WARN")
 
                 # Log with explicit commit confirmation
-                log(f"  Page {page_num + 1}: {len(papers)} papers | {committed_count} COMMITTED to DB | {skipped_duplicates} duplicates | Total in DB: {len(citations_collected)}")
+                log(f"  Page {page_num + 1}: {len(papers)} papers | {committed_count} COMMITTED | {skipped_already_seen} already seen | {skipped_no_id} no ID | Total new: {len(citations_collected)}")
 
             # Call the REAL function
             result = await harvest_partition(
@@ -305,6 +356,9 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False, log_file_pat
             log("  - Citations: The actual papers we harvested")
             log("")
             log("You can inspect these in the database to see exactly what happened.")
+            log("")
+            log(f"JSON BACKUP SAVED: {json_backup_path}")
+            log(f"Total papers in JSON: {len(all_papers_json)}")
 
         finally:
             await scholar.close()

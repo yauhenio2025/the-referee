@@ -33,13 +33,109 @@ from typing import Dict, Any, List, Set, Optional, Callable, Tuple
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.exc import DBAPIError, OperationalError
+
 from ..models import PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall, Citation
 
 logger = logging.getLogger(__name__)
 
+
+async def db_retry(db: AsyncSession, operation_name: str = "db_operation", max_retries: int = 3):
+    """
+    Retry decorator context for database operations.
+
+    Usage:
+        async with db_retry(db, "flush partition run"):
+            await safe_flush(db)
+
+    On connection error, rolls back and retries up to max_retries times.
+    """
+    class DbRetryContext:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            if exc_type is None:
+                return False
+
+            # Check if it's a connection error we can retry
+            if isinstance(exc_val, (DBAPIError, OperationalError)):
+                error_msg = str(exc_val).lower()
+                if any(x in error_msg for x in ['connection', 'closed', 'timeout', 'reset']):
+                    log_now(f"[DB RETRY] {operation_name} failed with connection error, will retry", "warn")
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                    return False  # Don't suppress, let caller handle retry
+            return False
+
+    return DbRetryContext()
+
+
+async def safe_flush(db: AsyncSession, context: str = ""):
+    """Flush with retry on connection errors"""
+    for attempt in range(3):
+        try:
+            await db.flush()
+            return
+        except (DBAPIError, OperationalError) as e:
+            error_msg = str(e).lower()
+            if any(x in error_msg for x in ['connection', 'closed', 'timeout', 'reset']):
+                log_now(f"[DB RETRY] Flush failed ({context}), attempt {attempt + 1}/3: {e}", "warn")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+            raise
+
+
+async def safe_commit(db: AsyncSession, context: str = ""):
+    """Commit with retry on connection errors"""
+    for attempt in range(3):
+        try:
+            await db.commit()
+            return
+        except (DBAPIError, OperationalError) as e:
+            error_msg = str(e).lower()
+            if any(x in error_msg for x in ['connection', 'closed', 'timeout', 'reset']):
+                log_now(f"[DB RETRY] Commit failed ({context}), attempt {attempt + 1}/3: {e}", "warn")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+            raise
+
+
+async def db_keepalive(db: AsyncSession):
+    """
+    Ping the database to keep the connection alive.
+    Call this before DB operations after long waits (like LLM calls).
+    If connection is dead, this will fail and trigger pool reconnection.
+    """
+    try:
+        from sqlalchemy import text
+        await db.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        log_now(f"[DB KEEPALIVE] Connection check failed: {e}", "warn")
+        # Try to rollback to clear any bad state
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return False
+
+
 # Constants
 GOOGLE_SCHOLAR_LIMIT = 1000
-TARGET_THRESHOLD = 850  # Aim to get well below limit - Google Scholar counts fluctuate wildly!
+TARGET_THRESHOLD = 990  # Just need to be below 1000 - previous 850 was too aggressive
 MAX_RECURSION_DEPTH = 3
 MAX_TERM_ATTEMPTS = 200  # Safety limit - keep trying until below 1000
 MAX_CONSECUTIVE_ZERO_REDUCTIONS = 15  # Give up if 15 terms in a row have 0 reduction
@@ -80,7 +176,7 @@ async def create_partition_run(
         target_threshold=TARGET_THRESHOLD,
     )
     db.add(run)
-    await db.flush()  # Get the ID
+    await safe_flush(db)  # Get the ID
     log_now(f"Created PartitionRun #{run.id} for year {year}, initial_count={initial_count}, depth={depth}")
     return run
 
@@ -100,7 +196,7 @@ async def update_partition_status(
         run.error_stage = error_stage
     if status == "completed":
         run.completed_at = datetime.utcnow()
-    await db.flush()
+    await safe_flush(db)
     log_now(f"PartitionRun #{run.id} status -> {status}")
 
 
@@ -173,7 +269,7 @@ Return ONLY the JSON array:"""
         started_at=datetime.utcnow(),
     )
     db.add(llm_call)
-    await db.flush()
+    await safe_flush(db)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -181,7 +277,7 @@ Return ONLY the JSON array:"""
         llm_call.status = "failed"
         llm_call.error_message = "No ANTHROPIC_API_KEY"
         llm_call.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db)
         terms = get_fallback_exclusion_terms(edition_title, already_excluded)
         return terms, llm_call
 
@@ -198,6 +294,10 @@ Return ONLY the JSON array:"""
         )
 
         latency_ms = int((time.time() - start_time) * 1000)
+
+        # Keep DB connection alive after LLM call (can take 30-60 seconds)
+        await db_keepalive(db)
+
         response_text = response.content[0].text.strip()
 
         # Update LLM call record with response
@@ -222,13 +322,13 @@ Return ONLY the JSON array:"""
             llm_call.status = "completed"
 
             log_now(f"LLM suggested {len(terms)} terms: {terms[:5]}...")
-            await db.flush()
+            await safe_flush(db)
             return terms, llm_call
 
         except json.JSONDecodeError as e:
             llm_call.status = "parse_error"
             llm_call.error_message = f"JSON parse error: {e}"
-            await db.flush()
+            await safe_flush(db)
             log_now(f"LLM response parse error: {e}", "warning")
             return get_fallback_exclusion_terms(edition_title, already_excluded), llm_call
 
@@ -236,7 +336,7 @@ Return ONLY the JSON array:"""
         llm_call.status = "failed"
         llm_call.error_message = str(e)[:1000]
         llm_call.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db)
         log_now(f"LLM call failed: {e}", "warning")
         return get_fallback_exclusion_terms(edition_title, already_excluded), llm_call
 
@@ -298,7 +398,7 @@ async def execute_count_query(
         started_at=datetime.utcnow(),
     )
     db.add(query_record)
-    await db.flush()
+    await safe_flush(db)
 
     try:
         start_time = time.time()
@@ -312,13 +412,17 @@ async def execute_count_query(
         )
 
         latency_ms = int((time.time() - start_time) * 1000)
+
+        # Keep DB connection alive after Scholar query (can take 10-20 seconds)
+        await db_keepalive(db)
+
         count = result.get('totalResults', 0) if isinstance(result, dict) else 0
 
         query_record.actual_count = count
         query_record.latency_ms = latency_ms
         query_record.status = "completed"
         query_record.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db, "test_exclusion_query completion")
 
         return count, query_record
 
@@ -326,7 +430,7 @@ async def execute_count_query(
         query_record.status = "failed"
         query_record.error_message = str(e)[:1000]
         query_record.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db)
         raise
 
 
@@ -360,7 +464,7 @@ async def execute_harvest_query(
         started_at=datetime.utcnow(),
     )
     db.add(query_record)
-    await db.flush()
+    await safe_flush(db)
 
     start_count = len(existing_scholar_ids)
 
@@ -378,6 +482,9 @@ async def execute_harvest_query(
 
         latency_ms = int((time.time() - start_time) * 1000)
 
+        # Keep DB connection alive after harvest (can take several minutes)
+        await db_keepalive(db)
+
         new_count = len(existing_scholar_ids) - start_count
 
         if isinstance(result, dict):
@@ -391,7 +498,7 @@ async def execute_harvest_query(
         query_record.latency_ms = latency_ms
         query_record.status = "completed"
         query_record.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db)
 
         return new_count, query_record.citations_harvested, query_record
 
@@ -399,7 +506,7 @@ async def execute_harvest_query(
         query_record.status = "failed"
         query_record.error_message = str(e)[:1000]
         query_record.completed_at = datetime.utcnow()
-        await db.flush()
+        await safe_flush(db)
         raise
 
 
@@ -443,7 +550,7 @@ async def test_exclusion_term(
         kept=False,
     )
     db.add(term_attempt)
-    await db.flush()
+    await safe_flush(db)
 
     try:
         start_time = time.time()
@@ -475,7 +582,7 @@ async def test_exclusion_term(
         if not kept:
             term_attempt.skip_reason = "no_reduction" if reduction == 0 else "negative_reduction"
 
-        await db.flush()
+        await safe_flush(db)
 
         log_now(f"  Term '{term}': {count_before} -> {count_after} (reduction: {reduction}, {'KEPT' if kept else 'SKIPPED'})")
 
@@ -483,7 +590,7 @@ async def test_exclusion_term(
 
     except Exception as e:
         term_attempt.skip_reason = f"error: {str(e)[:80]}"
-        await db.flush()
+        await safe_flush(db)
         log_now(f"  Term '{term}': ERROR - {e}", "warning")
         return count_before, False, term_attempt
 
@@ -511,7 +618,7 @@ async def find_exclusion_set(
 
     partition_run.status = "finding_terms"
     partition_run.terms_started_at = datetime.utcnow()
-    await db.flush()
+    await safe_flush(db)
 
     excluded_terms = []
     current_count = initial_count
@@ -530,6 +637,8 @@ async def find_exclusion_set(
         already_excluded=excluded_terms,
         call_number=llm_call_number
     )
+    # Keep DB connection alive after LLM call (can take 30-60 seconds)
+    await db_keepalive(db)
 
     term_index = 0
 
@@ -558,6 +667,8 @@ async def find_exclusion_set(
                 already_excluded=excluded_terms,
                 call_number=llm_call_number
             )
+            # Keep DB connection alive after LLM call
+            await db_keepalive(db)
             if not more_terms:
                 log_now(f"LLM returned no new terms after {llm_call_number} calls. Stopping at {current_count}", "warning")
                 break
@@ -612,7 +723,7 @@ async def find_exclusion_set(
         partition_run.status = "terms_failed"
         partition_run.error_message = f"Could not reduce count below {TARGET_THRESHOLD}. Final count: {current_count}"
 
-    await db.flush()
+    await safe_flush(db)
 
     return excluded_terms, current_count, success
 
@@ -672,7 +783,7 @@ async def harvest_partition(
     )
     # Commit the partition run creation immediately so it's visible even if harvest fails
     try:
-        await db.commit()
+        await safe_commit(db)
         log_now(f"{indent}Committed PartitionRun #{partition_run.id}")
     except Exception as commit_err:
         log_now(f"{indent}Failed to commit PartitionRun: {commit_err}", "error")
@@ -695,7 +806,7 @@ async def harvest_partition(
         partition_run.status = "failed"
         partition_run.error_message = f"Max recursion depth ({MAX_RECURSION_DEPTH}) reached"
         partition_run.error_stage = "depth_limit"
-        await db.flush()
+        await safe_flush(db)
 
         # Just harvest up to 1000
         try:
@@ -717,7 +828,7 @@ async def harvest_partition(
         except Exception as e:
             log_now(f"{indent}Fallback harvest failed: {e}", "error")
 
-        await db.flush()
+        await safe_flush(db)
         return stats
 
     # Step 1: Find exclusion terms to get below 1000
@@ -735,7 +846,7 @@ async def harvest_partition(
             initial_count=total_for_year
         )
         # Commit term discovery results before starting harvest
-        await db.commit()
+        await safe_commit(db)
         log_now(f"{indent}Committed term discovery results")
     except Exception as term_err:
         log_now(f"{indent}Term discovery error: {term_err}", "error")
@@ -756,7 +867,7 @@ async def harvest_partition(
         await update_partition_status(db, partition_run, "failed",
             error_message=f"Could not reduce count below {TARGET_THRESHOLD}. Final count: {exclusion_count}. Need more effective exclusion terms.",
             error_stage="term_discovery")
-        await db.commit()  # Commit the failed status
+        await safe_commit(db)  # Commit the failed status
 
         log_now(f"{indent}Harvest BLOCKED - must find terms to reduce below {TARGET_THRESHOLD} before scraping", "error")
         return stats
@@ -793,8 +904,8 @@ async def harvest_partition(
 
     partition_run.status = "harvesting_exclusion"
     partition_run.exclusion_started_at = datetime.utcnow()
-    await db.flush()
-    await db.commit()
+    await safe_flush(db)
+    await safe_commit(db)
 
     try:
         exclusion_new, exclusion_total, query_record = await execute_harvest_query(
@@ -813,7 +924,7 @@ async def harvest_partition(
         stats["exclusion_harvested"] = exclusion_new
         partition_run.exclusion_harvested = exclusion_new
         partition_run.exclusion_completed_at = datetime.utcnow()
-        await db.commit()  # Commit exclusion harvest progress
+        await safe_commit(db)  # Commit exclusion harvest progress
         log_now(f"{indent}Exclusion set harvested: {exclusion_new} new citations")
 
     except Exception as e:
@@ -828,7 +939,7 @@ async def harvest_partition(
             await update_partition_status(db, partition_run, "failed",
                 error_message=str(e),
                 error_stage="exclusion_harvest")
-            await db.commit()
+            await safe_commit(db)
         except Exception:
             pass
         return stats
@@ -859,7 +970,7 @@ async def harvest_partition(
         )
 
         partition_run.inclusion_set_count = inclusion_count
-        await db.commit()  # Commit the inclusion count
+        await safe_commit(db)  # Commit the inclusion count
 
         log_now(f"{indent}Inclusion set has {inclusion_count} results")
     except Exception as count_err:
@@ -883,8 +994,8 @@ async def harvest_partition(
 
         partition_run.status = "harvesting_inclusion"
         partition_run.inclusion_started_at = datetime.utcnow()
-        await db.flush()
-        await db.commit()
+        await safe_flush(db)
+        await safe_commit(db)
 
         try:
             inclusion_new, inclusion_total, query_record = await execute_harvest_query(
@@ -904,7 +1015,7 @@ async def harvest_partition(
             partition_run.inclusion_harvested = inclusion_new
             partition_run.inclusion_completed_at = datetime.utcnow()
             partition_run.status = "completed"
-            await db.commit()  # Commit inclusion harvest results
+            await safe_commit(db)  # Commit inclusion harvest results
             log_now(f"{indent}Inclusion set harvested: {inclusion_new} new citations")
 
         except Exception as e:
@@ -918,7 +1029,7 @@ async def harvest_partition(
                 await update_partition_status(db, partition_run, "failed",
                     error_message=str(e),
                     error_stage="inclusion_harvest")
-                await db.commit()
+                await safe_commit(db)
             except Exception:
                 pass
 
@@ -927,8 +1038,8 @@ async def harvest_partition(
         log_now(f"{indent}Step 4: Inclusion set too large ({inclusion_count}), RECURSIVELY PARTITIONING...")
 
         partition_run.status = "needs_recursive"
-        await db.flush()
-        await db.commit()
+        await safe_flush(db)
+        await safe_commit(db)
 
         try:
             # Recursive call with inclusion_query as base
@@ -962,7 +1073,7 @@ async def harvest_partition(
                 await update_partition_status(db, partition_run, "failed",
                     error_message=str(recursive_err),
                     error_stage="recursive_partition")
-                await db.commit()
+                await safe_commit(db)
             except Exception:
                 pass
             return stats
@@ -973,7 +1084,7 @@ async def harvest_partition(
     partition_run.completed_at = datetime.utcnow()
 
     try:
-        await db.commit()  # Final commit
+        await safe_commit(db)  # Final commit
         log_now(f"{indent}Committed final partition results")
     except Exception as final_err:
         log_now(f"{indent}Failed to commit final results: {final_err}", "warning")

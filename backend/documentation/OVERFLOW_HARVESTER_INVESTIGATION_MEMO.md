@@ -379,3 +379,33 @@ Most of the "instability" was actually a **parsing bug** in our code:
 - Goal should be "harvest as many as possible" not "harvest exactly N"
 - Accept some gap is inevitable, but 20% gap is too high
 - Current best result: 1397 unique citations for 2014 (76% of initial count)
+
+## Connection Stability Fixes (2025-12-29 evening)
+
+### Problem
+Run #18 failed with `connection was closed in the middle of operation` error.
+Render Postgres closes idle connections after ~5 minutes.
+During LLM calls (30-60 seconds each), the DB connection sits idle and gets killed.
+
+### Solution Applied
+
+1. **Added `db_keepalive()` function** in `overflow_harvester.py`:
+   - Executes `SELECT 1` to ping the database
+   - Called after every long-running operation
+   - Prevents connection timeout during idle waits
+
+2. **Added keepalive calls after**:
+   - Every LLM call (inside `suggest_exclusion_terms_llm`)
+   - Every Scholar query (inside `execute_count_query`)
+   - Every harvest operation (inside `execute_harvest_query`)
+   - After returning from `suggest_exclusion_terms_llm` in the main loop
+
+3. **Already had** (from earlier):
+   - `safe_flush()` and `safe_commit()` with retry logic
+   - Connection pool settings with TCP keepalive in test script
+
+### Test Command
+```bash
+cd /home/evgeny/projects/referee/the-referee/backend
+python scripts/test_overflow_harvester.py --paper-id 71 --year 2014 --run
+```
