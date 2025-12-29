@@ -207,6 +207,7 @@ async def run_test(paper_id: int, year: int, dry_run: bool = False):
                             authors_str = authors_raw
 
                         citation = Citation(
+                            paper_id=paper_id,  # REQUIRED field!
                             edition_id=edition_id,
                             scholar_id=pid,
                             title=p.get("title"),
