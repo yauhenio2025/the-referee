@@ -883,8 +883,8 @@ class ScholarSearchService:
         """Extract total result count from Scholar HTML"""
         # Patterns for different languages
         patterns = [
-            r"About\s+([\d,\.]+)\s+results?",
-            r"([\d,\.]+)\s+results?\s*\(",
+            r"About\s+([\d,\.\s]+)\s+results?",  # Added \s to capture space-separated thousands
+            r"([\d,\.\s]+)\s+results?\s*\(",
             r"Environ\s+([\d\s]+)\s+résultats?",  # French
             r"Aproximadamente\s+([\d,\.]+)\s+resultados?",  # Spanish
             r"Ungefähr\s+([\d,\.]+)\s+Ergebnisse?",  # German
@@ -893,14 +893,24 @@ class ScholarSearchService:
         for pattern in patterns:
             match = re.search(pattern, html, re.IGNORECASE)
             if match:
+                raw_match = match.group(1)
                 # Clean number - remove commas, dots, spaces
-                clean_num = re.sub(r"[,\.\s]", "", match.group(1))
+                clean_num = re.sub(r"[,\.\s]", "", raw_match)
                 try:
                     count = int(clean_num)
                     if count > 0:
+                        # Log for debugging parsing issues (catches truncation bugs)
+                        log_now(f"[COUNT PARSE] raw='{raw_match}' -> clean='{clean_num}' -> {count}")
                         return count
                 except ValueError:
+                    log_now(f"[COUNT PARSE ERROR] raw='{raw_match}' -> clean='{clean_num}' FAILED")
                     continue
+
+        # Log when no count found - helps debug HTML format changes
+        # Look for any "results" text to see what format Scholar is using
+        results_context = re.search(r'.{0,30}results.{0,30}', html, re.IGNORECASE)
+        if results_context:
+            log_now(f"[COUNT PARSE] No match found. Context: '{results_context.group(0)}'")
 
         return None
 

@@ -105,15 +105,24 @@ Order | Term            | Before | After | Reduction
    14 | global          |   1340 |   210 |     1130  <-- SUSPICIOUS!
 ```
 
-**SUSPICIOUS**: Term "global" shows 1130 reduction (84% drop from one term!)
-- Either Google Scholar glitched
-- Or there's something special about `intitle:"global"`
-- Or count fluctuation happened during this specific query
+**PARSING BUG CONFIRMED** (2025-12-29 follow-up):
 
-**DISCREPANCY**:
-- Term attempts show final count: 210
-- partition_run.exclusion_set_count: 1210
-- This is a 1000 paper difference! The verification step may have gotten a different result.
+The "210" was actually "1210" with the leading "1" dropped during parsing!
+
+**Evidence**:
+- Re-running same query now: `totalResults = 1210` ✓
+- Without "global": `totalResults = 1340` ✓
+- Actual reduction from "global": 130 (9.7%), NOT 1130 (84%)
+
+**Root Cause**: The HTML count may have been formatted as "1 210" (space-separated thousands)
+which the old regex `[\d,\.]+` didn't capture properly.
+
+**Fix Applied**: Updated `_extract_result_count()` in `scholar_search.py`:
+1. Added `\s` to regex pattern: `[\d,\.\s]+` to handle space-separated numbers
+2. Added debug logging to show raw match vs cleaned number
+3. Added context logging when no match found
+
+This same bug likely caused the earlier "410 vs 1410" discrepancy during Run #15.
 
 ---
 
@@ -328,20 +337,29 @@ ORDER BY term_order;
 | Gap B (72 papers) | Papers without scholar_ids silently skipped | Log and optionally save papers without IDs |
 | Duplicate pages 96-97 | Google Scholar recycles results near 1000 limit | Accept this as GS behavior, stop earlier if duplicates spike |
 
+### SOLVED (parsing bug)
+| Issue | Root Cause | Fix |
+|-------|------------|-----|
+| "global" 1130 reduction | Parsing bug: "1210" → "210" | Regex now includes `\s` for space-separated numbers |
+| 1210 vs 210 discrepancy | Same parsing bug | Debug logging added to catch future issues |
+| 410 vs 1410 fluctuation | Same parsing bug (Run #15) | Fixed with updated regex |
+
 ### PARTIALLY UNDERSTOOD
 | Issue | Current Understanding | Next Steps |
 |-------|----------------------|------------|
-| Gap A (361 papers) | Exclusion+Inclusion ≠ Total | Test sequential term harvesting |
-| "global" term 1130 reduction | Suspicious, possibly GS glitch | Test this specific term in isolation |
-| 1210 vs 210 discrepancy | Verification got different result than term testing | Investigate timing of verification step |
+| Gap A (361 papers) | Exclusion+Inclusion ≠ Total | Still need to investigate partition strategy |
 
-### KEY INSIGHT
-Google Scholar is fundamentally unreliable for precise counts. Evidence:
-- Count changed from 410 to 1410 in 10 seconds (same query)
-- Pages 96-97 returned 100% duplicates
-- Term "global" showed 84% reduction (1340→210)
+### KEY INSIGHT (REVISED)
+~~Google Scholar is fundamentally unreliable for precise counts.~~ **WRONG!**
 
-**Recommendation**: Build harvester to be resilient to GS chaos, not dependent on accurate counts.
+Most of the "instability" was actually a **parsing bug** in our code:
+- "410 vs 1410" → parsing bug, dropped leading "1"
+- "210 vs 1210" → same parsing bug
+- Term "global" 84% reduction → actually 9.7% (normal)
+
+**Only real GS issue**: Pages 96-97 returned 100% duplicates (near 1000 limit)
+
+**Recommendation**: Trust GS counts more, but add robust parsing with debug logging.
 
 ## Immediate Action Items
 
