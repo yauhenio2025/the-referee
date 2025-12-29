@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 GOOGLE_SCHOLAR_LIMIT = 1000
 TARGET_THRESHOLD = 950  # Aim to get below this to have safety margin
 MAX_RECURSION_DEPTH = 3
-MAX_TERM_ATTEMPTS = 30  # Max terms to try before giving up
+MAX_TERM_ATTEMPTS = 200  # Safety limit - keep trying until below 1000
+MAX_CONSECUTIVE_ZERO_REDUCTIONS = 15  # Give up if 15 terms in a row have 0 reduction
 LLM_MODEL = "claude-sonnet-4-5-20250929"
 
 
@@ -514,6 +515,7 @@ async def find_exclusion_set(
     current_count = initial_count
     term_order = 0
     llm_call_number = 0
+    consecutive_zero_reductions = 0  # Track when we're stuck
 
     # Get initial term suggestions from LLM
     llm_call_number += 1
@@ -529,15 +531,20 @@ async def find_exclusion_set(
 
     term_index = 0
 
-    for iteration in range(MAX_TERM_ATTEMPTS):
-        if current_count < TARGET_THRESHOLD:
-            log_now(f"SUCCESS: Achieved target: {current_count} < {TARGET_THRESHOLD}")
-            break
+    # CRITICAL: Keep trying until we're below target, not until MAX_TERM_ATTEMPTS
+    # Only stop if: (1) we succeed, (2) LLM gives no terms, or (3) stuck with consecutive 0-reduction terms
+    while current_count >= TARGET_THRESHOLD and term_order < MAX_TERM_ATTEMPTS:
+        # Check if we're stuck (too many consecutive terms with no reduction)
+        if consecutive_zero_reductions >= MAX_CONSECUTIVE_ZERO_REDUCTIONS:
+            log_now(f"STUCK: {MAX_CONSECUTIVE_ZERO_REDUCTIONS} consecutive terms with 0 reduction. Requesting fresh batch from LLM...")
+            consecutive_zero_reductions = 0  # Reset and try a fresh batch
+            # Clear remaining suggested terms to force new LLM call
+            suggested_terms = suggested_terms[:term_index]  # Keep only already-tried terms
 
         # Get next term to try
         if term_index >= len(suggested_terms):
             # Need more terms from LLM
-            log_now(f"Requesting more terms from LLM (iteration {iteration})...")
+            log_now(f"Requesting more terms from LLM (attempt {term_order + 1}, count={current_count})...")
             llm_call_number += 1
             more_terms, llm_call = await suggest_exclusion_terms_llm(
                 db=db,
@@ -549,9 +556,10 @@ async def find_exclusion_set(
                 call_number=llm_call_number
             )
             if not more_terms:
-                log_now(f"No more terms available, stopping at {current_count}")
+                log_now(f"LLM returned no new terms after {llm_call_number} calls. Stopping at {current_count}", "warning")
                 break
             suggested_terms.extend(more_terms)
+            log_now(f"LLM provided {len(more_terms)} new terms to try")
 
         next_term = suggested_terms[term_index]
         term_index += 1
@@ -575,9 +583,16 @@ async def find_exclusion_set(
         if kept:
             excluded_terms.append(next_term)
             current_count = new_count
+            consecutive_zero_reductions = 0  # Reset - we made progress
+        else:
+            consecutive_zero_reductions += 1
 
         # Rate limit
         await asyncio.sleep(1)
+
+    # Log final status
+    if current_count < TARGET_THRESHOLD:
+        log_now(f"SUCCESS: Achieved target: {current_count} < {TARGET_THRESHOLD} after {term_order} attempts")
 
     # Update partition run with term discovery results
     partition_run.terms_tried_count = term_order
@@ -731,16 +746,17 @@ async def harvest_partition(
 
     if not terms_success:
         log_now(f"{indent}FAILED: Could not reduce below {GOOGLE_SCHOLAR_LIMIT}, final count: {exclusion_count}", "error")
-        stats["error"] = f"Term discovery failed. Count still at {exclusion_count}"
-        # We still try to harvest the exclusion set we have
-        if exclusion_count < 2000:  # Don't completely give up
-            log_now(f"{indent}Attempting partial harvest anyway...")
-        else:
-            await update_partition_status(db, partition_run, "failed",
-                error_message=f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}",
-                error_stage="term_discovery")
-            await db.commit()  # Commit the failed status
-            return stats
+        stats["error"] = f"Term discovery failed. Count still at {exclusion_count}. Cannot proceed with harvest until below {GOOGLE_SCHOLAR_LIMIT}."
+
+        # CRITICAL: Do NOT proceed with harvest until we're below 1000
+        # Proceeding with partial harvest defeats the entire purpose of the partition strategy
+        await update_partition_status(db, partition_run, "failed",
+            error_message=f"Could not reduce count below {GOOGLE_SCHOLAR_LIMIT}. Final count: {exclusion_count}. Need more effective exclusion terms.",
+            error_stage="term_discovery")
+        await db.commit()  # Commit the failed status
+
+        log_now(f"{indent}Harvest BLOCKED - must find terms to reduce below {GOOGLE_SCHOLAR_LIMIT} before scraping", "error")
+        return stats
 
     exclusion_query = partition_run.final_exclusion_query
     if base_query:
