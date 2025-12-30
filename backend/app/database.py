@@ -1,18 +1,26 @@
 """
 Database connection and session management
 """
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 from .config import get_settings
 from .models import Base
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Create async engine
+# Create async engine with connection timeout
+# command_timeout: max time for a query (in seconds)
+# timeout: connection timeout (in seconds)
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     poolclass=NullPool,  # Better for serverless/Render
+    connect_args={
+        "command_timeout": 30,  # 30 second query timeout
+        "timeout": 15,  # 15 second connection timeout
+    },
 )
 
 # Session factory
@@ -25,11 +33,21 @@ async_session = async_sessionmaker(
 
 async def init_db():
     """Initialize database tables"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    logger.info("init_db: Starting database initialization...")
+    try:
+        logger.info("init_db: Connecting to database...")
+        async with engine.begin() as conn:
+            logger.info("init_db: Connected! Creating tables...")
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("init_db: Tables created successfully")
+    except Exception as e:
+        logger.error(f"init_db: Database connection failed: {e}")
+        raise
 
     # Run migrations for new columns
+    logger.info("init_db: Running migrations...")
     await run_migrations()
+    logger.info("init_db: Database initialization complete!")
 
 
 async def run_migrations():
