@@ -141,6 +141,29 @@ MAX_TERM_ATTEMPTS = 200  # Safety limit - keep trying until below 1000
 MAX_CONSECUTIVE_ZERO_REDUCTIONS = 15  # Give up if 15 terms in a row have 0 reduction
 LLM_MODEL = "claude-sonnet-4-5-20250929"
 
+# Language filter constants for stratified harvesting
+# Non-English: Chinese (Simplified & Traditional), Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Spanish, Turkish
+# NOTE: Oxylabs cannot handle pipe-separated multi-language filters - they cause ReadTimeout
+# So we harvest each language SEPARATELY with individual requests
+NON_ENGLISH_LANGUAGE_LIST = [
+    "lang_zh-CN",  # Chinese Simplified
+    "lang_zh-TW",  # Chinese Traditional
+    "lang_ja",     # Japanese
+    "lang_ko",     # Korean
+    "lang_de",     # German
+    "lang_fr",     # French
+    "lang_es",     # Spanish
+    "lang_pt",     # Portuguese
+    "lang_it",     # Italian
+    "lang_nl",     # Dutch
+    "lang_pl",     # Polish
+    "lang_tr",     # Turkish
+]
+ENGLISH_ONLY = "lang_en"
+
+# Legacy constant for backwards compatibility (but don't use with Oxylabs!)
+NON_ENGLISH_LANGUAGES = "|".join(NON_ENGLISH_LANGUAGE_LIST)
+
 
 def log_now(msg: str, level: str = "info"):
     """Log message and immediately flush to stdout"""
@@ -379,7 +402,8 @@ async def execute_count_query(
     year: int,
     query_suffix: str,
     query_type: str,
-    purpose: str
+    purpose: str,
+    language_filter: Optional[str] = None
 ) -> Tuple[int, PartitionQuery]:
     """
     Execute a count query and log it to PartitionQuery.
@@ -409,6 +433,7 @@ async def execute_count_query(
             year_low=year,
             year_high=year,
             additional_query=query_suffix if query_suffix else None,
+            language_filter=language_filter,
         )
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -445,7 +470,8 @@ async def execute_harvest_query(
     purpose: str,
     existing_scholar_ids: Set[str],
     on_page_complete: Callable,
-    max_results: int = GOOGLE_SCHOLAR_LIMIT
+    max_results: int = GOOGLE_SCHOLAR_LIMIT,
+    language_filter: Optional[str] = None
 ) -> Tuple[int, int, PartitionQuery]:
     """
     Execute a harvest query and log it to PartitionQuery.
@@ -478,6 +504,7 @@ async def execute_harvest_query(
             year_high=year,
             additional_query=query_suffix if query_suffix else None,
             on_page_complete=on_page_complete,
+            language_filter=language_filter,
         )
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -524,7 +551,8 @@ async def test_exclusion_term(
     count_before: int,
     order_tried: int,
     source: str,
-    llm_call_id: Optional[int] = None
+    llm_call_id: Optional[int] = None,
+    language_filter: Optional[str] = None
 ) -> Tuple[int, bool, PartitionTermAttempt]:
     """
     Test adding a term to the exclusion list.
@@ -563,7 +591,8 @@ async def test_exclusion_term(
             year=year,
             query_suffix=test_query,
             query_type="term_test",
-            purpose=f"Testing exclusion of '{term}'"
+            purpose=f"Testing exclusion of '{term}'",
+            language_filter=language_filter,
         )
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -605,10 +634,14 @@ async def find_exclusion_set(
     scholar_id: str,
     year: int,
     edition_title: str,
-    initial_count: int
+    initial_count: int,
+    language_filter: Optional[str] = None
 ) -> Tuple[List[str], int, bool]:
     """
     Find a set of exclusion terms that brings the result count below TARGET_THRESHOLD.
+
+    IMPORTANT: When used for stratified harvesting, pass language_filter=ENGLISH_ONLY
+    to ensure term testing happens within the English subset, not all languages.
 
     CRITICAL: This function will NOT return success=True unless we actually get below threshold.
 
@@ -691,7 +724,8 @@ async def find_exclusion_set(
             count_before=current_count,
             order_tried=term_order,
             source="llm" if llm_call else "fallback",
-            llm_call_id=llm_call.id if llm_call else None
+            llm_call_id=llm_call.id if llm_call else None,
+            language_filter=language_filter,
         )
 
         if kept:
@@ -1101,6 +1135,300 @@ async def harvest_partition(
     return stats
 
 
+async def harvest_with_language_stratification(
+    db: AsyncSession,
+    scholar_service,
+    edition_id: int,
+    scholar_id: str,
+    year: int,
+    edition_title: str,
+    paper_id: int,
+    existing_scholar_ids: Set[str],
+    on_page_complete: Callable,
+    total_for_year: int,
+    job_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    STRATIFIED HARVESTING: First harvest non-English papers, then handle English.
+
+    This approach reduces the need for aggressive exclusion terms by first
+    carving out a predictable subset (non-English papers).
+
+    Strategy:
+    1. Check non-English count and harvest if < 1000
+    2. Check English-only count
+    3. If English < 1000: harvest directly
+    4. If English >= 1000: use exclusion term strategy (but needs fewer terms now)
+
+    Returns stats dict with harvest results.
+    """
+    log_now(f"╔{'═'*60}╗")
+    log_now(f"║  STRATIFIED LANGUAGE HARVEST - Year {year}")
+    log_now(f"║  Total for year: {total_for_year}")
+    log_now(f"╚{'═'*60}╝")
+
+    stats = {
+        "year": year,
+        "total_reported": total_for_year,
+        "non_english_harvested": 0,
+        "english_harvested": 0,
+        "total_new": 0,
+        "strategy_used": "stratified_language",
+        "success": False
+    }
+
+    # Create partition run for tracking
+    partition_run = await create_partition_run(
+        db=db,
+        edition_id=edition_id,
+        job_id=job_id,
+        year=year,
+        initial_count=total_for_year,
+        parent_partition_id=None,
+        base_query=None,
+        depth=0
+    )
+    await safe_commit(db)
+
+    # ========== STEP 1: Harvest NON-ENGLISH papers (per-language) ==========
+    # NOTE: Oxylabs cannot handle pipe-separated multi-language filters
+    # So we harvest each language SEPARATELY with individual requests
+    log_now(f"Step 1: Harvesting non-English papers ({len(NON_ENGLISH_LANGUAGE_LIST)} languages)...")
+
+    partition_run.status = "harvesting_non_english"
+    await safe_flush(db)
+
+    total_non_english_new = 0
+
+    for lang_code in NON_ENGLISH_LANGUAGE_LIST:
+        try:
+            # First check count for this language
+            lang_result = await scholar_service.get_cited_by(
+                scholar_id=scholar_id,
+                max_results=10,  # Just first page for count
+                year_low=year,
+                year_high=year,
+                language_filter=lang_code,
+            )
+            lang_count = lang_result.get('totalResults', 0)
+
+            if lang_count == 0:
+                log_now(f"  {lang_code}: 0 papers (skipping)")
+                continue
+
+            if lang_count >= GOOGLE_SCHOLAR_LIMIT:
+                log_now(f"  {lang_code}: {lang_count} papers (>= 1000, would need partition)", "warn")
+                # For now just harvest first 1000 - could add recursion later
+                lang_count = GOOGLE_SCHOLAR_LIMIT
+
+            log_now(f"  {lang_code}: {lang_count} papers - harvesting...")
+
+            lang_new, lang_total, _ = await execute_harvest_query(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                year=year,
+                query_suffix=None,
+                query_type="non_english_harvest",
+                purpose=f"Harvest {lang_code} papers ({lang_count})",
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                language_filter=lang_code,
+            )
+
+            total_non_english_new += lang_new
+            log_now(f"  {lang_code}: +{lang_new} new papers (total non-English: {total_non_english_new})")
+
+            # Rate limit between languages
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            log_now(f"  {lang_code}: ERROR - {e}", "error")
+            # Continue with next language
+            await asyncio.sleep(3)
+
+    stats["non_english_harvested"] = total_non_english_new
+    log_now(f"✓ Total non-English harvested: {total_non_english_new} new papers")
+    await safe_commit(db)
+
+    # Rate limit before English phase
+    await asyncio.sleep(3)
+
+    # ========== STEP 2: Check ENGLISH-ONLY count ==========
+    log_now(f"Step 2: Checking English-only papers...")
+
+    try:
+        english_result = await scholar_service.get_cited_by(
+            scholar_id=scholar_id,
+            max_results=10,  # Just first page for count
+            year_low=year,
+            year_high=year,
+            language_filter=ENGLISH_ONLY,
+        )
+        english_count = english_result.get('totalResults', 0)
+        log_now(f"English-only papers: {english_count}")
+
+        # ========== STEP 3: Handle English papers ==========
+        if english_count == 0:
+            log_now(f"No English papers found - done!")
+            partition_run.status = "completed"
+            stats["success"] = True
+
+        elif english_count < GOOGLE_SCHOLAR_LIMIT:
+            # Can harvest English directly!
+            log_now(f"Step 3a: English count ({english_count}) < 1000 - harvesting directly!")
+
+            partition_run.status = "harvesting_english"
+            await safe_flush(db)
+
+            english_new, english_total, _ = await execute_harvest_query(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                year=year,
+                query_suffix=None,
+                query_type="english_harvest",
+                purpose=f"Harvest English papers ({english_count})",
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                language_filter=ENGLISH_ONLY,
+            )
+
+            stats["english_harvested"] = english_new
+            partition_run.status = "completed"
+            stats["success"] = True
+            log_now(f"✓ Harvested {english_new} new English papers")
+
+        else:
+            # English still >= 1000, need exclusion term strategy
+            log_now(f"Step 3b: English count ({english_count}) >= 1000 - using exclusion term strategy")
+            stats["strategy_used"] = "stratified_language_plus_exclusion"
+
+            # Update partition run for exclusion-based harvesting on English subset
+            partition_run.status = "finding_terms"
+            partition_run.base_query = f"lr={ENGLISH_ONLY}"  # Document that we're working on English subset
+            await safe_flush(db)
+
+            # Find exclusion terms to reduce English count below 1000
+            excluded_terms, exclusion_count, terms_success = await find_exclusion_set(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                year=year,
+                edition_title=edition_title,
+                initial_count=english_count,  # Start from English count, not total
+                language_filter=ENGLISH_ONLY,  # CRITICAL: Test terms within English subset only!
+            )
+            await safe_commit(db)
+
+            if not terms_success:
+                log_now(f"FAILED: Could not reduce English count below {TARGET_THRESHOLD}", "error")
+                partition_run.status = "failed"
+                partition_run.error_message = f"Could not reduce English count. Final: {exclusion_count}"
+                await safe_commit(db)
+                stats["error"] = f"Term discovery failed for English subset"
+                return stats
+
+            # Build exclusion query for English subset
+            exclusion_query = partition_run.final_exclusion_query
+
+            # Harvest EXCLUSION set (English papers WITHOUT those terms)
+            log_now(f"Harvesting English exclusion set ({exclusion_count} papers)...")
+
+            partition_run.status = "harvesting_exclusion"
+            await safe_flush(db)
+
+            exclusion_new, _, _ = await execute_harvest_query(
+                db=db,
+                partition_run=partition_run,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                year=year,
+                query_suffix=exclusion_query,
+                query_type="english_exclusion_harvest",
+                purpose=f"Harvest English exclusion set ({len(excluded_terms)} terms)",
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                language_filter=ENGLISH_ONLY,
+            )
+
+            stats["english_harvested"] += exclusion_new
+            log_now(f"✓ Harvested {exclusion_new} new English papers (exclusion set)")
+            await safe_commit(db)
+
+            await asyncio.sleep(3)
+
+            # Build and harvest INCLUSION set (English papers WITH at least one term)
+            inclusion_query = build_inclusion_query(excluded_terms)
+
+            # Check inclusion count
+            inclusion_result = await scholar_service.get_cited_by(
+                scholar_id=scholar_id,
+                max_results=10,
+                year_low=year,
+                year_high=year,
+                additional_query=inclusion_query,
+                language_filter=ENGLISH_ONLY,
+            )
+            inclusion_count = inclusion_result.get('totalResults', 0)
+            log_now(f"English inclusion set: {inclusion_count} papers")
+
+            if inclusion_count > 0 and inclusion_count < GOOGLE_SCHOLAR_LIMIT:
+                log_now(f"Harvesting English inclusion set ({inclusion_count} papers)...")
+
+                partition_run.status = "harvesting_inclusion"
+                await safe_flush(db)
+
+                inclusion_new, _, _ = await execute_harvest_query(
+                    db=db,
+                    partition_run=partition_run,
+                    scholar_service=scholar_service,
+                    scholar_id=scholar_id,
+                    year=year,
+                    query_suffix=inclusion_query,
+                    query_type="english_inclusion_harvest",
+                    purpose=f"Harvest English inclusion set ({inclusion_count})",
+                    existing_scholar_ids=existing_scholar_ids,
+                    on_page_complete=on_page_complete,
+                    language_filter=ENGLISH_ONLY,
+                )
+
+                stats["english_harvested"] += inclusion_new
+                log_now(f"✓ Harvested {inclusion_new} new English papers (inclusion set)")
+
+            elif inclusion_count >= GOOGLE_SCHOLAR_LIMIT:
+                log_now(f"WARNING: English inclusion set ({inclusion_count}) >= 1000 - would need recursion", "warn")
+                # Could add recursive handling here
+
+            partition_run.status = "completed"
+            stats["success"] = True
+
+    except Exception as e:
+        log_now(f"English harvest error: {e}", "error")
+        partition_run.status = "failed"
+        partition_run.error_message = str(e)[:1000]
+        stats["error"] = str(e)
+
+    # Finalize
+    stats["total_new"] = stats["non_english_harvested"] + stats["english_harvested"]
+    partition_run.total_new_unique = stats["total_new"]
+    partition_run.completed_at = datetime.utcnow()
+    await safe_commit(db)
+
+    log_now(f"╔{'═'*60}╗")
+    log_now(f"║  STRATIFIED HARVEST COMPLETE")
+    log_now(f"║  Non-English: {stats['non_english_harvested']}")
+    log_now(f"║  English: {stats['english_harvested']}")
+    log_now(f"║  Total new: {stats['total_new']}")
+    log_now(f"║  Strategy: {stats['strategy_used']}")
+    log_now(f"╚{'═'*60}╝")
+
+    return stats
+
+
 async def detect_and_handle_overflow(
     db: AsyncSession,
     scholar_service,
@@ -1115,7 +1443,15 @@ async def detect_and_handle_overflow(
     job_id: Optional[int] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Check if a year has overflow and handle it using partition strategy.
+    Check if a year has overflow and handle it using STRATIFIED LANGUAGE HARVESTING.
+
+    NEW STRATEGY (2024-12):
+    1. First harvest non-English papers (usually < 1000)
+    2. Then check English-only count
+    3. If English < 1000: harvest directly (most common case after non-English carved out)
+    4. If English >= 1000: use exclusion term strategy (but fewer terms needed)
+
+    This reduces the need for aggressive exclusion terms and improves coverage.
 
     Called after the initial year fetch completes.
     """
@@ -1129,8 +1465,8 @@ async def detect_and_handle_overflow(
 
     log_now(f"OVERFLOW DETECTED: Year {year} has {total_results} citations, only fetched {papers_fetched}")
 
-    # Use partition strategy to get the rest
-    return await harvest_partition(
+    # Use stratified language harvesting (non-English first, then English)
+    return await harvest_with_language_stratification(
         db=db,
         scholar_service=scholar_service,
         edition_id=edition_id,

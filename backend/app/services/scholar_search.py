@@ -33,9 +33,9 @@ def log_now(msg: str, level: str = "info"):
     sys.stdout.flush()
 
 # Timeout constants
-HTTP_TIMEOUT = 30.0  # 30s per HTTP request (reduced from 60)
-SEARCH_TOTAL_TIMEOUT = 120.0  # 2 minutes max per search query
-FETCH_RETRY_TIMEOUT = 90.0  # 90s max for all retries combined
+HTTP_TIMEOUT = 45.0  # 45s per HTTP request (increased for complex queries)
+SEARCH_TOTAL_TIMEOUT = 180.0  # 3 minutes max per search query
+FETCH_RETRY_TIMEOUT = 150.0  # 150s max for all retries combined
 
 
 class ScholarSearchService:
@@ -191,6 +191,7 @@ class ScholarSearchService:
         start_page: int = 0,
         additional_query: Optional[str] = None,
         on_page_failed: Optional[callable] = None,
+        language_filter: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get papers that cite a given paper - WITH PAGE-BY-PAGE CALLBACK
@@ -203,6 +204,8 @@ class ScholarSearchService:
             start_page: Resume from this page (0-indexed)
             additional_query: Additional query terms to append (e.g., exclusions like -author:"Smith")
             on_page_failed: Callback(page_num, url, error) called when page fails - STORE FOR RETRY
+            language_filter: Language restriction (e.g., "lang_en" for English only,
+                           "lang_zh-CN|lang_zh-TW|lang_fr|..." for multiple non-English)
 
         Returns:
             Dict with 'papers' list, 'totalResults' count, 'last_page' for resume,
@@ -216,13 +219,14 @@ class ScholarSearchService:
         log_now(f"║  year_low: {year_low}, year_high: {year_high}")
         log_now(f"║  start_page: {start_page}")
         log_now(f"║  additional_query: {additional_query}")
+        log_now(f"║  language_filter: {language_filter}")
         log_now(f"║  on_page_complete callback: {'SET' if on_page_complete else 'NOT SET'}")
         log_now(f"║  on_page_failed callback: {'SET' if on_page_failed else 'NOT SET'}")
         log_now(f"╚{'═'*60}╝")
 
         # No timeout wrapper - let it run, save pages as we go
         return await self._get_cited_by_impl(
-            scholar_id, max_results, year_low, year_high, on_page_complete, start_page, additional_query, on_page_failed
+            scholar_id, max_results, year_low, year_high, on_page_complete, start_page, additional_query, on_page_failed, language_filter
         )
 
     async def _get_cited_by_impl(
@@ -235,18 +239,32 @@ class ScholarSearchService:
         start_page: int = 0,
         additional_query: Optional[str] = None,
         on_page_failed: Optional[callable] = None,  # NEW: callback for failed pages
+        language_filter: Optional[str] = None,  # Language restriction (e.g., "lang_en" or "lang_zh-CN|lang_fr|...")
     ) -> Dict[str, Any]:
         """Internal cited-by implementation with page-by-page callback for immediate DB saves
 
         Args:
             on_page_failed: async callback(page_num, url, error_msg) called when a page fails all retries.
                            Use this to store failed pages for later retry.
+            language_filter: Language restriction parameter (lr=). Examples:
+                           "lang_en" for English only
+                           "lang_zh-CN|lang_zh-TW|lang_fr|lang_de|..." for multiple languages
         """
         # Build URL exactly like gs-harvester JS version
         # CRITICAL: scipsc=1 tells Scholar to search WITHIN citations, not just the paper
-        base_url = f"https://scholar.google.com/scholar?hl=en&cites={scholar_id}&scipsc=1"
+        base_url = f"https://scholar.google.com/scholar?hl=en"
 
         log_now(f"[CITED_BY_IMPL] ═══════════════════════════════════════════════")
+
+        # Add language filter EARLY if specified (Google Scholar seems to need it before cites param)
+        # Format: lr=lang_en or lr=lang_zh-CN%7Clang_zh-TW%7Clang_fr%7C...
+        # URL-encode pipes as %7C for Oxylabs compatibility
+        if language_filter:
+            encoded_filter = language_filter.replace("|", "%7C")
+            base_url += f"&lr={encoded_filter}"
+            log_now(f"[CITED_BY_IMPL] Language filter: {language_filter} -> {encoded_filter}")
+
+        base_url += f"&cites={scholar_id}&scipsc=1"
         log_now(f"[CITED_BY_IMPL] BASE URL (with scipsc=1): {base_url}")
 
         if year_low:
@@ -328,8 +346,8 @@ class ScholarSearchService:
                 log_now(f"[PROGRESS] Total papers so far: {len(all_papers)}")
 
                 if current_page < max_pages and len(all_papers) < max_results:
-                    log_now(f"[RATE LIMIT] Sleeping 2 seconds before next page...")
-                    await asyncio.sleep(2)
+                    log_now(f"[RATE LIMIT] Sleeping 4 seconds before next page...")
+                    await asyncio.sleep(4)
 
             except Exception as e:
                 error_msg = f"{type(e).__name__}: {str(e)}"
@@ -562,18 +580,22 @@ class ScholarSearchService:
                 "error": str(e),
             }
 
-    async def _fetch_with_retry(self, url: str, max_retries: int = 5) -> str:
+    async def _fetch_with_retry(self, url: str, max_retries: int = 50) -> str:
         """
-        Fetch URL via Oxylabs with retry logic - matches gs-harvester JS exactly
+        Fetch URL via Oxylabs with persistent retry logic.
 
-        JS version uses: maxRetries = 5, then falls back to direct scraping
+        Keep retrying Oxylabs until FETCH_RETRY_TIMEOUT (150s) is exhausted.
+        Oxylabs is reliable - transient faults recover quickly with retries.
+        Direct scraping fallback is unreliable (Google blocks it), so we
+        prioritize persistent Oxylabs retries.
         """
         last_error = None
+        attempt = 0
 
         try:
-            # Wrap all retries in a total timeout
+            # Wrap all retries in a total timeout - keep trying until exhausted
             async with asyncio.timeout(FETCH_RETRY_TIMEOUT):
-                for attempt in range(max_retries):
+                while attempt < max_retries:
                     try:
                         html = await self._fetch_via_oxylabs(url)
                         if attempt > 0:
@@ -581,33 +603,29 @@ class ScholarSearchService:
                         return html
                     except asyncio.TimeoutError:
                         last_error = TimeoutError(f"HTTP request timed out on attempt {attempt + 1}")
-                        log_now(f"Attempt {attempt + 1}/{max_retries} timed out")
+                        log_now(f"Attempt {attempt + 1} timed out")
                     except Exception as e:
                         last_error = e
-                        log_now(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                        log_now(f"Attempt {attempt + 1} failed: {e}")
 
-                    if attempt < max_retries - 1:
-                        # Exponential backoff: 1s, 2s, 4s, 8s (matches JS)
-                        backoff = min(2 ** attempt, 8)
-                        log_now(f"  Retrying in {backoff}s...")
-                        await asyncio.sleep(backoff)
+                    attempt += 1
+                    # Exponential backoff capped at 8s: 1s, 2s, 4s, 8s, 8s, 8s...
+                    backoff = min(2 ** min(attempt - 1, 3), 8)
+                    log_now(f"  Retrying in {backoff}s...")
+                    await asyncio.sleep(backoff)
 
         except asyncio.TimeoutError:
-            log_now(f"Oxylabs exhausted ({max_retries} attempts). Trying direct scraping fallback...")
-            # FALLBACK: Try direct scraping like JS does
+            log_now(f"Oxylabs exhausted after {attempt} attempts and {FETCH_RETRY_TIMEOUT}s timeout")
+            # Only try direct as last resort
             try:
                 return await self._fetch_direct(url, max_retries=2)
             except Exception as direct_error:
                 log_now(f"Direct scraping also failed: {direct_error}")
                 raise last_error or TimeoutError(f"All retries exhausted after {FETCH_RETRY_TIMEOUT}s total timeout")
 
-        # If we get here, all Oxylabs attempts failed - try direct scraping
-        log_now(f"Oxylabs exhausted ({max_retries} attempts). Falling back to direct scraping...")
-        try:
-            return await self._fetch_direct(url, max_retries=2)
-        except Exception as direct_error:
-            log_now(f"Direct scraping also failed: {direct_error}")
-            raise last_error or Exception("All retry attempts failed")
+        # If we somehow exit the loop (shouldn't happen with high max_retries)
+        log_now(f"Oxylabs exhausted after {attempt} attempts")
+        raise last_error or Exception("All retry attempts failed")
 
     async def _fetch_via_oxylabs(self, url: str) -> str:
         """Fetch URL via Oxylabs SERP Scraper API - matches gs-harvester JS exactly"""

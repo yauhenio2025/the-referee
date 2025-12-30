@@ -912,6 +912,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[Worker] ✓ Resuming edition {edition.id} from page {resume_page}")
 
         # Callback to save citations IMMEDIATELY after each page
+        # IMPORTANT: Uses fresh DB session to avoid greenlet context issues
+        # when callback is invoked from within scholar_search after async context switches
         async def save_page_citations(page_num: int, papers: List[Dict]):
             nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params
 
@@ -933,98 +935,115 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             new_count = 0
             skipped_no_id = 0
 
-            try:
-                for idx, paper_data in enumerate(papers):
-                    if not isinstance(paper_data, dict):
-                        log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
-                        continue
-
-                    scholar_id = paper_data.get("scholarId")
-                    if not scholar_id:
-                        skipped_no_id += 1
-                        continue
-
-                    if scholar_id in existing_scholar_ids:
-                        # Already exists in memory - skip
-                        total_updated_citations += 1
-                    else:
-                        # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
-                        # even if concurrent jobs have the same citation
-                        from sqlalchemy import text
-                        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-                        stmt = pg_insert(Citation).values(
-                            paper_id=paper_id,
-                            edition_id=edition.id,
-                            scholar_id=scholar_id,
-                            title=paper_data.get("title", "Unknown"),
-                            authors=paper_data.get("authorsRaw"),
-                            year=paper_data.get("year"),
-                            venue=paper_data.get("venue"),
-                            abstract=paper_data.get("abstract"),
-                            link=paper_data.get("link"),
-                            citation_count=paper_data.get("citationCount", 0),
-                            intersection_count=1,
-                        ).on_conflict_do_nothing(
-                            index_elements=['paper_id', 'scholar_id']
-                        )
-                        result = await db.execute(stmt)
-
-                        # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
-                        if result.rowcount > 0:
-                            new_count += 1
-                            total_new_citations += 1
-                        else:
-                            # Duplicate detected by database - already exists from concurrent job
-                            total_updated_citations += 1
-
-                        existing_scholar_ids.add(scholar_id)
-
-                # COMMIT IMMEDIATELY after each page
-                await db.commit()
-            except Exception as insert_err:
-                log_now(f"[CALLBACK] ✗ Error inserting citations: {insert_err}")
+            # Use a FRESH session to avoid greenlet context issues
+            # The parent session's greenlet context can be lost during async operations
+            # (rate limits, retries) in scholar_search.py
+            async with async_session() as callback_db:
                 try:
-                    await db.rollback()
-                    log_now(f"[CALLBACK] Rolled back transaction after insert error")
-                except Exception as rollback_err:
-                    log_now(f"[CALLBACK] Failed to rollback: {rollback_err}")
-                raise  # Re-raise to be handled by caller
-            log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
+                    for idx, paper_data in enumerate(papers):
+                        if not isinstance(paper_data, dict):
+                            log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
+                            continue
 
-            # Update job progress with current state for resume
-            # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
-            raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
-            progress_pct = min(raw_progress, 90)
-            year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
-            await update_job_progress(
-                db, job.id, progress_pct,
-                f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
-                details={
-                    "edition_index": i + 1,
-                    "editions_total": total_editions,
+                        scholar_id = paper_data.get("scholarId")
+                        if not scholar_id:
+                            skipped_no_id += 1
+                            continue
+
+                        if scholar_id in existing_scholar_ids:
+                            # Already exists in memory - skip
+                            total_updated_citations += 1
+                        else:
+                            # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
+                            # even if concurrent jobs have the same citation
+                            from sqlalchemy import text
+                            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                            stmt = pg_insert(Citation).values(
+                                paper_id=paper_id,
+                                edition_id=edition.id,
+                                scholar_id=scholar_id,
+                                title=paper_data.get("title", "Unknown"),
+                                authors=paper_data.get("authorsRaw"),
+                                year=paper_data.get("year"),
+                                venue=paper_data.get("venue"),
+                                abstract=paper_data.get("abstract"),
+                                link=paper_data.get("link"),
+                                citation_count=paper_data.get("citationCount", 0),
+                                intersection_count=1,
+                            ).on_conflict_do_nothing(
+                                index_elements=['paper_id', 'scholar_id']
+                            )
+                            result = await callback_db.execute(stmt)
+
+                            # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
+                            if result.rowcount > 0:
+                                new_count += 1
+                                total_new_citations += 1
+                            else:
+                                # Duplicate detected by database - already exists from concurrent job
+                                total_updated_citations += 1
+
+                            existing_scholar_ids.add(scholar_id)
+
+                    # COMMIT IMMEDIATELY after each page
+                    await callback_db.commit()
+                except Exception as insert_err:
+                    log_now(f"[CALLBACK] ✗ Error inserting citations: {insert_err}")
+                    try:
+                        await callback_db.rollback()
+                        log_now(f"[CALLBACK] Rolled back transaction after insert error")
+                    except Exception as rollback_err:
+                        log_now(f"[CALLBACK] Failed to rollback: {rollback_err}")
+                    raise  # Re-raise to be handled by caller
+
+                log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
+
+                # Update job progress with current state for resume
+                # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
+                raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
+                progress_pct = min(raw_progress, 90)
+                year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
+
+                # Update job progress using fresh session
+                await callback_db.execute(
+                    update(Job)
+                    .where(Job.id == job.id)
+                    .values(
+                        progress=progress_pct,
+                        progress_message=f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
+                        details=json.dumps({
+                            "edition_index": i + 1,
+                            "editions_total": total_editions,
+                            "edition_id": edition.id,
+                            "edition_title": edition.title[:80] if edition.title else "Unknown",
+                            "edition_language": edition.language,
+                            "edition_citation_count": edition.citation_count,
+                            "current_page": page_num + 1,
+                            "current_year": current_harvest_year.get("year"),
+                            "harvest_mode": current_harvest_year.get("mode", "standard"),
+                            "citations_saved": total_new_citations,
+                            "citations_this_edition": total_new_citations - edition_start_citations,
+                            "citations_updated": total_updated_citations,
+                            "stage": "harvesting",
+                        })
+                    )
+                )
+                await callback_db.commit()
+
+                # Save resume state (update params dict and serialize to job)
+                # MUST be inside fresh session block to avoid greenlet issues
+                params["resume_state"] = {
                     "edition_id": edition.id,
-                    "edition_title": edition.title[:80] if edition.title else "Unknown",
-                    "edition_language": edition.language,
-                    "edition_citation_count": edition.citation_count,
-                    "current_page": page_num + 1,
-                    "current_year": current_harvest_year.get("year"),
-                    "harvest_mode": current_harvest_year.get("mode", "standard"),
-                    "citations_saved": total_new_citations,
-                    "citations_this_edition": total_new_citations - edition_start_citations,
-                    "citations_updated": total_updated_citations,
-                    "stage": "harvesting",
+                    "last_page": page_num + 1,
+                    "total_citations": total_new_citations,
                 }
-            )
-
-            # Save resume state (update params dict and serialize to job)
-            params["resume_state"] = {
-                "edition_id": edition.id,
-                "last_page": page_num + 1,
-                "total_citations": total_new_citations,
-            }
-            job.params = json.dumps(params)
-            await db.commit()
+                await callback_db.execute(
+                    update(Job)
+                    .where(Job.id == job.id)
+                    .values(params=json.dumps(params))
+                )
+                await callback_db.commit()
 
         try:
             log_now(f"[EDITION {i+1}/{total_editions}] ═══════════════════════════════════════════════")
@@ -1162,6 +1181,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         log_now(f"[EDITION {i+1}] ℹ️ No saved year-by-year state - will scan all years")
 
                 # Helper to save year-by-year resume state to edition
+                # IMPORTANT: Uses fresh DB session to avoid greenlet context issues
                 async def save_year_resume_state(year: int, page: int, completed: set):
                     """Save current progress to edition.harvest_resume_state"""
                     state = {
@@ -1170,12 +1190,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         "current_page": page,
                         "completed_years": sorted(list(completed), reverse=True),
                     }
-                    await db.execute(
-                        update(Edition)
-                        .where(Edition.id == edition.id)
-                        .values(harvest_resume_state=json.dumps(state))
-                    )
-                    await db.commit()
+                    # Use fresh session to avoid greenlet context issues
+                    async with async_session() as state_db:
+                        await state_db.execute(
+                            update(Edition)
+                            .where(Edition.id == edition.id)
+                            .values(harvest_resume_state=json.dumps(state))
+                        )
+                        await state_db.commit()
 
                 # Modify save_page_citations to also save year state
                 original_save_page_citations = save_page_citations
