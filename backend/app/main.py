@@ -2,6 +2,8 @@
 The Referee - Citation Analysis API
 
 A robust API for discovering editions and extracting citations from academic papers.
+
+Fixed greenlet context issues in harvest callbacks (2025-12-30).
 """
 import logging
 from contextlib import asynccontextmanager
