@@ -95,13 +95,15 @@ async def run_migrations():
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
-    for migration in migrations:
+    for i, migration in enumerate(migrations, 1):
         try:
+            logger.info(f"Migration {i}/{len(migrations)}: {migration[:50]}...")
             async with engine.begin() as conn:
                 await conn.execute(text(migration))
+            logger.info(f"Migration {i} completed")
         except Exception as e:
             # Column might already exist or other non-fatal error - just log and continue
-            logger.debug(f"Migration skipped: {e}")
+            logger.info(f"Migration {i} skipped: {e}")
 
 
 async def get_db() -> AsyncSession:
