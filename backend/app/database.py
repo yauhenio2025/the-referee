@@ -51,7 +51,11 @@ async def init_db():
 
 
 async def run_migrations():
-    """Add any missing columns to existing tables"""
+    """Add any missing columns to existing tables.
+
+    Each migration runs in its own transaction to avoid cascading failures
+    when one migration fails (e.g., column already exists).
+    """
     from sqlalchemy import text
 
     migrations = [
@@ -88,28 +92,16 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_papers_deleted ON papers(deleted_at)",
         # Stall detection: track consecutive zero-progress jobs to stop infinite auto-resume loops
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
-        # Citation deduplication: handled by UPSERT logic in job_worker.py (v2)
-        # Run these manually after clearing duplicates:
-        #   DELETE FROM citations WHERE id NOT IN (
-        #     SELECT MIN(id) FROM citations WHERE scholar_id IS NOT NULL
-        #     GROUP BY paper_id, scholar_id
-        #   ) AND scholar_id IS NOT NULL;
-        #   CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique
-        #     ON citations(paper_id, scholar_id) WHERE scholar_id IS NOT NULL;
-
-        # Partition harvest traceability: new tables created by SQLAlchemy metadata
-        # partition_runs, partition_term_attempts, partition_queries, partition_llm_calls
-        # These track EVERY aspect of overflow year harvesting for complete auditability
-        # NOTE: Indexes are defined in __table_args__ of each model, created by create_all()
     ]
 
-    async with engine.begin() as conn:
-        for migration in migrations:
-            try:
+    # Run each migration in its own transaction to avoid cascading failures
+    for migration in migrations:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(migration))
-            except Exception as e:
-                # Column might already exist or other non-fatal error
-                print(f"Migration note: {e}")
+        except Exception as e:
+            # Column might already exist or other non-fatal error - just log and continue
+            logger.debug(f"Migration skipped: {e}")
 
 
 async def get_db() -> AsyncSession:
