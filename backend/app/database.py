@@ -95,15 +95,18 @@ async def run_migrations():
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
+    # Set short lock timeout to fail fast if table is locked by another process
     for i, migration in enumerate(migrations, 1):
         try:
             logger.info(f"Migration {i}/{len(migrations)}: {migration[:50]}...")
             async with engine.begin() as conn:
+                # Set 2 second lock timeout to fail fast
+                await conn.execute(text("SET lock_timeout = '2s'"))
                 await conn.execute(text(migration))
             logger.info(f"Migration {i} completed")
         except Exception as e:
-            # Column might already exist or other non-fatal error - just log and continue
-            logger.info(f"Migration {i} skipped: {e}")
+            # Column might already exist, lock timeout, or other non-fatal error
+            logger.info(f"Migration {i} skipped: {type(e).__name__}: {e}")
 
 
 async def get_db() -> AsyncSession:
