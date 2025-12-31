@@ -154,6 +154,34 @@ async def db_health_check(db: AsyncSession = Depends(get_db)):
         }
 
 
+@app.get("/health/db/tables")
+async def db_table_check(db: AsyncSession = Depends(get_db)):
+    """Check each table individually to isolate timeout issue"""
+    import time
+    results = {}
+
+    # Test each table separately
+    tables = [
+        ("collections_count", "SELECT COUNT(*) FROM collections"),
+        ("papers_count", "SELECT COUNT(*) FROM papers"),
+        ("editions_count", "SELECT COUNT(*) FROM editions"),
+        ("citations_count", "SELECT COUNT(*) FROM citations"),
+    ]
+
+    for name, query in tables:
+        start = time.time()
+        try:
+            result = await db.execute(text(query))
+            count = result.scalar()
+            elapsed = time.time() - start
+            results[name] = {"count": count, "time_ms": round(elapsed * 1000, 2)}
+        except Exception as e:
+            elapsed = time.time() - start
+            results[name] = {"error": str(e), "time_ms": round(elapsed * 1000, 2)}
+
+    return results
+
+
 @app.get("/")
 async def root():
     return {
