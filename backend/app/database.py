@@ -92,6 +92,8 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_papers_deleted ON papers(deleted_at)",
         # Stall detection: track consecutive zero-progress jobs to stop infinite auto-resume loops
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
+        # Performance: index on editions.paper_id for N+1 query fixes
+        "CREATE INDEX IF NOT EXISTS ix_editions_paper ON editions(paper_id)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

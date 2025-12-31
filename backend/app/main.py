@@ -159,6 +159,44 @@ def build_edition_response_with_staleness(edition: Edition) -> EditionResponse:
     )
 
 
+def build_paper_response_with_preloaded_editions(paper: Paper, editions: list) -> PaperResponse:
+    """Build a PaperResponse with pre-loaded editions (avoids N+1 queries)"""
+    # Calculate stats
+    edition_count = len(editions)
+    total_edition_citations = sum(e.citation_count or 0 for e in editions)
+
+    # Get canonical edition (highest citations - list is already sorted)
+    canonical_edition = None
+    if editions:
+        top_edition = editions[0]
+        canonical_edition = CanonicalEditionSummary(
+            id=top_edition.id,
+            title=top_edition.title,
+            citation_count=top_edition.citation_count or 0,
+            language=top_edition.language,
+        )
+
+    # Compute staleness fields
+    is_stale = False
+    days_since_harvest = None
+    if paper.any_edition_harvested_at is None:
+        is_stale = True
+    else:
+        days_since_harvest = (datetime.utcnow() - paper.any_edition_harvested_at).days
+        is_stale = days_since_harvest > 90
+
+    # Build response
+    paper_dict = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
+    return PaperResponse(
+        **paper_dict,
+        edition_count=edition_count,
+        total_edition_citations=total_edition_citations,
+        canonical_edition=canonical_edition,
+        is_stale=is_stale,
+        days_since_harvest=days_since_harvest,
+    )
+
+
 async def build_paper_response_with_editions(paper: Paper, db: AsyncSession) -> PaperResponse:
     """Build a PaperResponse with edition statistics (canonical edition, total citations)"""
     from datetime import timedelta
@@ -235,30 +273,36 @@ async def create_collection(
 @app.get("/api/collections", response_model=List[CollectionResponse])
 async def list_collections(db: AsyncSession = Depends(get_db)):
     """List all collections with paper counts"""
+    # Single query to get all collections with paper counts (avoids N+1)
+    from sqlalchemy import outerjoin
+    from sqlalchemy.orm import aliased
+
+    # Get paper counts grouped by collection in one query
+    counts_result = await db.execute(
+        select(Paper.collection_id, func.count(Paper.id).label('count'))
+        .where(Paper.deleted_at.is_(None))
+        .group_by(Paper.collection_id)
+    )
+    paper_counts = {row.collection_id: row.count for row in counts_result}
+
+    # Get all collections
     result = await db.execute(
         select(Collection).order_by(Collection.name)
     )
     collections = result.scalars().all()
 
-    # Get paper counts for each collection (excluding soft-deleted)
-    responses = []
-    for c in collections:
-        count_result = await db.execute(
-            select(func.count(Paper.id))
-            .where(Paper.collection_id == c.id)
-            .where(Paper.deleted_at.is_(None))
-        )
-        paper_count = count_result.scalar() or 0
-        responses.append(CollectionResponse(
+    return [
+        CollectionResponse(
             id=c.id,
             name=c.name,
             description=c.description,
             color=c.color,
             created_at=c.created_at,
             updated_at=c.updated_at,
-            paper_count=paper_count,
-        ))
-    return responses
+            paper_count=paper_counts.get(c.id, 0),
+        )
+        for c in collections
+    ]
 
 
 @app.get("/api/collections/{collection_id}", response_model=CollectionDetail)
@@ -277,11 +321,26 @@ async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db))
         .order_by(Paper.created_at.desc())
     )
     papers = papers_result.scalars().all()
+    paper_ids = [p.id for p in papers]
 
-    # Build paper responses with edition stats
+    # Pre-load all editions for all papers in ONE query (avoids N+1)
+    editions_by_paper = {}
+    if paper_ids:
+        editions_result = await db.execute(
+            select(Edition)
+            .where(Edition.paper_id.in_(paper_ids))
+            .order_by(Edition.paper_id, Edition.citation_count.desc())
+        )
+        for edition in editions_result.scalars().all():
+            if edition.paper_id not in editions_by_paper:
+                editions_by_paper[edition.paper_id] = []
+            editions_by_paper[edition.paper_id].append(edition)
+
+    # Build paper responses using pre-loaded editions
     paper_responses = []
     for paper in papers:
-        paper_response = await build_paper_response_with_editions(paper, db)
+        editions = editions_by_paper.get(paper.id, [])
+        paper_response = build_paper_response_with_preloaded_editions(paper, editions)
         paper_responses.append(paper_response)
 
     return CollectionDetail(
@@ -423,20 +482,20 @@ async def list_dossiers(
     db: AsyncSession = Depends(get_db)
 ):
     """List all dossiers, optionally filtered by collection"""
+    # Get paper counts grouped by dossier in one query (avoids N+1)
+    counts_query = select(Paper.dossier_id, func.count(Paper.id).label('count')).group_by(Paper.dossier_id)
+    counts_result = await db.execute(counts_query)
+    paper_counts = {row.dossier_id: row.count for row in counts_result}
+
+    # Get dossiers
     query = select(Dossier).order_by(Dossier.name)
     if collection_id is not None:
         query = query.where(Dossier.collection_id == collection_id)
     result = await db.execute(query)
     dossiers = result.scalars().all()
 
-    # Get paper counts for each dossier
-    responses = []
-    for d in dossiers:
-        count_result = await db.execute(
-            select(func.count(Paper.id)).where(Paper.dossier_id == d.id)
-        )
-        paper_count = count_result.scalar() or 0
-        responses.append(DossierResponse(
+    return [
+        DossierResponse(
             id=d.id,
             name=d.name,
             description=d.description,
@@ -444,9 +503,10 @@ async def list_dossiers(
             collection_id=d.collection_id,
             created_at=d.created_at,
             updated_at=d.updated_at,
-            paper_count=paper_count,
-        ))
-    return responses
+            paper_count=paper_counts.get(d.id, 0),
+        )
+        for d in dossiers
+    ]
 
 
 @app.get("/api/dossiers/{dossier_id}", response_model=DossierDetail)
@@ -467,11 +527,25 @@ async def get_dossier(dossier_id: int, db: AsyncSession = Depends(get_db)):
     )
     papers = papers_result.scalars().all()
 
-    # Build paper responses with edition stats
-    paper_responses = []
-    for paper in papers:
-        paper_response = await build_paper_response_with_editions(paper, db)
-        paper_responses.append(paper_response)
+    # Pre-load all editions for all papers in ONE query (avoids N+1)
+    paper_ids = [p.id for p in papers]
+    editions_by_paper = {}
+    if paper_ids:
+        editions_result = await db.execute(
+            select(Edition)
+            .where(Edition.paper_id.in_(paper_ids))
+            .order_by(Edition.paper_id, Edition.citation_count.desc())
+        )
+        for edition in editions_result.scalars().all():
+            if edition.paper_id not in editions_by_paper:
+                editions_by_paper[edition.paper_id] = []
+            editions_by_paper[edition.paper_id].append(edition)
+
+    # Build paper responses using pre-loaded editions (no N+1!)
+    paper_responses = [
+        build_paper_response_with_preloaded_editions(paper, editions_by_paper.get(paper.id, []))
+        for paper in papers
+    ]
 
     return DossierDetail(
         id=dossier.id,
