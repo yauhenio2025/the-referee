@@ -206,6 +206,76 @@ async def db_citations_check(db: AsyncSession = Depends(get_db)):
         return {"table": "citations", "error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
 
 
+@app.get("/health/db/jobs")
+async def db_jobs_check(db: AsyncSession = Depends(get_db)):
+    """Test jobs table query"""
+    import time
+    start = time.time()
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM jobs"))
+        count = result.scalar()
+        # Also get running jobs
+        running = await db.execute(text("SELECT COUNT(*) FROM jobs WHERE status = 'running'"))
+        running_count = running.scalar()
+        return {
+            "table": "jobs",
+            "count": count,
+            "running": running_count,
+            "time_ms": round((time.time() - start) * 1000, 2)
+        }
+    except Exception as e:
+        return {"table": "jobs", "error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
+
+
+@app.get("/health/db/locks")
+async def db_locks_check(db: AsyncSession = Depends(get_db)):
+    """Check for PostgreSQL locks"""
+    import time
+    start = time.time()
+    try:
+        # Query to find blocking queries
+        result = await db.execute(text("""
+            SELECT
+                blocked_locks.pid AS blocked_pid,
+                blocking_locks.pid AS blocking_pid,
+                blocked_activity.query AS blocked_query,
+                blocking_activity.query AS blocking_query
+            FROM pg_locks blocked_locks
+            JOIN pg_stat_activity blocked_activity ON blocked_locks.pid = blocked_activity.pid
+            JOIN pg_locks blocking_locks ON blocking_locks.locktype = blocked_locks.locktype
+                AND blocking_locks.relation = blocked_locks.relation
+                AND blocking_locks.granted
+            JOIN pg_stat_activity blocking_activity ON blocking_locks.pid = blocking_activity.pid
+            WHERE NOT blocked_locks.granted
+            LIMIT 10
+        """))
+        locks = [dict(row._mapping) for row in result]
+        return {"locks": locks, "time_ms": round((time.time() - start) * 1000, 2)}
+    except Exception as e:
+        return {"error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
+
+
+@app.get("/health/db/activity")
+async def db_activity_check(db: AsyncSession = Depends(get_db)):
+    """Check active PostgreSQL queries"""
+    import time
+    start = time.time()
+    try:
+        result = await db.execute(text("""
+            SELECT pid, state, query, query_start,
+                   EXTRACT(EPOCH FROM (NOW() - query_start)) as duration_seconds
+            FROM pg_stat_activity
+            WHERE state != 'idle'
+            AND query NOT LIKE '%pg_stat_activity%'
+            ORDER BY query_start
+            LIMIT 10
+        """))
+        activities = [dict(row._mapping) for row in result]
+        return {"activities": activities, "time_ms": round((time.time() - start) * 1000, 2)}
+    except Exception as e:
+        return {"error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
+
+
 @app.get("/")
 async def root():
     return {
