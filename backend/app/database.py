@@ -94,6 +94,10 @@ async def run_migrations():
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_stall_count INTEGER DEFAULT 0",
         # Performance: index on editions.paper_id for N+1 query fixes
         "CREATE INDEX IF NOT EXISTS ix_editions_paper ON editions(paper_id)",
+        # CRITICAL: Unique constraint for ON CONFLICT (paper_id, scholar_id) DO NOTHING in citation upserts
+        # First drop the old non-unique index if it exists, then create unique version
+        "DROP INDEX IF EXISTS ix_citations_paper_scholar",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique ON citations(paper_id, scholar_id)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

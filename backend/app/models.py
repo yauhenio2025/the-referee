@@ -216,7 +216,8 @@ class Citation(Base):
     paper: Mapped["Paper"] = relationship(back_populates="citations")
 
     __table_args__ = (
-        Index("ix_citations_paper_scholar", "paper_id", "scholar_id"),
+        # Unique constraint required for ON CONFLICT (paper_id, scholar_id) DO NOTHING
+        Index("ix_citations_paper_scholar_unique", "paper_id", "scholar_id", unique=True),
     )
 
 
