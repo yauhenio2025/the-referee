@@ -448,6 +448,96 @@ body {
   min-width: 150px;
 }
 
+/* Quick Add */
+.quick-add {
+  padding: 1rem 0;
+}
+
+.quick-add-hint {
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.quick-add-input {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.input-scholar {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.input-scholar:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input-scholar::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.btn-quick-add {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-quick-add:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-quick-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-add-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  margin-bottom: 1rem;
+}
+
+.quick-add-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.quick-add-success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  padding: 1rem;
+  color: var(--text-primary);
+}
+
+.quick-add-success .citation-count {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.quick-add-success .harvest-started {
+  color: var(--success);
+}
+
 /* Paper List */
 .paper-list-header {
   display: flex;

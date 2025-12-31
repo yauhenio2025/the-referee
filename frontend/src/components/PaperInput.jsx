@@ -6,7 +6,7 @@ export default function PaperInput({ onPaperAdded }) {
   const queryClient = useQueryClient()
 
   // Input mode toggle
-  const [inputMode, setInputMode] = useState('manual') // 'manual' | 'smart'
+  const [inputMode, setInputMode] = useState('manual') // 'manual' | 'smart' | 'quick'
 
   // Manual mode state
   const [title, setTitle] = useState('')
@@ -22,6 +22,13 @@ export default function PaperInput({ onPaperAdded }) {
 
   // Batch add state
   const [addingBatch, setAddingBatch] = useState(false)
+
+  // Quick add state
+  const [scholarInput, setScholarInput] = useState('')
+  const [quickAddLoading, setQuickAddLoading] = useState(false)
+  const [quickAddResult, setQuickAddResult] = useState(null)
+  const [quickAddError, setQuickAddError] = useState(null)
+  const [startHarvestAfterAdd, setStartHarvestAfterAdd] = useState(true)
 
   const createPaper = useMutation({
     mutationFn: (paper) => api.createPaper(paper),
@@ -110,6 +117,33 @@ export default function PaperInput({ onPaperAdded }) {
   // Count total works in parsed result
   const totalWorks = parsedWorks?.authors?.reduce((sum, a) => sum + (a.works?.length || 0), 0) || 0
 
+  // Quick add using Google Scholar ID or URL
+  const handleQuickAdd = async () => {
+    if (!scholarInput.trim()) {
+      setQuickAddError('Please enter a Google Scholar ID or URL')
+      return
+    }
+
+    setQuickAddLoading(true)
+    setQuickAddError(null)
+    setQuickAddResult(null)
+
+    try {
+      const result = await api.quickAdd(scholarInput.trim(), {
+        startHarvest: startHarvestAfterAdd,
+      })
+      setQuickAddResult(result)
+      setScholarInput('')
+      queryClient.invalidateQueries(['papers'])
+      onPaperAdded?.()
+    } catch (err) {
+      console.error('Quick add error:', err)
+      setQuickAddError(err.message || 'Failed to add paper')
+    } finally {
+      setQuickAddLoading(false)
+    }
+  }
+
   return (
     <div className="paper-input">
       {/* Mode toggle */}
@@ -128,9 +162,16 @@ export default function PaperInput({ onPaperAdded }) {
         >
           🤖 Smart Paste
         </button>
+        <button
+          type="button"
+          className={`mode-btn ${inputMode === 'quick' ? 'active' : ''}`}
+          onClick={() => setInputMode('quick')}
+        >
+          ⚡ Quick Add
+        </button>
       </div>
 
-      {inputMode === 'manual' ? (
+      {inputMode === 'manual' && (
         /* Manual entry mode */
         <form onSubmit={handleSubmit}>
           <div className="form-row">
@@ -172,7 +213,9 @@ export default function PaperInput({ onPaperAdded }) {
             <div className="error">Error: {createPaper.error.message}</div>
           )}
         </form>
-      ) : (
+      )}
+
+      {inputMode === 'smart' && (
         /* Smart paste mode */
         <div className="smart-paste">
           {!parsedWorks ? (
@@ -256,6 +299,58 @@ Harvey, David. A Brief History of Neoliberalism. Oxford University Press, 2005.`
                   ← Back to Edit
                 </button>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {inputMode === 'quick' && (
+        /* Quick add mode - paste Google Scholar ID or URL */
+        <div className="quick-add">
+          <p className="quick-add-hint">
+            Paste a Google Scholar URL or ID to quickly add a paper with its citation count.
+          </p>
+          <div className="quick-add-input">
+            <input
+              type="text"
+              placeholder="https://scholar.google.com/scholar?cites=... or just the ID"
+              value={scholarInput}
+              onChange={(e) => setScholarInput(e.target.value)}
+              className="input-scholar"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !quickAddLoading && scholarInput.trim()) {
+                  handleQuickAdd()
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleQuickAdd}
+              disabled={quickAddLoading || !scholarInput.trim()}
+              className="btn-quick-add"
+            >
+              {quickAddLoading ? '⏳ Adding...' : '⚡ Add Paper'}
+            </button>
+          </div>
+          <label className="quick-add-option">
+            <input
+              type="checkbox"
+              checked={startHarvestAfterAdd}
+              onChange={(e) => setStartHarvestAfterAdd(e.target.checked)}
+            />
+            Start harvesting citations immediately
+          </label>
+          {quickAddError && <div className="error">{quickAddError}</div>}
+          {quickAddResult && (
+            <div className="quick-add-success">
+              <strong>Added:</strong> {quickAddResult.title}
+              {quickAddResult.authors && <span> by {quickAddResult.authors}</span>}
+              {quickAddResult.year && <span> ({quickAddResult.year})</span>}
+              <br />
+              <span className="citation-count">📊 {quickAddResult.citation_count.toLocaleString()} citations</span>
+              {quickAddResult.harvest_job_id && (
+                <span className="harvest-started"> • 🚀 Harvest started</span>
+              )}
             </div>
           )}
         </div>

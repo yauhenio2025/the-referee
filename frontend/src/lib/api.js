@@ -418,6 +418,26 @@ class RefereeAPI {
     return this.request(`/api/staleness${query}`);
   }
 
+  // ============== Quick Add (Scholar ID/URL) ==============
+
+  /**
+   * Quick-add a paper using Google Scholar ID or URL.
+   * Creates both Paper and Edition, ready for harvesting.
+   * @param {string} input - Scholar ID or URL containing cites=/cluster=
+   * @param {Object} options - { collectionId, dossierId, startHarvest }
+   */
+  async quickAdd(input, options = {}) {
+    return this.request('/api/papers/quick-add', {
+      method: 'POST',
+      body: {
+        input: input,
+        collection_id: options.collectionId || null,
+        dossier_id: options.dossierId || null,
+        start_harvest: options.startHarvest ?? false,
+      },
+    });
+  }
+
   // ============== Quick Harvest ==============
 
   async quickHarvest(paperId) {
