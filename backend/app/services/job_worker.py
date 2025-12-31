@@ -36,6 +36,9 @@ HEARTBEAT_INTERVAL = 60  # Seconds between heartbeat updates
 # Staleness threshold (for UI indicators)
 STALENESS_THRESHOLD_DAYS = 90
 
+# Year-by-year threshold (Google Scholar limits ~1000 results per query)
+YEAR_BY_YEAR_THRESHOLD = 1000
+
 # Global worker state
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
@@ -1057,8 +1060,6 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             log_now(f"[EDITION {i+1}] Previously harvested: {edition.harvested_citation_count}")
 
             # For editions with >1000 citations, use year-by-year fetching
-            # Google Scholar limits ~1000 results per query
-            YEAR_BY_YEAR_THRESHOLD = 1000
             current_year = datetime.now().year
 
             if edition.citation_count and edition.citation_count > YEAR_BY_YEAR_THRESHOLD:
