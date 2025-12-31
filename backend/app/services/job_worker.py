@@ -1009,27 +1009,29 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
 
                 # Update job progress using fresh session
+                # Store progress details in params["progress_details"] (Job model has no 'details' column)
+                params["progress_details"] = {
+                    "edition_index": i + 1,
+                    "editions_total": total_editions,
+                    "edition_id": edition.id,
+                    "edition_title": edition.title[:80] if edition.title else "Unknown",
+                    "edition_language": edition.language,
+                    "edition_citation_count": edition.citation_count,
+                    "current_page": page_num + 1,
+                    "current_year": current_harvest_year.get("year"),
+                    "harvest_mode": current_harvest_year.get("mode", "standard"),
+                    "citations_saved": total_new_citations,
+                    "citations_this_edition": total_new_citations - edition_start_citations,
+                    "citations_updated": total_updated_citations,
+                    "stage": "harvesting",
+                }
                 await callback_db.execute(
                     update(Job)
                     .where(Job.id == job.id)
                     .values(
                         progress=progress_pct,
                         progress_message=f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
-                        details=json.dumps({
-                            "edition_index": i + 1,
-                            "editions_total": total_editions,
-                            "edition_id": edition.id,
-                            "edition_title": edition.title[:80] if edition.title else "Unknown",
-                            "edition_language": edition.language,
-                            "edition_citation_count": edition.citation_count,
-                            "current_page": page_num + 1,
-                            "current_year": current_harvest_year.get("year"),
-                            "harvest_mode": current_harvest_year.get("mode", "standard"),
-                            "citations_saved": total_new_citations,
-                            "citations_this_edition": total_new_citations - edition_start_citations,
-                            "citations_updated": total_updated_citations,
-                            "stage": "harvesting",
-                        })
+                        params=json.dumps(params),
                     )
                 )
                 await callback_db.commit()
