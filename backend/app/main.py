@@ -329,23 +329,35 @@ async def create_collection(
 @app.get("/api/collections", response_model=List[CollectionResponse])
 async def list_collections(db: AsyncSession = Depends(get_db)):
     """List all collections with paper counts"""
-    # Single query to get all collections with paper counts (avoids N+1)
-    from sqlalchemy import outerjoin
-    from sqlalchemy.orm import aliased
+    import time
+    logger.info("list_collections: Starting query...")
 
-    # Get paper counts grouped by collection in one query
-    counts_result = await db.execute(
-        select(Paper.collection_id, func.count(Paper.id).label('count'))
-        .where(Paper.deleted_at.is_(None))
-        .group_by(Paper.collection_id)
-    )
-    paper_counts = {row.collection_id: row.count for row in counts_result}
+    # Get all collections first (simpler query)
+    start = time.time()
+    try:
+        result = await db.execute(
+            select(Collection).order_by(Collection.name)
+        )
+        collections = result.scalars().all()
+        logger.info(f"list_collections: Got {len(collections)} collections in {time.time() - start:.2f}s")
+    except Exception as e:
+        logger.error(f"list_collections: Collection query failed after {time.time() - start:.2f}s: {e}")
+        raise
 
-    # Get all collections
-    result = await db.execute(
-        select(Collection).order_by(Collection.name)
-    )
-    collections = result.scalars().all()
+    # Get paper counts in a separate query
+    start = time.time()
+    paper_counts = {}
+    try:
+        counts_result = await db.execute(
+            select(Paper.collection_id, func.count(Paper.id).label('count'))
+            .where(Paper.deleted_at.is_(None))
+            .group_by(Paper.collection_id)
+        )
+        paper_counts = {row.collection_id: row.count for row in counts_result}
+        logger.info(f"list_collections: Got paper counts in {time.time() - start:.2f}s")
+    except Exception as e:
+        logger.warning(f"list_collections: Paper count query failed after {time.time() - start:.2f}s: {e}")
+        # Continue with empty counts rather than failing
 
     return [
         CollectionResponse(
