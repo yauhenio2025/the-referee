@@ -11,7 +11,7 @@ from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, text
 from typing import List, Optional
 from pydantic import BaseModel
 import json
@@ -126,6 +126,32 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "the-referee"}
+
+
+@app.get("/health/db")
+async def db_health_check(db: AsyncSession = Depends(get_db)):
+    """Check database connectivity with detailed timing"""
+    import time
+    start = time.time()
+    try:
+        # Simple count query
+        result = await db.execute(text("SELECT 1"))
+        result.scalar()
+        elapsed = time.time() - start
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "query_time_ms": round(elapsed * 1000, 2)
+        }
+    except Exception as e:
+        elapsed = time.time() - start
+        return {
+            "status": "unhealthy",
+            "database": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "elapsed_ms": round(elapsed * 1000, 2)
+        }
 
 
 @app.get("/")

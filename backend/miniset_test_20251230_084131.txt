@@ -1,0 +1,21 @@
+Mini-Set Inclusion Test Results
+Timestamp: 20251230_084131
+Scholar ID: 15603705792201309427
+Year: 2014
+
+Total for year: 1820
+Exclusion set: 980
+Expected inclusion: 840
+Big OR query: 732
+Sum of mini-sets: 496
+
+Batch 1: ['cultural', 'contemporary', 'theory'] = 83
+Batch 2: ['social', 'critical', 'modern'] = 52
+Batch 3: ['political', 'culture', 'postmodern'] = 82
+Batch 4: ['analysis', 'identity', 'media'] = 43
+Batch 5: ['global', 'art', 'discourse'] = 50
+Batch 6: ['space', 'literature', 'history'] = 60
+Batch 7: ['power', 'urban', 'aesthetic'] = 26
+Batch 8: ['capitalism', 'film', 'study'] = 35
+Batch 9: ['approach', 'architecture', 'narrative'] = 22
+Batch 10: ['new'] = 43
