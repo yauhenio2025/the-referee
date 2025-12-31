@@ -276,6 +276,37 @@ async def db_activity_check(db: AsyncSession = Depends(get_db)):
         return {"error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
 
 
+@app.post("/health/db/kill/{pid}")
+async def kill_db_process(pid: int, db: AsyncSession = Depends(get_db)):
+    """Kill a specific PostgreSQL backend process"""
+    import time
+    start = time.time()
+    try:
+        # First check if this PID exists and get info
+        info_result = await db.execute(text(f"""
+            SELECT pid, state, query, query_start,
+                   EXTRACT(EPOCH FROM (NOW() - query_start)) as duration_seconds
+            FROM pg_stat_activity
+            WHERE pid = {pid}
+        """))
+        info = info_result.fetchone()
+        if not info:
+            return {"error": f"PID {pid} not found", "time_ms": round((time.time() - start) * 1000, 2)}
+
+        # Kill it
+        result = await db.execute(text(f"SELECT pg_terminate_backend({pid})"))
+        killed = result.scalar()
+        return {
+            "killed": killed,
+            "pid": pid,
+            "was_state": info.state,
+            "was_running_seconds": float(info.duration_seconds) if info.duration_seconds else None,
+            "time_ms": round((time.time() - start) * 1000, 2)
+        }
+    except Exception as e:
+        return {"error": str(e), "time_ms": round((time.time() - start) * 1000, 2)}
+
+
 @app.get("/")
 async def root():
     return {
