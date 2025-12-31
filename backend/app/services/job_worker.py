@@ -1024,6 +1024,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     "citations_this_edition": total_new_citations - edition_start_citations,
                     "citations_updated": total_updated_citations,
                     "stage": "harvesting",
+                    # CRITICAL: Include these for UI display (was missing, causing "Already Had: 0" bug)
+                    "previously_harvested": total_previously_harvested,
+                    "target_citations_total": total_target_citations,
                 }
                 await callback_db.execute(
                     update(Job)
