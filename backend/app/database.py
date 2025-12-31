@@ -95,9 +95,11 @@ async def run_migrations():
         # Performance: index on editions.paper_id for N+1 query fixes
         "CREATE INDEX IF NOT EXISTS ix_editions_paper ON editions(paper_id)",
         # CRITICAL: Unique constraint for ON CONFLICT (paper_id, scholar_id) DO NOTHING in citation upserts
-        # First drop the old non-unique index if it exists, then create unique version
+        # Must be NON-partial index (no WHERE clause) to match ON CONFLICT clause exactly
+        # Drop any existing indexes first (both old non-unique and old partial unique)
         "DROP INDEX IF EXISTS ix_citations_paper_scholar",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique ON citations(paper_id, scholar_id)",
+        "DROP INDEX IF EXISTS ix_citations_paper_scholar_unique",
+        "CREATE UNIQUE INDEX ix_citations_paper_scholar_unique ON citations(paper_id, scholar_id)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

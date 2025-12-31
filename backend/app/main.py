@@ -4534,13 +4534,13 @@ async def create_citation_unique_index(
     if check_result.scalar():
         return {"status": "ok", "message": "Index already exists"}
 
-    # Create the unique partial index (only for non-null scholar_ids)
+    # Create the unique index (non-partial - required for ON CONFLICT to work)
     # Note: Cannot use CONCURRENTLY inside a transaction, so we use regular CREATE INDEX
     # This will briefly lock the table but is safe since we've already deduplicated
     try:
         await db.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS ix_citations_paper_scholar_unique
-            ON citations(paper_id, scholar_id) WHERE scholar_id IS NOT NULL
+            ON citations(paper_id, scholar_id)
         """))
         await db.commit()
         return {"status": "ok", "message": "Unique index created successfully"}
