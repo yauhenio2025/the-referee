@@ -105,6 +105,27 @@ class PaperSubmitBatch(BaseModel):
     custom_languages: List[str] = []
 
 
+class QuickAddRequest(BaseModel):
+    """Quick-add a paper using Google Scholar ID or URL"""
+    input: str  # Scholar ID or URL containing cites=ID or cluster=ID
+    collection_id: Optional[int] = None
+    dossier_id: Optional[int] = None
+    start_harvest: bool = False  # Whether to immediately start harvesting
+
+
+class QuickAddResponse(BaseModel):
+    """Response from quick-add"""
+    paper_id: int
+    edition_id: int
+    title: str
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    citation_count: int = 0
+    scholar_id: str
+    harvest_job_id: Optional[int] = None
+    message: str
+
+
 class ScholarCandidate(BaseModel):
     """A candidate paper from Google Scholar"""
     scholar_id: Optional[str] = Field(None, alias="scholarId")

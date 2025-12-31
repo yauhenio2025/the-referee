@@ -37,6 +37,8 @@ from .schemas import (
     HarvestTargetResponse, FailedFetchResponse, HarvestCompletenessResponse, FailedFetchesSummary,
     # AI Gap Analysis schemas
     GapDetail, GapFix, AIGapAnalysisResponse,
+    # Quick-add schemas
+    QuickAddRequest, QuickAddResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -806,6 +808,131 @@ async def create_papers_batch(
         db.add(job)
 
     return created_papers
+
+
+@app.post("/api/papers/quick-add", response_model=QuickAddResponse)
+async def quick_add_paper(
+    request: QuickAddRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Quick-add a paper using a Google Scholar ID or URL.
+
+    Accepts:
+    - Raw scholar ID: "2586223056195525242"
+    - Cites URL: "https://scholar.google.com/scholar?cites=2586223056195525242..."
+    - Cluster URL: "https://scholar.google.com/scholar?cluster=2586223056195525242..."
+
+    Creates both a Paper and an Edition with the scholar_id, ready for harvesting.
+    """
+    import re
+    from .services.scholar_search import ScholarSearchService
+
+    input_text = request.input.strip()
+
+    # Extract scholar_id from input
+    scholar_id = None
+
+    # Try to extract from URL patterns
+    cites_match = re.search(r'cites=(\d+)', input_text)
+    cluster_match = re.search(r'cluster=(\d+)', input_text)
+
+    if cites_match:
+        scholar_id = cites_match.group(1)
+    elif cluster_match:
+        scholar_id = cluster_match.group(1)
+    elif input_text.isdigit():
+        # Raw ID
+        scholar_id = input_text
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid input. Provide a Google Scholar ID (digits) or a Scholar URL containing cites= or cluster="
+        )
+
+    # Check if this scholar_id already exists
+    existing = await db.execute(
+        select(Edition).where(Edition.scholar_id == scholar_id)
+    )
+    existing_edition = existing.scalar_one_or_none()
+    if existing_edition:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Paper with this Scholar ID already exists (paper_id={existing_edition.paper_id}, edition_id={existing_edition.id})"
+        )
+
+    # Look up the paper metadata from Google Scholar
+    scholar_service = ScholarSearchService()
+    paper_data = await scholar_service.get_paper_by_scholar_id(scholar_id)
+
+    if not paper_data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not find paper with Scholar ID {scholar_id}"
+        )
+
+    # Format authors
+    authors = paper_data.get('authorsRaw') or ''
+    if isinstance(paper_data.get('authors'), list):
+        authors = ', '.join(paper_data['authors'])
+
+    # Create the Paper
+    db_paper = Paper(
+        title=paper_data.get('title', 'Unknown Title'),
+        authors=authors,
+        year=paper_data.get('year'),
+        venue=paper_data.get('venue'),
+        collection_id=request.collection_id,
+        dossier_id=request.dossier_id,
+        status="resolved",  # Skip resolution since we have the scholar_id
+    )
+    db.add(db_paper)
+    await db.flush()
+    await db.refresh(db_paper)
+
+    # Create the Edition
+    db_edition = Edition(
+        paper_id=db_paper.id,
+        scholar_id=scholar_id,
+        cluster_id=paper_data.get('clusterId'),
+        title=paper_data.get('title', 'Unknown Title'),
+        authors=authors,
+        year=paper_data.get('year'),
+        venue=paper_data.get('venue'),
+        abstract=paper_data.get('abstract'),
+        link=paper_data.get('link'),
+        citation_count=paper_data.get('citationCount', 0),
+        confidence="high",  # User explicitly provided this ID
+        auto_selected=True,
+        selected=True,  # Ready for harvesting
+    )
+    db.add(db_edition)
+    await db.flush()
+    await db.refresh(db_edition)
+
+    # Optionally start harvesting
+    harvest_job_id = None
+    if request.start_harvest:
+        from .services.job_worker import create_extract_citations_job
+        job = await create_extract_citations_job(db, db_paper.id)
+        if job:
+            harvest_job_id = job.id
+
+    await db.commit()
+
+    return QuickAddResponse(
+        paper_id=db_paper.id,
+        edition_id=db_edition.id,
+        title=db_paper.title,
+        authors=db_paper.authors,
+        year=db_paper.year,
+        citation_count=db_edition.citation_count,
+        scholar_id=scholar_id,
+        harvest_job_id=harvest_job_id,
+        message=f"Paper '{db_paper.title[:50]}...' added successfully" + (
+            f". Harvest job {harvest_job_id} queued." if harvest_job_id else ""
+        ),
+    )
 
 
 def paper_to_response(paper: Paper) -> dict:

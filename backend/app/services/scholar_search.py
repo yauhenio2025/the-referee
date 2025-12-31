@@ -959,6 +959,45 @@ class ScholarSearchService:
             log_now(f"Failed to get year count for {scholar_id}/{year}: {e}")
             return None
 
+    async def get_paper_by_scholar_id(self, scholar_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Look up a paper's metadata by its Google Scholar cluster/cites ID.
+
+        Uses the cluster endpoint to fetch the work and parses the first result.
+        This is useful for "quick add" where user provides just a Scholar ID.
+
+        Args:
+            scholar_id: The cluster/cites ID from Google Scholar
+
+        Returns:
+            Dict with paper metadata (title, authors, year, citationCount, etc.)
+            or None if not found
+        """
+        url = f"https://scholar.google.com/scholar?cluster={scholar_id}&hl=en"
+        log_now(f"[LOOKUP] Fetching paper by scholar_id: {scholar_id}")
+
+        try:
+            html = await self._fetch_with_retry(url)
+            if not html:
+                log_now(f"[LOOKUP] No HTML returned for {scholar_id}")
+                return None
+
+            papers = self._parse_scholar_page(html)
+            if not papers:
+                log_now(f"[LOOKUP] No papers found for cluster {scholar_id}")
+                return None
+
+            # Return the first (primary) result
+            paper = papers[0]
+            # Ensure the scholar_id is set correctly
+            paper["scholarId"] = scholar_id
+            log_now(f"[LOOKUP] Found: {paper.get('title', 'Unknown')[:60]}... ({paper.get('citationCount', 0)} citations)")
+            return paper
+
+        except Exception as e:
+            log_now(f"[LOOKUP] Error looking up {scholar_id}: {e}")
+            return None
+
     async def scrape_abstract_via_allintitle(
         self,
         title: str,
