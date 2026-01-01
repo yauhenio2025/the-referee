@@ -23,11 +23,11 @@ export default function PaperInput({ onPaperAdded }) {
   // Batch add state
   const [addingBatch, setAddingBatch] = useState(false)
 
-  // Quick add state
-  const [scholarInput, setScholarInput] = useState('')
+  // Quick add state - batch mode with multiple rows
+  const INITIAL_ROWS = 10
+  const [scholarInputs, setScholarInputs] = useState(Array(INITIAL_ROWS).fill(''))
   const [quickAddLoading, setQuickAddLoading] = useState(false)
-  const [quickAddResult, setQuickAddResult] = useState(null)
-  const [quickAddError, setQuickAddError] = useState(null)
+  const [quickAddResults, setQuickAddResults] = useState([]) // Array of {input, success, result, error}
   const [startHarvestAfterAdd, setStartHarvestAfterAdd] = useState(true)
 
   const createPaper = useMutation({
@@ -117,31 +117,66 @@ export default function PaperInput({ onPaperAdded }) {
   // Count total works in parsed result
   const totalWorks = parsedWorks?.authors?.reduce((sum, a) => sum + (a.works?.length || 0), 0) || 0
 
-  // Quick add using Google Scholar ID or URL
-  const handleQuickAdd = async () => {
-    if (!scholarInput.trim()) {
-      setQuickAddError('Please enter a Google Scholar ID or URL')
+  // Update a single input row
+  const updateScholarInput = (index, value) => {
+    const newInputs = [...scholarInputs]
+    newInputs[index] = value
+    setScholarInputs(newInputs)
+  }
+
+  // Add 5 more empty rows
+  const addMoreRows = () => {
+    setScholarInputs([...scholarInputs, ...Array(5).fill('')])
+  }
+
+  // Clear all inputs and results
+  const clearAllInputs = () => {
+    setScholarInputs(Array(INITIAL_ROWS).fill(''))
+    setQuickAddResults([])
+  }
+
+  // Get non-empty inputs
+  const getNonEmptyInputs = () => scholarInputs.filter(s => s.trim())
+
+  // Quick add batch - process all non-empty inputs
+  const handleQuickAddBatch = async () => {
+    const inputs = getNonEmptyInputs()
+    if (inputs.length === 0) {
       return
     }
 
     setQuickAddLoading(true)
-    setQuickAddError(null)
-    setQuickAddResult(null)
+    setQuickAddResults([])
 
-    try {
-      const result = await api.quickAdd(scholarInput.trim(), {
-        startHarvest: startHarvestAfterAdd,
+    // Process all inputs in parallel
+    const results = await Promise.all(
+      inputs.map(async (input) => {
+        try {
+          const result = await api.quickAdd(input.trim(), {
+            startHarvest: startHarvestAfterAdd,
+          })
+          return { input, success: true, result, error: null }
+        } catch (err) {
+          console.error('Quick add error for', input, ':', err)
+          return { input, success: false, result: null, error: err.message || 'Failed to add' }
+        }
       })
-      setQuickAddResult(result)
-      setScholarInput('')
+    )
+
+    setQuickAddResults(results)
+
+    // Clear successful inputs, keep failed ones
+    const failedInputs = results.filter(r => !r.success).map(r => r.input)
+    const newInputs = [...failedInputs, ...Array(Math.max(INITIAL_ROWS - failedInputs.length, 0)).fill('')]
+    setScholarInputs(newInputs)
+
+    // Refresh if any succeeded
+    if (results.some(r => r.success)) {
       queryClient.invalidateQueries(['papers'])
       onPaperAdded?.()
-    } catch (err) {
-      console.error('Quick add error:', err)
-      setQuickAddError(err.message || 'Failed to add paper')
-    } finally {
-      setQuickAddLoading(false)
     }
+
+    setQuickAddLoading(false)
   }
 
   return (
@@ -305,33 +340,60 @@ Harvey, David. A Brief History of Neoliberalism. Oxford University Press, 2005.`
       )}
 
       {inputMode === 'quick' && (
-        /* Quick add mode - paste Google Scholar ID or URL */
+        /* Quick add mode - batch paste Google Scholar IDs/URLs */
         <div className="quick-add">
           <p className="quick-add-hint">
-            Paste a Google Scholar URL or ID to quickly add a paper with its citation count.
+            Paste Google Scholar URLs or IDs to quickly add multiple papers with their citation counts.
           </p>
-          <div className="quick-add-input">
-            <input
-              type="text"
-              placeholder="https://scholar.google.com/scholar?cites=... or just the ID"
-              value={scholarInput}
-              onChange={(e) => setScholarInput(e.target.value)}
-              className="input-scholar"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !quickAddLoading && scholarInput.trim()) {
-                  handleQuickAdd()
-                }
-              }}
-            />
+
+          {/* Multiple input rows */}
+          <div className="quick-add-rows">
+            {scholarInputs.map((value, idx) => (
+              <div key={idx} className="quick-add-row">
+                <span className="row-number">{idx + 1}</span>
+                <input
+                  type="text"
+                  placeholder="https://scholar.google.com/scholar?cites=... or just the ID"
+                  value={value}
+                  onChange={(e) => updateScholarInput(idx, e.target.value)}
+                  className="input-scholar"
+                  disabled={quickAddLoading}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Actions row */}
+          <div className="quick-add-actions">
             <button
               type="button"
-              onClick={handleQuickAdd}
-              disabled={quickAddLoading || !scholarInput.trim()}
-              className="btn-quick-add"
+              onClick={addMoreRows}
+              disabled={quickAddLoading}
+              className="btn-add-rows"
             >
-              {quickAddLoading ? '⏳ Adding...' : '⚡ Add Paper'}
+              + Add 5 More Rows
+            </button>
+            <button
+              type="button"
+              onClick={clearAllInputs}
+              disabled={quickAddLoading}
+              className="btn-clear-rows"
+            >
+              Clear All
+            </button>
+            <div className="quick-add-spacer" />
+            <button
+              type="button"
+              onClick={handleQuickAddBatch}
+              disabled={quickAddLoading || getNonEmptyInputs().length === 0}
+              className="btn-quick-add-batch"
+            >
+              {quickAddLoading
+                ? `⏳ Adding ${getNonEmptyInputs().length} papers...`
+                : `⚡ Add ${getNonEmptyInputs().length || ''} Paper${getNonEmptyInputs().length !== 1 ? 's' : ''}`}
             </button>
           </div>
+
           <label className="quick-add-option">
             <input
               type="checkbox"
@@ -340,17 +402,31 @@ Harvey, David. A Brief History of Neoliberalism. Oxford University Press, 2005.`
             />
             Start harvesting citations immediately
           </label>
-          {quickAddError && <div className="error">{quickAddError}</div>}
-          {quickAddResult && (
-            <div className="quick-add-success">
-              <strong>Added:</strong> {quickAddResult.title}
-              {quickAddResult.authors && <span> by {quickAddResult.authors}</span>}
-              {quickAddResult.year && <span> ({quickAddResult.year})</span>}
-              <br />
-              <span className="citation-count">📊 {quickAddResult.citation_count.toLocaleString()} citations</span>
-              {quickAddResult.harvest_job_id && (
-                <span className="harvest-started"> • 🚀 Harvest started</span>
-              )}
+
+          {/* Results display */}
+          {quickAddResults.length > 0 && (
+            <div className="quick-add-results">
+              <h4>Results ({quickAddResults.filter(r => r.success).length}/{quickAddResults.length} succeeded)</h4>
+              {quickAddResults.map((r, idx) => (
+                <div key={idx} className={`quick-add-result ${r.success ? 'success' : 'error'}`}>
+                  {r.success ? (
+                    <>
+                      <span className="result-icon">✓</span>
+                      <span className="result-title">{r.result.title}</span>
+                      {r.result.authors && <span className="result-authors"> by {r.result.authors}</span>}
+                      {r.result.year && <span className="result-year"> ({r.result.year})</span>}
+                      <span className="result-citations">📊 {r.result.citation_count?.toLocaleString() || 0}</span>
+                      {r.result.harvest_job_id && <span className="result-harvest">🚀</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="result-icon">✗</span>
+                      <span className="result-input">{r.input.substring(0, 50)}...</span>
+                      <span className="result-error">{r.error}</span>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
