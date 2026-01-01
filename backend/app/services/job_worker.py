@@ -44,7 +44,7 @@ _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
 
 # Parallel processing settings
-MAX_CONCURRENT_JOBS = 5  # How many jobs can run simultaneously
+MAX_CONCURRENT_JOBS = 10  # How many jobs can run simultaneously
 _job_semaphore: Optional[asyncio.Semaphore] = None
 _running_jobs: set = set()  # Track currently running job IDs
 
