@@ -143,11 +143,29 @@ export default function PaperInput({ onPaperAdded }) {
   const handleParseBulkUrls = () => {
     if (!bulkPasteText.trim()) return
 
-    // Split by newlines, filter empty lines, trim each
-    const urls = bulkPasteText
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
+    // Smart parse: handle wrapped URLs (lines not starting with http get joined to previous)
+    const lines = bulkPasteText.split('\n').map(line => line.trim())
+    const urls = []
+    let currentUrl = ''
+
+    for (const line of lines) {
+      if (!line) continue // skip empty lines
+
+      // Check if this line starts a new URL
+      if (line.startsWith('http://') || line.startsWith('https://')) {
+        // Save previous URL if any
+        if (currentUrl) urls.push(currentUrl)
+        currentUrl = line
+      } else if (currentUrl) {
+        // This is a continuation of the previous URL (wrapped line)
+        currentUrl += line
+      } else {
+        // Standalone line (maybe just an ID) - treat as its own entry
+        urls.push(line)
+      }
+    }
+    // Don't forget the last URL
+    if (currentUrl) urls.push(currentUrl)
 
     if (urls.length === 0) return
 
@@ -156,6 +174,26 @@ export default function PaperInput({ onPaperAdded }) {
     const newInputs = [...urls, ...Array(Math.max(0, neededRows - urls.length)).fill('')]
     setScholarInputs(newInputs)
     setBulkPasteText('')
+  }
+
+  // Count URLs in bulk paste (handles wrapped lines)
+  const countBulkUrls = () => {
+    if (!bulkPasteText.trim()) return 0
+    const lines = bulkPasteText.split('\n').map(line => line.trim())
+    let count = 0
+    let inUrl = false
+    for (const line of lines) {
+      if (!line) continue
+      if (line.startsWith('http://') || line.startsWith('https://')) {
+        count++
+        inUrl = true
+      } else if (!inUrl) {
+        // Standalone ID
+        count++
+      }
+      // else: continuation of URL, don't count
+    }
+    return count
   }
 
   // Quick add batch - process all non-empty inputs
@@ -387,7 +425,7 @@ https://scholar.google.com/scholar?cites=4592822924704713920..."
                 disabled={quickAddLoading || !bulkPasteText.trim()}
                 className="btn-parse-urls"
               >
-                Parse {bulkPasteText.split('\n').filter(l => l.trim()).length || ''} URLs
+                Parse {countBulkUrls() || ''} URLs
               </button>
               {bulkPasteText.trim() && (
                 <button
