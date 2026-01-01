@@ -29,6 +29,7 @@ export default function PaperInput({ onPaperAdded }) {
   const [quickAddLoading, setQuickAddLoading] = useState(false)
   const [quickAddResults, setQuickAddResults] = useState([]) // Array of {input, success, result, error}
   const [startHarvestAfterAdd, setStartHarvestAfterAdd] = useState(true)
+  const [bulkPasteText, setBulkPasteText] = useState('')
 
   const createPaper = useMutation({
     mutationFn: (paper) => api.createPaper(paper),
@@ -137,6 +138,25 @@ export default function PaperInput({ onPaperAdded }) {
 
   // Get non-empty inputs
   const getNonEmptyInputs = () => scholarInputs.filter(s => s.trim())
+
+  // Parse bulk paste text and distribute to input rows
+  const handleParseBulkUrls = () => {
+    if (!bulkPasteText.trim()) return
+
+    // Split by newlines, filter empty lines, trim each
+    const urls = bulkPasteText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+
+    if (urls.length === 0) return
+
+    // Expand rows if needed
+    const neededRows = Math.max(urls.length, INITIAL_ROWS)
+    const newInputs = [...urls, ...Array(Math.max(0, neededRows - urls.length)).fill('')]
+    setScholarInputs(newInputs)
+    setBulkPasteText('')
+  }
 
   // Quick add batch - process all non-empty inputs
   const handleQuickAddBatch = async () => {
@@ -345,6 +365,42 @@ Harvey, David. A Brief History of Neoliberalism. Oxford University Press, 2005.`
           <p className="quick-add-hint">
             Paste Google Scholar URLs or IDs to quickly add multiple papers with their citation counts.
           </p>
+
+          {/* Bulk paste area */}
+          <div className="bulk-paste-area">
+            <textarea
+              placeholder="Paste multiple URLs here (one per line):
+
+https://scholar.google.com/scholar?cites=13113053921268685298...
+https://scholar.google.com/scholar?cites=1456224074819751909...
+https://scholar.google.com/scholar?cites=4592822924704713920..."
+              value={bulkPasteText}
+              onChange={(e) => setBulkPasteText(e.target.value)}
+              className="bulk-paste-textarea"
+              rows={5}
+              disabled={quickAddLoading}
+            />
+            <div className="bulk-paste-actions">
+              <button
+                type="button"
+                onClick={handleParseBulkUrls}
+                disabled={quickAddLoading || !bulkPasteText.trim()}
+                className="btn-parse-urls"
+              >
+                Parse {bulkPasteText.split('\n').filter(l => l.trim()).length || ''} URLs
+              </button>
+              {bulkPasteText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setBulkPasteText('')}
+                  className="btn-clear-paste"
+                  disabled={quickAddLoading}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* Multiple input rows */}
           <div className="quick-add-rows">
