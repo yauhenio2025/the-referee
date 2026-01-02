@@ -182,10 +182,23 @@ class Edition(Base):
     # Used to prevent infinite auto-resume loops when harvest can't progress further
     harvest_stall_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Edition merging - when editions are duplicates (same work, different URLs/scholar_ids)
+    # The merged edition's citations are pooled into the canonical edition
+    # But we keep both scholar_ids for harvesting from both Google Scholar entries
+    merged_into_edition_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("editions.id", ondelete="SET NULL"), nullable=True, default=None
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
     paper: Mapped["Paper"] = relationship(back_populates="editions")
+    merged_editions: Mapped[List["Edition"]] = relationship(
+        "Edition",
+        backref="canonical_edition",
+        remote_side="Edition.id",
+        foreign_keys="Edition.merged_into_edition_id"
+    )
 
 
 class Citation(Base):

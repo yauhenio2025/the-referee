@@ -279,6 +279,27 @@ class EditionAddAsSeedResponse(BaseModel):
     dossier_name: Optional[str] = None
 
 
+class EditionMergeRequest(BaseModel):
+    """Merge one edition into another (canonical) edition.
+
+    Use case: Same work appears under different URLs/scholar_ids (e.g., JSTOR + marcuse.org).
+    The merged edition's citations are pooled into the canonical edition.
+    Both scholar_ids are preserved for future harvesting.
+    """
+    source_edition_id: int  # Edition to merge (will be marked as merged)
+    target_edition_id: int  # Canonical edition (receives citations)
+    copy_metadata: bool = False  # Copy target's metadata to source
+
+
+class EditionMergeResponse(BaseModel):
+    """Response from merging editions"""
+    success: bool
+    message: str
+    citations_moved: int = 0
+    source_edition_id: int
+    target_edition_id: int
+
+
 class EditionUpdateConfidenceRequest(BaseModel):
     """Mark editions as high/uncertain/rejected"""
     edition_ids: List[int]

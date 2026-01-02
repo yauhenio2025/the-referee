@@ -25,6 +25,7 @@ from .schemas import (
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
     EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
     EditionExcludeRequest, EditionAddAsSeedRequest, EditionAddAsSeedResponse,
+    EditionMergeRequest, EditionMergeResponse,
     ManualEditionAddRequest, ManualEditionAddResponse,
     CitationResponse, CitationExtractionRequest, CitationExtractionResponse, CrossCitationResult, CitationMarkReviewedRequest,
     JobResponse, JobDetail, FetchMoreJobRequest, FetchMoreJobResponse,
@@ -1642,6 +1643,75 @@ async def exclude_editions(request: EditionExcludeRequest, db: AsyncSession = De
 
     await db.commit()
     return {"updated": len(editions), "excluded": request.excluded}
+
+
+@app.post("/api/editions/merge", response_model=EditionMergeResponse)
+async def merge_editions(request: EditionMergeRequest, db: AsyncSession = Depends(get_db)):
+    """Merge one edition into another (canonical) edition.
+
+    Use case: Same work appears under different URLs/scholar_ids (e.g., JSTOR + marcuse.org).
+    - Source edition's citations are moved to target edition
+    - Source keeps its scholar_id for future harvesting
+    - Source is marked as merged_into_edition_id = target
+    - Optionally copy target's metadata to source
+    """
+    # Get both editions
+    result = await db.execute(
+        select(Edition).where(Edition.id.in_([request.source_edition_id, request.target_edition_id]))
+    )
+    editions = {e.id: e for e in result.scalars().all()}
+
+    source = editions.get(request.source_edition_id)
+    target = editions.get(request.target_edition_id)
+
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source edition {request.source_edition_id} not found")
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Target edition {request.target_edition_id} not found")
+
+    # Ensure they belong to the same paper
+    if source.paper_id != target.paper_id:
+        raise HTTPException(status_code=400, detail="Cannot merge editions from different papers")
+
+    # Check for circular merge
+    if target.merged_into_edition_id:
+        raise HTTPException(status_code=400, detail="Target edition is already merged into another edition")
+
+    # Move citations from source to target
+    citations_result = await db.execute(
+        select(Citation).where(Citation.edition_id == source.id)
+    )
+    source_citations = citations_result.scalars().all()
+    citations_moved = 0
+
+    for citation in source_citations:
+        citation.edition_id = target.id
+        citations_moved += 1
+
+    # Mark source as merged
+    source.merged_into_edition_id = target.id
+
+    # Optionally copy metadata from target to source
+    if request.copy_metadata:
+        source.title = target.title
+        source.authors = target.authors
+        source.year = target.year
+        source.venue = target.venue
+        source.abstract = target.abstract
+        # Keep source's own link and scholar_id
+
+    # Update target's harvested citation count
+    target.harvested_citation_count = (target.harvested_citation_count or 0) + citations_moved
+
+    await db.commit()
+
+    return EditionMergeResponse(
+        success=True,
+        message=f"Merged edition {source.id} into {target.id}. {citations_moved} citations moved.",
+        citations_moved=citations_moved,
+        source_edition_id=source.id,
+        target_edition_id=target.id
+    )
 
 
 @app.post("/api/editions/{edition_id}/add-as-seed", response_model=EditionAddAsSeedResponse)

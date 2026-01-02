@@ -362,6 +362,9 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false)
   const [analyzingEditionId, setAnalyzingEditionId] = useState(null) // Track which edition is being analyzed
   const [showGapModal, setShowGapModal] = useState(false)
+  // Edition merging state
+  const [mergingEdition, setMergingEdition] = useState(null) // Source edition being merged
+  const [showMergeModal, setShowMergeModal] = useState(false)
 
   // Poll for job status updates
   useEffect(() => {
@@ -507,6 +510,19 @@ export default function EditionDiscovery({ paper, onBack }) {
     onError: (error) => toast.error(`Failed to update edition: ${error.message}`),
   })
 
+  // Merge editions
+  const mergeEditionsMutation = useMutation({
+    mutationFn: ({ sourceId, targetId, copyMetadata }) => api.mergeEditions(sourceId, targetId, copyMetadata),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries(['editions', paper.id])
+      queryClient.invalidateQueries(['citations', paper.id])
+      toast.success(`✓ Merged editions: ${result.citations_moved} citations moved`)
+      setShowMergeModal(false)
+      setMergingEdition(null)
+    },
+    onError: (error) => toast.error(`Merge failed: ${error.message}`),
+  })
+
   // Helper to open edit modal
   const openEditEdition = (edition) => {
     setEditForm({
@@ -533,6 +549,22 @@ export default function EditionDiscovery({ paper, onBack }) {
     })
     setEditingPaper(true)
   }
+
+  // Open merge modal for an edition
+  const openMergeModal = (edition) => {
+    setMergingEdition(edition)
+    setShowMergeModal(true)
+  }
+
+  // Get available merge targets (all other non-merged editions)
+  const getMergeTargets = useCallback(() => {
+    if (!editions || !mergingEdition) return []
+    return editions.filter(e =>
+      e.id !== mergingEdition.id &&
+      !e.merged_into_edition_id &&
+      !e.excluded
+    )
+  }, [editions, mergingEdition])
 
   const handleSaveMetadata = () => {
     const metadata = {
@@ -1103,6 +1135,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
               onEditEdition={openEditEdition}
+              onMergeEdition={openMergeModal}
             />
           )}
 
@@ -1129,6 +1162,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
               onEditEdition={openEditEdition}
+              onMergeEdition={openMergeModal}
             />
           )}
 
@@ -1155,6 +1189,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
               onEditEdition={openEditEdition}
+              onMergeEdition={openMergeModal}
             />
           )}
 
@@ -1180,6 +1215,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
               onEditEdition={openEditEdition}
+              onMergeEdition={openMergeModal}
             />
           )}
         </div>
@@ -1574,6 +1610,26 @@ export default function EditionDiscovery({ paper, onBack }) {
           </div>
         </div>
       )}
+
+      {/* Merge Edition Modal */}
+      {showMergeModal && mergingEdition && (
+        <MergeEditionModal
+          sourceEdition={mergingEdition}
+          targetOptions={getMergeTargets()}
+          onMerge={(targetId, copyMetadata) => {
+            mergeEditionsMutation.mutate({
+              sourceId: mergingEdition.id,
+              targetId,
+              copyMetadata,
+            })
+          }}
+          onClose={() => {
+            setShowMergeModal(false)
+            setMergingEdition(null)
+          }}
+          isPending={mergeEditionsMutation.isPending}
+        />
+      )}
     </div>
   )
 }
@@ -1604,7 +1660,8 @@ function EditionGroup({
   isExcludedGroup = false,
   onAnalyzeGaps,
   analyzingEditionId,
-  onEditEdition
+  onEditEdition,
+  onMergeEdition
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
@@ -1737,6 +1794,7 @@ function EditionGroup({
                   onAnalyzeGaps={onAnalyzeGaps}
                   isAnalyzingGaps={analyzingEditionId === ed.id}
                   onEditEdition={onEditEdition}
+                  onMergeEdition={onMergeEdition}
                 />
               ))}
             </tbody>
@@ -1766,7 +1824,8 @@ function EditionRow({
   isExcludedGroup = false,
   onAnalyzeGaps,
   isAnalyzingGaps = false,
-  onEditEdition
+  onEditEdition,
+  onMergeEdition
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
@@ -1879,6 +1938,17 @@ function EditionRow({
           </button>
         )}
 
+        {/* Merge into another edition button */}
+        {onMergeEdition && !isExcludedGroup && !edition.merged_into_edition_id && (
+          <button
+            className="btn-icon btn-merge"
+            onClick={() => onMergeEdition(edition)}
+            title="Merge into another edition (combine citations)"
+          >
+            🔗
+          </button>
+        )}
+
         {/* Add as Seed button - for all groups except excluded */}
         {onAddAsSeed && !isExcludedGroup && (
           <button
@@ -1950,5 +2020,108 @@ function EditionRow({
         )}
       </td>
     </tr>
+  )
+}
+
+/**
+ * Merge Edition Modal - select target edition and merge
+ */
+function MergeEditionModal({ sourceEdition, targetOptions, onMerge, onClose, isPending }) {
+  const [selectedTarget, setSelectedTarget] = useState(null)
+  const [copyMetadata, setCopyMetadata] = useState(false)
+
+  // Sort targets by citation count (highest first) for easier selection
+  const sortedTargets = useMemo(() => {
+    return [...targetOptions].sort((a, b) => (b.citation_count || 0) - (a.citation_count || 0))
+  }, [targetOptions])
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal merge-modal" onClick={e => e.stopPropagation()}>
+        <h3>🔗 Merge Edition</h3>
+
+        <div className="merge-source">
+          <span className="merge-label">Merge this edition:</span>
+          <div className="merge-edition-card source">
+            <strong>{sourceEdition.title}</strong>
+            <span className="merge-meta">
+              {sourceEdition.language && <span className="lang">{sourceEdition.language}</span>}
+              {sourceEdition.year && <span className="year">{sourceEdition.year}</span>}
+              <span className="cites">{sourceEdition.citation_count?.toLocaleString() || 0} citations</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="merge-arrow">↓ into ↓</div>
+
+        <div className="merge-target">
+          <span className="merge-label">Select target edition (will become canonical):</span>
+
+          {sortedTargets.length === 0 ? (
+            <div className="no-targets">No other editions available to merge into.</div>
+          ) : (
+            <div className="target-list">
+              {sortedTargets.map(target => (
+                <div
+                  key={target.id}
+                  className={`merge-edition-card target ${selectedTarget?.id === target.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedTarget(target)}
+                >
+                  <input
+                    type="radio"
+                    checked={selectedTarget?.id === target.id}
+                    onChange={() => setSelectedTarget(target)}
+                  />
+                  <div className="target-info">
+                    <strong>{target.title}</strong>
+                    <span className="merge-meta">
+                      {target.language && <span className="lang">{target.language}</span>}
+                      {target.year && <span className="year">{target.year}</span>}
+                      <span className="cites">{target.citation_count?.toLocaleString() || 0} citations</span>
+                      {target.harvested_citations > 0 && (
+                        <span className="harvested">{target.harvested_citations} harvested</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="merge-options">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={copyMetadata}
+              onChange={e => setCopyMetadata(e.target.checked)}
+            />
+            Copy metadata from target (title, authors, year, venue)
+          </label>
+        </div>
+
+        <div className="merge-info">
+          <p>
+            <strong>What happens:</strong>
+          </p>
+          <ul>
+            <li>Citations from both editions will be combined</li>
+            <li>Source edition will be marked as "merged" (preserved for scholar_id harvesting)</li>
+            <li>Both scholar_ids will continue to be used for periodic harvests</li>
+          </ul>
+        </div>
+
+        <div className="modal-footer">
+          <button onClick={onClose} disabled={isPending}>Cancel</button>
+          <button
+            onClick={() => selectedTarget && onMerge(selectedTarget.id, copyMetadata)}
+            disabled={!selectedTarget || isPending}
+            className="btn-primary"
+          >
+            {isPending ? 'Merging...' : `Merge into ${selectedTarget?.language || 'Selected'} Edition`}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -882,9 +882,23 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         raise ValueError("No editions selected for extraction")
 
     # Filter out editions without scholar_id, above threshold, zero citations, or already complete
+    # Also handle merged editions: redirect their citations to the canonical edition
     valid_editions = []
     skipped_editions = []
+    # Map merged edition IDs to canonical edition IDs for citation redirection
+    merged_to_canonical = {}
+
     for e in editions:
+        # If this edition is merged into another, skip it (it will be processed via its canonical edition)
+        if e.merged_into_edition_id:
+            merged_to_canonical[e.id] = e.merged_into_edition_id
+            skipped_editions.append({
+                "id": e.id,
+                "title": e.title,
+                "reason": f"merged_into_edition_{e.merged_into_edition_id}"
+            })
+            continue
+
         if not e.scholar_id:
             skipped_editions.append({"id": e.id, "title": e.title, "reason": "no_scholar_id"})
         elif e.citation_count is None or e.citation_count == 0:
@@ -903,6 +917,26 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             })
         else:
             valid_editions.append(e)
+
+    # For canonical editions, also fetch their merged editions for harvesting
+    # This allows harvesting from multiple scholar_ids but directing all citations to the canonical edition
+    canonical_ids = [e.id for e in valid_editions]
+    merged_editions_result = await db.execute(
+        select(Edition).where(
+            Edition.merged_into_edition_id.in_(canonical_ids),
+            Edition.scholar_id.isnot(None)
+        )
+    )
+    merged_editions_for_harvest = list(merged_editions_result.scalars().all())
+
+    # Build a map of canonical edition ID -> list of merged editions to also harvest
+    canonical_to_merged = {}
+    for me in merged_editions_for_harvest:
+        canonical_id = me.merged_into_edition_id
+        if canonical_id not in canonical_to_merged:
+            canonical_to_merged[canonical_id] = []
+        canonical_to_merged[canonical_id].append(me)
+        log_now(f"[Worker] Will also harvest merged edition {me.id} (scholar_id={me.scholar_id}) for canonical edition {canonical_id}")
 
     if not valid_editions:
         raise ValueError(f"No valid editions to process (all {len(skipped_editions)} skipped)")
@@ -960,6 +994,10 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         # Track current year for year-by-year mode (accessible in callback)
         current_harvest_year = {"year": None, "mode": "standard"}
 
+        # Target edition ID for citations - normally same as edition.id,
+        # but for merged editions it points to their canonical edition
+        target_edition_id = edition.id
+
         # First, update harvest stats to capture any zombie job progress (citations saved but stats not updated)
         await update_edition_harvest_stats(db, edition.id)
         await db.refresh(edition)
@@ -989,7 +1027,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         # IMPORTANT: Uses fresh DB session to avoid greenlet context issues
         # when callback is invoked from within scholar_search after async context switches
         async def save_page_citations(page_num: int, papers: List[Dict]):
-            nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params
+            nonlocal total_new_citations, total_updated_citations, existing_scholar_ids, params, target_edition_id
 
             log_now(f"[CALLBACK] ═══════════════════════════════════════════════")
             log_now(f"[CALLBACK] save_page_citations called")
@@ -1033,9 +1071,10 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             from sqlalchemy import text
                             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+                            # Use target_edition_id - allows merged editions to redirect citations to canonical
                             stmt = pg_insert(Citation).values(
                                 paper_id=paper_id,
-                                edition_id=edition.id,
+                                edition_id=target_edition_id,  # May differ from edition.id for merged editions
                                 scholar_id=scholar_id,
                                 title=paper_data.get("title", "Unknown"),
                                 authors=paper_data.get("authorsRaw"),
@@ -1554,6 +1593,34 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
             # Update edition harvest stats (always, not just refresh mode)
             await update_edition_harvest_stats(db, edition.id)
+
+            # ====== MERGED EDITIONS HARVESTING ======
+            # After processing a canonical edition, also harvest from its merged editions
+            # Citations go to the canonical edition (target_edition_id stays as edition.id)
+            merged_editions = canonical_to_merged.get(edition.id, [])
+            if merged_editions:
+                log_now(f"[EDITION {i+1}] 🔗 Processing {len(merged_editions)} merged edition(s)...")
+                for merged_ed in merged_editions:
+                    try:
+                        log_now(f"[MERGED] Harvesting from merged edition {merged_ed.id} (scholar_id={merged_ed.scholar_id})")
+                        # Use standard harvest for merged editions (smaller, just picking up extras)
+                        merged_result = await scholar_service.get_cited_by(
+                            scholar_id=merged_ed.scholar_id,
+                            max_results=max_citations_per_edition,
+                            on_page_complete=save_page_citations,  # Uses target_edition_id which is still the canonical edition
+                        )
+                        merged_citations = merged_result.get("papers", []) if isinstance(merged_result, dict) else []
+                        log_now(f"[MERGED] ✓ Merged edition {merged_ed.id} complete: fetched {len(merged_citations)} results")
+
+                        # Update merged edition's harvest stats too (tracks when it was last harvested)
+                        merged_ed.last_harvested_at = datetime.utcnow()
+                        await db.commit()
+
+                        # Small delay between merged editions
+                        await asyncio.sleep(2)
+                    except Exception as merged_err:
+                        log_now(f"[MERGED] ⚠️ Error harvesting merged edition {merged_ed.id}: {merged_err}", "warning")
+                        # Continue with other merged editions
 
             # Rate limit between editions
             if i < total_editions - 1:

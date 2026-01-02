@@ -224,6 +224,17 @@ class RefereeAPI {
     });
   }
 
+  async mergeEditions(sourceEditionId, targetEditionId, copyMetadata = false) {
+    return this.request('/api/editions/merge', {
+      method: 'POST',
+      body: {
+        source_edition_id: sourceEditionId,
+        target_edition_id: targetEditionId,
+        copy_metadata: copyMetadata,
+      },
+    });
+  }
+
   async addEditionAsSeed(editionId, options = {}) {
     return this.request(`/api/editions/${editionId}/add-as-seed`, {
       method: 'POST',
