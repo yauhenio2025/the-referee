@@ -8,8 +8,9 @@ Fixed greenlet context issues in harvest callbacks (2025-12-30).
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, text
 from typing import List, Optional
@@ -39,6 +40,9 @@ from .schemas import (
     GapDetail, GapFix, AIGapAnalysisResponse,
     # Quick-add schemas
     QuickAddRequest, QuickAddResponse,
+    # External API schemas
+    BatchCrossRequest, BatchCrossResult, CrossCitationItem,
+    ExternalAnalyzeRequest, ExternalAnalyzeResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -88,6 +92,38 @@ logger.info("THE REFEREE API STARTING UP")
 logger.info("="*60)
 
 settings = get_settings()
+
+
+# ============== API Key Authentication ==============
+# Used for external API endpoints (/api/external/*)
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
+    """
+    Verify API key for external endpoints.
+    Returns the API key if valid, raises HTTPException if invalid.
+    """
+    if not settings.api_auth_enabled:
+        return "auth_disabled"  # Auth disabled, allow all
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide X-API-Key header.",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+
+    valid_keys = settings.get_api_keys_list()
+    if api_key not in valid_keys:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+
+    return api_key
 
 
 @asynccontextmanager
@@ -2893,13 +2929,14 @@ async def refresh_paper_citations(
         year_low = paper.any_edition_harvested_at.year
 
     # Create refresh job
+    # When force_full_refresh=True, set is_refresh=False to bypass year filtering in job_worker
     job = await create_extract_citations_job(
         db=db,
         paper_id=paper_id,
         edition_ids=[e.id for e in editions],
         max_citations_per_edition=request.max_citations_per_edition,
         skip_threshold=request.skip_threshold,
-        is_refresh=True,
+        is_refresh=not request.force_full_refresh,
         year_low=year_low,
         batch_id=batch_id,
     )
@@ -4779,4 +4816,309 @@ async def get_partition_run_details(run_id: int, db: AsyncSession = Depends(get_
             }
             for c in llm_calls
         ],
+    }
+
+
+# ============== External API Endpoints ==============
+# These endpoints are designed for service-to-service integration
+# They require API key authentication when api_auth_enabled=True
+
+
+@app.post("/api/external/cross-citations", response_model=BatchCrossResult)
+async def batch_cross_citations(
+    request: BatchCrossRequest,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Get citations that cite multiple papers from the given list.
+    Returns papers ranked by how many of the target papers they cite.
+
+    This is the key endpoint for finding papers that are cited by most/all
+    of your target papers - useful for identifying foundational works.
+    """
+    if not request.paper_ids:
+        raise HTTPException(status_code=400, detail="paper_ids cannot be empty")
+
+    # Single efficient query to find cross-citations
+    # Uses GROUP BY to aggregate citations across papers
+    query = text("""
+        SELECT
+            c.scholar_id,
+            MIN(c.title) as title,
+            MIN(c.authors) as authors,
+            MIN(c.year) as year,
+            MIN(c.venue) as venue,
+            MIN(c.link) as link,
+            MIN(c.citation_count) as citation_count,
+            COUNT(DISTINCT c.paper_id) as cites_count,
+            ARRAY_AGG(DISTINCT c.paper_id) as cites_papers
+        FROM citations c
+        WHERE c.paper_id = ANY(:paper_ids)
+        AND c.scholar_id IS NOT NULL
+        GROUP BY c.scholar_id
+        HAVING COUNT(DISTINCT c.paper_id) >= :min_intersection
+        ORDER BY cites_count DESC, citation_count DESC
+        LIMIT 1000
+    """)
+
+    result = await db.execute(
+        query,
+        {"paper_ids": request.paper_ids, "min_intersection": request.min_intersection}
+    )
+    rows = result.fetchall()
+
+    cross_citations = [
+        CrossCitationItem(
+            scholar_id=row.scholar_id,
+            title=row.title,
+            authors=row.authors,
+            year=row.year,
+            venue=row.venue,
+            link=row.link,
+            cites_count=row.cites_count,
+            cites_papers=list(row.cites_papers),
+            own_citation_count=row.citation_count or 0,
+        )
+        for row in rows
+    ]
+
+    return BatchCrossResult(
+        paper_ids=request.paper_ids,
+        total_unique_citations=len(cross_citations),
+        cross_citations=cross_citations,
+    )
+
+
+@app.post("/api/external/analyze", response_model=ExternalAnalyzeResponse)
+async def external_analyze_papers(
+    request: ExternalAnalyzeRequest,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Submit papers for full analysis pipeline via external API.
+
+    This endpoint:
+    1. Creates a collection/dossier if specified
+    2. Adds all papers
+    3. Queues jobs for edition discovery and citation extraction
+    4. Returns job IDs for tracking
+    5. Optionally sends webhook when complete
+
+    Options:
+    - discover_editions: bool (default True) - Run edition discovery
+    - harvest_citations: bool (default True) - Harvest citations after discovery
+    - compute_cross_citations: bool (default False) - Compute cross-citations after harvest
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    options = request.options or {}
+    discover_editions = options.get("discover_editions", True)
+    harvest_citations = options.get("harvest_citations", True)
+
+    # Create collection/dossier if specified
+    collection_id = None
+    dossier_id = None
+
+    if request.collection_name:
+        # Check if collection exists
+        result = await db.execute(
+            select(Collection).where(Collection.name == request.collection_name)
+        )
+        collection = result.scalar_one_or_none()
+
+        if not collection:
+            collection = Collection(name=request.collection_name)
+            db.add(collection)
+            await db.flush()
+
+        collection_id = collection.id
+
+        # Create dossier if specified
+        if request.dossier_name:
+            result = await db.execute(
+                select(Dossier).where(
+                    Dossier.collection_id == collection_id,
+                    Dossier.name == request.dossier_name
+                )
+            )
+            dossier = result.scalar_one_or_none()
+
+            if not dossier:
+                dossier = Dossier(
+                    collection_id=collection_id,
+                    name=request.dossier_name
+                )
+                db.add(dossier)
+                await db.flush()
+
+            dossier_id = dossier.id
+
+    # Add papers
+    paper_ids = []
+    for paper_input in request.papers:
+        paper = Paper(
+            title=paper_input.title,
+            authors=paper_input.authors,
+            year=paper_input.year,
+            status="pending",
+            collection_id=collection_id,
+            dossier_id=dossier_id,
+        )
+        db.add(paper)
+        await db.flush()
+        paper_ids.append(paper.id)
+
+    # Create a master job to track the overall process
+    master_job = Job(
+        job_type="external_analyze",
+        status="pending",
+        priority=5,
+        params=json.dumps({
+            "paper_ids": paper_ids,
+            "discover_editions": discover_editions,
+            "harvest_citations": harvest_citations,
+            "options": options,
+        }),
+        callback_url=request.callback_url,
+        callback_secret=request.callback_secret,
+    )
+    db.add(master_job)
+    await db.flush()
+
+    # Queue edition discovery jobs for each paper
+    if discover_editions:
+        for paper_id in paper_ids:
+            job = Job(
+                paper_id=paper_id,
+                job_type="discover_editions",
+                status="pending",
+                priority=3,
+                params=json.dumps({
+                    "language_strategy": "major_languages",
+                    "parent_job_id": master_job.id,
+                }),
+            )
+            db.add(job)
+
+    await db.commit()
+
+    return ExternalAnalyzeResponse(
+        job_id=master_job.id,
+        paper_ids=paper_ids,
+        status="pending",
+        message=f"Queued {len(paper_ids)} papers for analysis",
+        collection_id=collection_id,
+        dossier_id=dossier_id,
+    )
+
+
+@app.get("/api/external/papers/{paper_id}/citations")
+async def external_get_paper_citations(
+    paper_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    min_citation_count: int = 0,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Get all citations for a paper with full Google Scholar data.
+
+    Returns citations sorted by their own citation count (most cited first).
+    """
+    # Verify paper exists
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail=f"Paper {paper_id} not found")
+
+    # Get citations with optional filtering
+    query = (
+        select(Citation)
+        .where(Citation.paper_id == paper_id)
+        .where(Citation.citation_count >= min_citation_count)
+        .order_by(Citation.citation_count.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    citations = result.scalars().all()
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count(Citation.id))
+        .where(Citation.paper_id == paper_id)
+        .where(Citation.citation_count >= min_citation_count)
+    )
+    total_count = count_result.scalar() or 0
+
+    return {
+        "paper_id": paper_id,
+        "paper_title": paper.title,
+        "total_citations": total_count,
+        "returned_count": len(citations),
+        "offset": offset,
+        "limit": limit,
+        "citations": [
+            {
+                "scholar_id": c.scholar_id,
+                "title": c.title,
+                "authors": c.authors,
+                "year": c.year,
+                "venue": c.venue,
+                "link": c.link,
+                "citation_count": c.citation_count,
+                "abstract": c.abstract,
+            }
+            for c in citations
+        ],
+    }
+
+
+@app.get("/api/external/jobs/{job_id}")
+async def external_get_job_status(
+    job_id: int,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Get status of a job, including webhook callback status.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "progress": job.progress,
+        "progress_message": job.progress_message,
+        "paper_id": job.paper_id,
+        "result": json.loads(job.result) if job.result else None,
+        "error": job.error,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "callback_url": job.callback_url,
+        "callback_sent_at": job.callback_sent_at.isoformat() if job.callback_sent_at else None,
+        "callback_error": job.callback_error,
+    }
+
+
+@app.get("/api/external/health")
+async def external_health_check(api_key: str = Depends(verify_api_key)):
+    """
+    Health check for external API. Verifies API key is valid.
+    """
+    return {
+        "status": "healthy",
+        "service": "the-referee",
+        "api_auth_enabled": settings.api_auth_enabled,
+        "timestamp": datetime.utcnow().isoformat(),
     }

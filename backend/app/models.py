@@ -248,6 +248,12 @@ class Job(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
+    # Webhook callback (for external API integration)
+    callback_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    callback_secret: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, default=None)
+    callback_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+    callback_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+
     # Relationships
     paper: Mapped[Optional["Paper"]] = relationship(back_populates="jobs")
 

@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "paper_id": 71,
+    "edition_id": 1073,
+    "year": 2011,
+    "strategy": "author_initial_split",
+    "excluded_initials": [
+      "m"
+    ],
+    "timestamp": "2026-01-02T09:50:47.024147",
+    "dry_run": false
+  },
+  "stats": {
+    "oxylabs_requests": 27,
+    "oxylabs_successes": 27,
+    "oxylabs_failures": 0,
+    "non_english_papers": 0,
+    "english_papers": 0,
+    "total_papers": 0,
+    "new_papers": 0,
+    "duplicates": 1206
+  },
+  "papers": []
+}

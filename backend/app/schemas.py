@@ -567,6 +567,74 @@ class AIGapAnalysisResponse(BaseModel):
     ai_recommendations: str = ""
 
 
+# ============== External API Schemas ==============
+
+class BatchCrossRequest(BaseModel):
+    """Request for batch cross-citation analysis across multiple papers"""
+    paper_ids: List[int]
+    min_intersection: int = 2  # Only return citations citing at least this many papers
+
+
+class CrossCitationItem(BaseModel):
+    """A citation that appears across multiple seed papers"""
+    scholar_id: Optional[str] = None
+    title: str
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    link: Optional[str] = None
+    cites_count: int  # How many of our papers this citation cites
+    cites_papers: List[int]  # Which paper_ids it cites
+    own_citation_count: int  # How popular is this paper itself
+
+
+class BatchCrossResult(BaseModel):
+    """Response from batch cross-citation analysis"""
+    paper_ids: List[int]
+    total_unique_citations: int
+    cross_citations: List[CrossCitationItem]
+
+
+class ExternalPaperInput(BaseModel):
+    """Paper input for external API (simplified)"""
+    title: str
+    authors: Optional[str] = None
+    year: Optional[int] = None
+
+
+class ExternalAnalyzeRequest(BaseModel):
+    """Request to analyze papers via external API"""
+    papers: List[ExternalPaperInput]
+    callback_url: Optional[str] = None  # Webhook URL to call when done
+    callback_secret: Optional[str] = None  # Secret for HMAC signing
+    options: Optional[dict] = None  # {discover_editions: bool, harvest_citations: bool, compute_cross_citations: bool}
+    collection_name: Optional[str] = None  # Optional collection to add papers to
+    dossier_name: Optional[str] = None  # Optional dossier name
+
+
+class ExternalAnalyzeResponse(BaseModel):
+    """Response from external analyze request"""
+    job_id: int
+    paper_ids: List[int]
+    status: str
+    message: str
+    collection_id: Optional[int] = None
+    dossier_id: Optional[int] = None
+
+
+class WebhookPayload(BaseModel):
+    """Payload sent to webhook callback URL"""
+    event: str  # "job.completed", "job.failed", "job.progress"
+    job_id: int
+    job_type: str
+    status: str
+    paper_id: Optional[int] = None
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    progress: Optional[float] = None
+    timestamp: datetime
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 CollectionDetail.model_rebuild()

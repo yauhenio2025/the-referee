@@ -19,8 +19,77 @@ from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# ============== Webhook Callback System ==============
+
+async def send_webhook_callback(job: Job, db: AsyncSession) -> bool:
+    """
+    Send webhook callback for job completion/failure.
+
+    Uses HMAC-SHA256 signing if callback_secret is provided.
+    Returns True if webhook was sent successfully, False otherwise.
+    """
+    if not job.callback_url:
+        return True  # No callback configured, that's fine
+
+    import httpx
+    import hmac
+    import hashlib
+
+    settings = get_settings()
+
+    # Build payload
+    payload = {
+        "event": f"job.{job.status}",
+        "job_id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "paper_id": job.paper_id,
+        "result": json.loads(job.result) if job.result else None,
+        "error": job.error,
+        "progress": job.progress,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    headers = {"Content-Type": "application/json"}
+
+    # Sign payload if secret is provided
+    if job.callback_secret:
+        payload_bytes = json.dumps(payload, sort_keys=True).encode()
+        signature = hmac.new(
+            job.callback_secret.encode(),
+            payload_bytes,
+            hashlib.sha256
+        ).hexdigest()
+        headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                job.callback_url,
+                json=payload,
+                headers=headers,
+                timeout=settings.webhook_timeout_seconds
+            )
+
+            if response.status_code >= 200 and response.status_code < 300:
+                job.callback_sent_at = datetime.utcnow()
+                job.callback_error = None
+                log_now(f"[Webhook] Successfully sent callback for job {job.id} to {job.callback_url}")
+                return True
+            else:
+                job.callback_error = f"HTTP {response.status_code}: {response.text[:500]}"
+                log_now(f"[Webhook] Failed for job {job.id}: {job.callback_error}")
+                return False
+
+    except Exception as e:
+        job.callback_error = f"Exception: {str(e)}"
+        log_now(f"[Webhook] Exception for job {job.id}: {e}")
+        return False
 
 # Force immediate log output
 def log_now(msg: str, level: str = "info"):
@@ -2020,6 +2089,11 @@ async def process_single_job(job_id: int):
 
                     log_now(f"[Worker] Completed job {job_id}")
 
+                    # Send webhook callback if configured
+                    if job.callback_url:
+                        await send_webhook_callback(job, db)
+                        await db.commit()
+
                 except Exception as e:
                     log_now(f"[Worker] Job {job_id} failed: {e}")
                     log_now(f"[Worker] Traceback: {traceback.format_exc()}")
@@ -2029,6 +2103,11 @@ async def process_single_job(job_id: int):
                         job.error = str(e)
                         job.completed_at = datetime.utcnow()
                         await db.commit()
+
+                        # Send webhook callback for failure if configured
+                        if job.callback_url:
+                            await send_webhook_callback(job, db)
+                            await db.commit()
                     except:
                         pass
         finally:

@@ -100,6 +100,11 @@ async def run_migrations():
         "DROP INDEX IF EXISTS ix_citations_paper_scholar",
         "DROP INDEX IF EXISTS ix_citations_paper_scholar_unique",
         "CREATE UNIQUE INDEX ix_citations_paper_scholar_unique ON citations(paper_id, scholar_id)",
+        # External API feature: webhook callback support for jobs
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_url TEXT NULL",
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_secret VARCHAR(256) NULL",
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_sent_at TIMESTAMP NULL",
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_error TEXT NULL",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
