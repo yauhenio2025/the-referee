@@ -29,16 +29,12 @@ logger = logging.getLogger(__name__)
 async def send_webhook_callback(job: Job, db: AsyncSession) -> bool:
     """
     Send webhook callback for job completion/failure.
-
-    Uses HMAC-SHA256 signing if callback_secret is provided.
     Returns True if webhook was sent successfully, False otherwise.
     """
     if not job.callback_url:
         return True  # No callback configured, that's fine
 
     import httpx
-    import hmac
-    import hashlib
 
     settings = get_settings()
 
@@ -57,16 +53,6 @@ async def send_webhook_callback(job: Job, db: AsyncSession) -> bool:
 
     headers = {"Content-Type": "application/json"}
 
-    # Sign payload if secret is provided
-    if job.callback_secret:
-        payload_bytes = json.dumps(payload, sort_keys=True).encode()
-        signature = hmac.new(
-            job.callback_secret.encode(),
-            payload_bytes,
-            hashlib.sha256
-        ).hexdigest()
-        headers["X-Webhook-Signature"] = f"sha256={signature}"
-
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -77,7 +63,6 @@ async def send_webhook_callback(job: Job, db: AsyncSession) -> bool:
             )
 
             if response.status_code >= 200 and response.status_code < 300:
-                job.callback_sent_at = datetime.utcnow()
                 job.callback_error = None
                 log_now(f"[Webhook] Successfully sent callback for job {job.id} to {job.callback_url}")
                 return True

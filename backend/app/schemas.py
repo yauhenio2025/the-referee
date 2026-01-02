@@ -606,7 +606,6 @@ class ExternalAnalyzeRequest(BaseModel):
     """Request to analyze papers via external API"""
     papers: List[ExternalPaperInput]
     callback_url: Optional[str] = None  # Webhook URL to call when done
-    callback_secret: Optional[str] = None  # Secret for HMAC signing
     options: Optional[dict] = None  # {discover_editions: bool, harvest_citations: bool, compute_cross_citations: bool}
     collection_name: Optional[str] = None  # Optional collection to add papers to
     dossier_name: Optional[str] = None  # Optional dossier name
