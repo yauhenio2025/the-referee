@@ -1345,8 +1345,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 current_harvest_year["mode"] = "year_by_year"
                 consecutive_empty_years = 0
 
-                # Import harvest_partition for overflow years
-                from .overflow_harvester import harvest_partition
+                # Import partition functions for overflow years
+                from .overflow_harvester import harvest_partition, harvest_with_language_stratification
 
                 for year in range(current_year, min_year - 1, -1):
                     # SKIP completed years entirely
@@ -1430,8 +1430,13 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         # OVERFLOW: Use partition strategy from the start
                         log_now(f"[EDITION {i+1}] 📅 Year {year}: {total_this_year} citations - USING PARTITION STRATEGY")
 
+                        # Track whether this year's harvest succeeded
+                        year_harvest_succeeded = False
+
                         try:
-                            partition_stats = await harvest_partition(
+                            # First try stratified language harvesting (non-English first, then English)
+                            # This is more effective for highly-cited papers
+                            partition_stats = await harvest_with_language_stratification(
                                 db=db,
                                 scholar_service=scholar_service,
                                 edition_id=edition.id,
@@ -1446,11 +1451,22 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             )
 
                             year_citations = partition_stats.get("total_new", 0)
-                            total_new_citations += year_citations
-                            log_now(f"[EDITION {i+1}] 📅 Year {year}: ✓ Partition harvest complete - {year_citations} new citations")
+                            year_harvest_succeeded = partition_stats.get("success", False)
+
+                            if year_harvest_succeeded:
+                                total_new_citations += year_citations
+                                log_now(f"[EDITION {i+1}] 📅 Year {year}: ✓ Stratified harvest complete - {year_citations} new citations")
+                            else:
+                                # Partition failed (couldn't reduce below 990)
+                                error_msg = partition_stats.get("error", "Unknown partition failure")
+                                log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ Stratified harvest FAILED - {error_msg}", "warning")
+                                log_now(f"[EDITION {i+1}] 📅 Year {year}: Will NOT mark as complete - needs manual review or different strategy")
+                                # Add whatever we did harvest
+                                total_new_citations += year_citations
 
                         except Exception as partition_err:
-                            log_now(f"[EDITION {i+1}] ⚠️ Partition harvest failed: {partition_err}", "warning")
+                            log_now(f"[EDITION {i+1}] ⚠️ Stratified harvest exception: {partition_err}", "warning")
+                            year_harvest_succeeded = False
                             # Fallback to normal harvest (will only get ~1000)
                             result = await scholar_service.get_cited_by(
                                 scholar_id=edition.scholar_id,
@@ -1465,9 +1481,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             if isinstance(result, dict):
                                 year_pages_succeeded = result.get("pages_succeeded", 0)
                                 year_pages_attempted = result.get("pages_fetched", 0)
+                            # Fallback harvest counts as partial success if we got pages
+                            if year_pages_attempted > 0:
+                                year_harvest_succeeded = True
+                                log_now(f"[EDITION {i+1}] 📅 Year {year}: Fallback harvest got {year_citations} citations (partial coverage)")
 
                     else:
                         # Normal case: <= 1000 citations, standard harvest
+                        year_harvest_succeeded = True  # Normal harvests succeed unless exception
                         result = await scholar_service.get_cited_by(
                             scholar_id=edition.scholar_id,
                             max_results=1000,  # Max per year
@@ -1486,22 +1507,37 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             year_pages_attempted = result.get("pages_fetched", 0)
                         log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total, pages OK={year_pages_succeeded}, FAIL={year_pages_failed})")
 
-                    # Mark this year as completed
-                    completed_years.add(year)
-                    await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
+                    # Only mark year as completed if harvest succeeded
+                    # For overflow years, year_harvest_succeeded is set based on partition/stratified result
+                    if year_harvest_succeeded:
+                        completed_years.add(year)
+                        await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
 
-                    # Update HarvestTarget with actual results for this year
-                    # IMPORTANT: Always update, even for 0 citations - this marks year as complete
-                    await update_harvest_target_progress(
-                        db=db,
-                        edition_id=edition.id,
-                        year=year,
-                        actual_count=year_citations,
-                        pages_succeeded=year_pages_succeeded,
-                        pages_failed=year_pages_failed,
-                        pages_attempted=year_pages_attempted,
-                        mark_complete=True
-                    )
+                        # Update HarvestTarget with actual results - mark as complete
+                        await update_harvest_target_progress(
+                            db=db,
+                            edition_id=edition.id,
+                            year=year,
+                            actual_count=year_citations,
+                            pages_succeeded=year_pages_succeeded,
+                            pages_failed=year_pages_failed,
+                            pages_attempted=year_pages_attempted,
+                            mark_complete=True
+                        )
+                    else:
+                        # Harvest failed (e.g., partition couldn't reduce below threshold)
+                        # Update HarvestTarget but mark as INCOMPLETE so it gets retried
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ Harvest INCOMPLETE - will retry in future jobs")
+                        await update_harvest_target_progress(
+                            db=db,
+                            edition_id=edition.id,
+                            year=year,
+                            actual_count=year_citations,
+                            pages_succeeded=year_pages_succeeded,
+                            pages_failed=year_pages_failed,
+                            pages_attempted=year_pages_attempted,
+                            mark_complete=False  # Don't mark complete - needs retry
+                        )
 
                     # Track consecutive empty years for early termination
                     # Use high threshold (10) since old papers may have scattered citations across decades
