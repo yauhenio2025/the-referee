@@ -3040,19 +3040,73 @@ async def link_paper_as_edition(
 
     edition_id = edition.id
     source_deleted = False
+    citations_moved = 0
+    citations_deleted_duplicates = 0
 
     # Optionally delete source paper
     if request.delete_source:
+        # IMPORTANT: Move citations from source paper to target paper BEFORE deleting
+        # Otherwise they become orphaned (linked to a deleted paper)
+
+        # First, find which citations would be duplicates (same scholar_id already on target)
+        duplicate_check = await db.execute(
+            text("""
+                SELECT c_source.id
+                FROM citations c_source
+                WHERE c_source.paper_id = :source_paper_id
+                AND c_source.scholar_id IN (
+                    SELECT scholar_id FROM citations WHERE paper_id = :target_paper_id
+                )
+            """),
+            {"source_paper_id": source_paper.id, "target_paper_id": target_paper.id}
+        )
+        duplicate_ids = [row[0] for row in duplicate_check.fetchall()]
+
+        # Delete duplicates to avoid unique constraint violation
+        if duplicate_ids:
+            await db.execute(
+                text("DELETE FROM citations WHERE id = ANY(:ids)"),
+                {"ids": duplicate_ids}
+            )
+            citations_deleted_duplicates = len(duplicate_ids)
+
+        # Move remaining citations from source to target paper with new edition_id
+        move_result = await db.execute(
+            text("""
+                UPDATE citations
+                SET paper_id = :target_paper_id, edition_id = :edition_id
+                WHERE paper_id = :source_paper_id
+            """),
+            {
+                "target_paper_id": target_paper.id,
+                "edition_id": edition_id,
+                "source_paper_id": source_paper.id
+            }
+        )
+        citations_moved = move_result.rowcount
+
+        # Update the new edition's harvested_citation_count
+        if citations_moved > 0:
+            edition.harvested_citation_count = citations_moved
+
+        # Now safe to soft-delete the source paper
         source_paper.deleted_at = datetime.utcnow()
         source_deleted = True
 
     await db.commit()
 
+    message = f"Linked '{source_paper.title[:50]}...' as edition of '{target_paper.title[:50]}...'"
+    if citations_moved > 0:
+        message += f" ({citations_moved} citations migrated"
+        if citations_deleted_duplicates > 0:
+            message += f", {citations_deleted_duplicates} duplicates removed"
+        message += ")"
+
     return LinkAsEditionResponse(
         edition_id=edition_id,
         target_paper_id=target_paper.id,
         source_deleted=source_deleted,
-        message=f"Linked '{source_paper.title[:50]}...' as edition of '{target_paper.title[:50]}...'"
+        message=message
     )
 
 
