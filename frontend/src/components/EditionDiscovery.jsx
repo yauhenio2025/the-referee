@@ -1870,7 +1870,19 @@ function EditionRow({
         </div>
       </td>
       <td className="col-harvested">
-        {hasHarvested ? (
+        {/* For merged editions, show redirected harvest count */}
+        {isMerged ? (
+          edition.redirected_harvest_count > 0 ? (
+            <span
+              className="redirected-harvest"
+              title={`${edition.redirected_harvest_count} citations harvested from this scholar_id and redirected to canonical edition #${edition.merged_into_edition_id}`}
+            >
+              ↗{edition.redirected_harvest_count}
+            </span>
+          ) : (
+            <span className="not-harvested" title="Not yet harvested from this merged edition">–</span>
+          )
+        ) : hasHarvested ? (
           <button
             className="btn-harvested"
             onClick={() => onViewCitations(edition.id)}

@@ -1066,8 +1066,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             # Already exists in memory - skip
                             total_updated_citations += 1
                         else:
-                            # NEW citation - use INSERT ON CONFLICT DO NOTHING to prevent duplicates
-                            # even if concurrent jobs have the same citation
+                            # NEW citation - use INSERT ON CONFLICT DO UPDATE to track duplicate encounters
+                            # This helps reconcile our count vs GS count (GS tolerates duplicates, we don't)
                             from sqlalchemy import text
                             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -1084,17 +1084,21 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 link=paper_data.get("link"),
                                 citation_count=paper_data.get("citationCount", 0),
                                 intersection_count=1,
-                            ).on_conflict_do_nothing(
-                                index_elements=['paper_id', 'scholar_id']
+                                encounter_count=1,
+                            ).on_conflict_do_update(
+                                index_elements=['paper_id', 'scholar_id'],
+                                set_={'encounter_count': Citation.encounter_count + 1}
                             )
                             result = await callback_db.execute(stmt)
 
-                            # Check if row was actually inserted (rowcount = 1) or skipped due to conflict
-                            if result.rowcount > 0:
+                            # rowcount is always 1 for upserts (insert or update)
+                            # We need to check xmax to determine if this was an insert
+                            # For now, track based on memory set (if not in set, it's new to this run)
+                            if scholar_id not in existing_scholar_ids:
                                 new_count += 1
                                 total_new_citations += 1
                             else:
-                                # Duplicate detected by database - already exists from concurrent job
+                                # Duplicate detected - already exists from concurrent job or earlier in this run
                                 total_updated_citations += 1
 
                             existing_scholar_ids.add(scholar_id)
@@ -1603,6 +1607,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 for merged_ed in merged_editions:
                     try:
                         log_now(f"[MERGED] Harvesting from merged edition {merged_ed.id} (scholar_id={merged_ed.scholar_id})")
+                        # Track citations saved before processing this merged edition
+                        merged_start_citations = total_new_citations
+
                         # Use standard harvest for merged editions (smaller, just picking up extras)
                         merged_result = await scholar_service.get_cited_by(
                             scholar_id=merged_ed.scholar_id,
@@ -1610,10 +1617,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             on_page_complete=save_page_citations,  # Uses target_edition_id which is still the canonical edition
                         )
                         merged_citations = merged_result.get("papers", []) if isinstance(merged_result, dict) else []
-                        log_now(f"[MERGED] ✓ Merged edition {merged_ed.id} complete: fetched {len(merged_citations)} results")
 
-                        # Update merged edition's harvest stats too (tracks when it was last harvested)
+                        # Track how many NEW citations came from this merged edition
+                        merged_contribution = total_new_citations - merged_start_citations
+                        log_now(f"[MERGED] ✓ Merged edition {merged_ed.id} complete: {merged_contribution} new citations (fetched {len(merged_citations)} results)")
+
+                        # Update merged edition's harvest stats (tracks when harvested AND contribution)
                         merged_ed.last_harvested_at = datetime.utcnow()
+                        merged_ed.redirected_harvest_count = (merged_ed.redirected_harvest_count or 0) + merged_contribution
                         await db.commit()
 
                         # Small delay between merged editions

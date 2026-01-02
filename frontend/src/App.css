@@ -1671,6 +1671,12 @@ button:disabled {
   font-style: italic;
 }
 
+.redirected-harvest {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: help;
+}
+
 /* Multi-Dossier Modal Styles */
 .multi-dossier-modal {
   max-width: 550px;

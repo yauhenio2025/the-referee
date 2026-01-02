@@ -221,6 +221,7 @@ class EditionResponse(BaseModel):
     excluded: bool = False
     is_supplementary: bool = False
     merged_into_edition_id: Optional[int] = None  # Non-null = merged into another edition
+    redirected_harvest_count: int = 0  # For merged editions: citations harvested from this scholar_id
     added_by_job_id: Optional[int] = None  # Non-null = NEW (from recent fetch job)
     # Harvest freshness tracking (auto-updater feature)
     last_harvested_at: Optional[datetime] = None

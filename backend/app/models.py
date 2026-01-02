@@ -188,6 +188,9 @@ class Edition(Base):
     merged_into_edition_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("editions.id", ondelete="SET NULL"), nullable=True, default=None
     )
+    # For merged editions: how many citations were harvested FROM this scholar_id
+    # (these citations are assigned to the canonical edition, but we track the contribution)
+    redirected_harvest_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -222,6 +225,11 @@ class Citation(Base):
 
     # For cross-citation analysis
     intersection_count: Mapped[int] = mapped_column(Integer, default=1)  # How many seeds this cites
+
+    # Duplicate encounter tracking - increments each time we see this paper in GS results
+    # Helps reconcile our count vs GS count (GS tolerates duplicates, we don't)
+    # SUM(encounter_count) = GS-equivalent count, COUNT(*) = our deduplicated count
+    encounter_count: Mapped[int] = mapped_column(Integer, default=1)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
