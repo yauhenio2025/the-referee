@@ -6766,10 +6766,22 @@ a.paper-title-minimal:hover {
 
 /* Harvest bar - more visible */
 .harvest-bar-mini {
+  display: inline-block;
   width: 60px;
-  height: 5px;
+  height: 6px;
   border-radius: 3px;
   border: 1px solid var(--border);
+  background: var(--bg-tertiary, #333);
+  vertical-align: middle;
+  overflow: hidden;
+  position: relative;
+}
+
+.harvest-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }
 
 .harvest-text-mini {

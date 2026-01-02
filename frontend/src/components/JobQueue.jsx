@@ -23,17 +23,20 @@ export default function JobQueue() {
 
   // Fetch papers to get titles for jobs
   // Use distinct queryKey to avoid conflict with PaperList's complex queryFn
-  const { data: papers, isLoading: papersLoading } = useQuery({
+  const { data: papersData, isLoading: papersLoading } = useQuery({
     queryKey: ['papers-for-jobs'],
     queryFn: () => api.listPapers(),
     staleTime: 60000, // Cache for 60s - paper titles rarely change
   })
 
+  // Handle both paginated response (object with papers array) and legacy array response
+  const papers = Array.isArray(papersData) ? papersData : (papersData?.papers || [])
+
   // Create paper lookup map
-  const paperLookup = papers?.reduce((acc, p) => {
+  const paperLookup = papers.reduce((acc, p) => {
     acc[p.id] = p
     return acc
-  }, {}) || {}
+  }, {})
 
   const getPaperTitle = (paperId) => {
     if (!paperId) return null

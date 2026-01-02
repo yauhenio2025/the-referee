@@ -173,7 +173,7 @@ async def harvest_query(scholar, existing_ids: Set[str], query_suffix: str = "",
     total = result.get('totalResults', 0)
 
     for paper in page_papers:
-        scholar_id = paper.get('scholar_id')
+        scholar_id = paper.get('scholarId')  # API uses camelCase
         if scholar_id and scholar_id not in existing_ids:
             papers.append(paper)
             existing_ids.add(scholar_id)
@@ -223,28 +223,34 @@ async def save_papers_to_db(papers: List[Dict]) -> int:
     from app.database import engine
 
     saved = 0
+    now = datetime.now()
     async with engine.begin() as conn:
         for paper in papers:
             try:
                 await conn.execute(text("""
                     INSERT INTO citations (
-                        edition_id, scholar_id, title, authors,
-                        venue, year, url, snippet, citation_count
+                        paper_id, edition_id, scholar_id, title, authors,
+                        venue, year, link, abstract, citation_count,
+                        intersection_count, created_at
                     ) VALUES (
-                        :edition_id, :scholar_id, :title, :authors,
-                        :venue, :year, :url, :snippet, :citation_count
+                        :paper_id, :edition_id, :scholar_id, :title, :authors,
+                        :venue, :year, :link, :abstract, :citation_count,
+                        :intersection_count, :created_at
                     )
-                    ON CONFLICT (edition_id, scholar_id) DO NOTHING
+                    ON CONFLICT (paper_id, scholar_id) DO NOTHING
                 """), {
+                    "paper_id": PAPER_ID,
                     "edition_id": EDITION_ID,
-                    "scholar_id": paper.get("scholar_id"),
+                    "scholar_id": paper.get("scholarId"),
                     "title": paper.get("title"),
-                    "authors": paper.get("authors"),
+                    "authors": ", ".join(paper.get("authors", [])) if isinstance(paper.get("authors"), list) else paper.get("authors"),
                     "venue": paper.get("venue"),
                     "year": paper.get("year"),
-                    "url": paper.get("url"),
-                    "snippet": paper.get("snippet"),
-                    "citation_count": paper.get("cited_by"),
+                    "link": paper.get("link"),
+                    "abstract": paper.get("abstract") or "",
+                    "citation_count": paper.get("citationCount", 0),
+                    "intersection_count": 0,
+                    "created_at": now,
                 })
                 saved += 1
             except Exception as e:

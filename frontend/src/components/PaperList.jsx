@@ -632,15 +632,16 @@ export default function PaperList({ onSelectPaper }) {
                     {/* Only show harvest progress if we have actual harvested data */}
                     {paper.harvest_expected > 0 && paper.harvest_actual > 0 && (
                       <span className="stat-item harvest-stat">
-                        <span
-                          className="harvest-bar-mini"
-                          style={{
-                            background: `linear-gradient(to right, ${
-                              paper.harvest_percent >= 90 ? 'var(--success)' :
-                              paper.harvest_percent >= 50 ? 'var(--warning)' : 'var(--danger)'
-                            } ${paper.harvest_percent}%, var(--bg-tertiary) ${paper.harvest_percent}%)`
-                          }}
-                        />
+                        <span className="harvest-bar-mini">
+                          <span
+                            className="harvest-bar-fill"
+                            style={{
+                              width: `${Math.min(paper.harvest_percent, 100)}%`,
+                              backgroundColor: paper.harvest_percent >= 90 ? '#22c55e' :
+                                paper.harvest_percent >= 50 ? '#eab308' : '#ef4444'
+                            }}
+                          />
+                        </span>
                         <span className="harvest-text-mini">
                           {paper.harvest_actual}/{paper.harvest_expected}
                         </span>

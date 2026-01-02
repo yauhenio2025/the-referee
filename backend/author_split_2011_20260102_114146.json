@@ -1,0 +1,2940 @@
+{
+  "metadata": {
+    "paper_id": 71,
+    "edition_id": 1073,
+    "year": 2011,
+    "strategy": "author_initial_split",
+    "excluded_initials": [
+      "m"
+    ],
+    "timestamp": "2026-01-02T12:14:35.026729",
+    "dry_run": false
+  },
+  "stats": {
+    "oxylabs_requests": 27,
+    "oxylabs_successes": 27,
+    "oxylabs_failures": 0,
+    "non_english_papers": 55,
+    "english_papers": 124,
+    "total_papers": 179,
+    "new_papers": 179,
+    "duplicates": 1026
+  },
+  "papers": [
+    {
+      "id": "5125771699727279476",
+      "scholarId": "5125771699727279476",
+      "clusterId": "dKX-ETRmIkcJ",
+      "title": "\u201c\u610f\u8bc6\u5f62\u6001\u6279\u5224\u201d \u653f\u6cbb: \u65b0/\u540e\u9a6c\u514b\u601d\u4e3b\u4e49\u65f6\u4ee3\u7684\u793e\u4f1a\u4e3b\u4e49",
+      "authors": [
+        "\u7279\u91cc\u5c14\uff0c \u5361\u5f17\uff0c \u5f20\u79c0\u7434\uff0c \u9b4f\u5929\u8212"
+      ],
+      "authorsRaw": "\u7279\u91cc\u5c14\uff0c \u5361\u5f17\uff0c \u5f20\u79c0\u7434\uff0c \u9b4f\u5929\u8212 - \u9a6c\u514b\u601d\u4e3b\u4e49\u4e0e\u73b0\u5b9e, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 3,
+      "link": null,
+      "venue": "\u9a6c\u514b\u601d\u4e3b\u4e49\u4e0e\u73b0\u5b9e",
+      "source": "google_scholar"
+    },
+    {
+      "id": "8376466154174979417",
+      "scholarId": "8376466154174979417",
+      "clusterId": "WZ2uOJYvP3QJ",
+      "title": "\u5efa\u7b51\u4e2d\u7684\u73b0\u4ee3\u6027: \u8ff0\u8bc4\u4e0e\u91cd\u6784",
+      "authors": [
+        "\u5362\u7aef\u82b3\uff0c \u91d1\u79cb\u91ce"
+      ],
+      "authorsRaw": "\u5362\u7aef\u82b3\uff0c \u91d1\u79cb\u91ce - \u5efa\u7b51\u5e08, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 3,
+      "link": null,
+      "venue": "\u5efa\u7b51\u5e08",
+      "source": "google_scholar"
+    },
+    {
+      "id": "6984155759043550809",
+      "scholarId": "6984155759043550809",
+      "clusterId": "WR7Kwai07GAJ",
+      "title": "\u7406\u8bba\u8fc1\u79fb\u7684\u4e09\u4e2a\u7ef4\u5ea6: \u65f6\u95f4\u00b7 \u7a7a\u95f4\u00b7 \u7acb\u573a",
+      "authors": [
+        "\u8d75\u6df3"
+      ],
+      "authorsRaw": "\u8d75\u6df3 - \u897f\u5357\u5927\u5b66\u5b66\u62a5: \u793e\u4f1a\u79d1\u5b66\u7248, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 3,
+      "link": null,
+      "venue": "\u897f\u5357\u5927\u5b66\u5b66\u62a5: \u793e\u4f1a\u79d1\u5b66\u7248",
+      "source": "google_scholar"
+    },
+    {
+      "id": "5286849618963565295",
+      "scholarId": "5286849618963565295",
+      "clusterId": "74o7r7epXkkJ",
+      "title": "\ub4e4\ub8b0\uc988\uc758 \uc2dc\ubbac\ub77c\ud06c\ub974\ub97c \ud1b5\ud55c \ubb38\ud654 \ubd84\uc11d \uc2dc\ub860",
+      "authors": [
+        "\uae40\uae30\uc815"
+      ],
+      "authorsRaw": "\uae40\uae30\uc815 - \uc778\ubb38\ucf58\ud150\uce20, 2011 - dbpia.co.kr",
+      "year": 2011,
+      "abstract": "\ub9ce\uc740 \uc0ac\ub78c\ub4e4\uc774 \ud604\ub300 \uc0ac\ud68c\uc758 \ubb38\ud654\ub97c \uc2dc\ubbac\ub77c\ud06c\ub974\ub85c \uc9c4\ub2e8\ud55c\ub2e4. \ud2b9\uc815\ud55c \ud558\ub098\uc758 \uac1c\ub150\uc774 \ub110\ub9ac, \uc624\ub798\ud1a0\ub85d \ud68c\uc790\ub41c\ub2e4\ub294 \uac83\uc740 \ub2e8\uc21c\ud788 \uadf8 \uac1c\ub150\uc774 \uc124\uba85\ub418\ub294 \ub17c\ub9ac\uc801\u2024 \uc774\ub860\uc801\uc815\ud569\uc131 \ucc28\uc6d0\uc758 \ubb38\uc81c\ubcf4\ub2e4 \u2026",
+      "citationCount": 3,
+      "link": "https://www.dbpia.co.kr/pdf/pdfView?nodeId=NODE01786043",
+      "venue": "\uc778\ubb38\ucf58\ud150\uce20",
+      "source": "google_scholar"
+    },
+    {
+      "id": "oqmbQV7q524J",
+      "scholarId": "oqmbQV7q524J",
+      "clusterId": "oqmbQV7q524J",
+      "title": "\ud55c\uad6d\uc758 \ub2e4\ubb38\ud654\uc8fc\uc758\uc640 \ud55c\uad6d\ubb38\ud654\uc758 \ud0c8\uadfc\ub300\uc801 \uc815\uccb4\uc131-\ubb38\ud654\uac1c\ub150\uc758 \ub3c4\uad6c\ud654\uc640 '\ud55c\uad6d\uc801'\ub2e4\ubb38\ud654 \uc0ac\ud68c\uc758 \uac00\ub2a5\uc131 \ubaa8\uc0c9",
+      "authors": [
+        "\ud64d\uc21c\ud76c"
+      ],
+      "authorsRaw": "\ud64d\uc21c\ud76c - \uc5b8\uc5b4\uc640 \ubb38\ud654, 2011 - kiss.kstudy.com",
+      "year": 2011,
+      "abstract": "It is often said that Korea is already a multi-cultural society in the global village. According to the statistic result it is true because there are more than 120 millions of immigrants from \u2026",
+      "citationCount": 0,
+      "link": "https://kiss.kstudy.com/Detail/Ar?key=3811435",
+      "venue": "\uc5b8\uc5b4\uc640 \ubb38\ud654",
+      "source": "google_scholar"
+    },
+    {
+      "id": "xX9vqqGPMGEJ",
+      "scholarId": "xX9vqqGPMGEJ",
+      "clusterId": "xX9vqqGPMGEJ",
+      "title": "Inaugural-Dissertation zur Erlangung des Doktorgrades der Philosophie des Fachbereiches 05 der Justus-Liebig-Universtit\u00e4t Gie\u00dfen",
+      "authors": [
+        "M Grucza"
+      ],
+      "authorsRaw": "M Grucza - jlupub.ub.uni-giessen.de",
+      "year": null,
+      "abstract": "F\u00fcr die Infragestellung der europ\u00e4ischen Machtposition an der Schwelle zum 20. Jahrhundert gab es sowohl interne als auch externe Gr\u00fcnde. Europainterne Motive wurden \u2026",
+      "citationCount": 0,
+      "link": "https://jlupub.ub.uni-giessen.de/bitstreams/4d079366-5a96-4f36-ae3d-6128abbf5a5f/download",
+      "venue": "jlupub.ub.uni-giessen.de",
+      "source": "google_scholar"
+    },
+    {
+      "id": "pjG5P1SPul8J",
+      "scholarId": "pjG5P1SPul8J",
+      "clusterId": "pjG5P1SPul8J",
+      "title": "Neue Medien und die Logik fr\u00fchkindlicher",
+      "authors": [
+        "U Peukert"
+      ],
+      "authorsRaw": "U Peukert - Zeitschrift f\u00fcr P\u00e4dagogik - pedocs.de",
+      "year": null,
+      "abstract": "Die Diskussion dar\u00fcber, ob in der sichherausbildenden \u201eInformationsgesellschaft\" auch jungen Kindern \u201eMedienkompetenz\" vermittelt werden soll, wird gegenw\u00e4rtig kontrovers \u2026",
+      "citationCount": 0,
+      "link": "https://www.pedocs.de/zeitschriften.php?zst=6989-2000-2#page=141",
+      "venue": "Zeitschrift f\u00fcr P\u00e4dagogik",
+      "source": "google_scholar"
+    },
+    {
+      "id": "A7ym1d6iIqYJ",
+      "scholarId": "A7ym1d6iIqYJ",
+      "clusterId": "A7ym1d6iIqYJ",
+      "title": "MAINSTREAMING THE VAMPIRE",
+      "authors": [
+        "J M\u00fcller"
+      ],
+      "authorsRaw": "J M\u00fcller",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "RMsSCeFzJ2sJ",
+      "scholarId": "RMsSCeFzJ2sJ",
+      "clusterId": "RMsSCeFzJ2sJ",
+      "title": "Konsumsoziologie und Massenkultur",
+      "authors": [
+        "KU Hellmann",
+        "D Schrage"
+      ],
+      "authorsRaw": "KU Hellmann , D Schrage - Springer",
+      "year": null,
+      "abstract": "In der Reihe \u201eKonsumsoziologie und Massenkultur \u201cerscheinen Sammelb\u00e4nde und Monografien, die sich dem in der deutschen Soziologie bislang vernachl\u00e4ssigten \u2026",
+      "citationCount": 0,
+      "link": "https://link.springer.com/content/pdf/10.1007/978-3-658-00541-2.pdf",
+      "venue": "Springer",
+      "source": "google_scholar"
+    },
+    {
+      "id": "B9XoxofjCEUJ",
+      "scholarId": "B9XoxofjCEUJ",
+      "clusterId": "B9XoxofjCEUJ",
+      "title": "Wirkung",
+      "authors": [
+        "C Schneider",
+        "R Von Klein",
+        "R Von Klein\u2026"
+      ],
+      "authorsRaw": "C Schneider, R Von Klein, R Von Klein\u2026 - \u2026 Leben\u2014Werk\u2014Wirkung, 2011 - Springer",
+      "year": 2011,
+      "abstract": "Was immer sonst Adorno von anderen bedeutenden Intellektuellen des 20. Jahrhunderts unterscheiden mag, auffallend ist die Intimit\u00e4t, mit der selbst heute noch seiner gedacht, sein \u2026",
+      "citationCount": 0,
+      "link": "https://link.springer.com/chapter/10.1007/978-3-476-05329-9_7",
+      "venue": "\u2026 Leben\u2014Werk\u2014Wirkung",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2640971103688532688",
+      "scholarId": "2640971103688532688",
+      "clusterId": "0CJt8TmdpiQJ",
+      "title": "Von den modernen zu den postmodernen Zeitvorstellungen: Kant, Heidegger, Virilio, Baudrillard",
+      "authors": [
+        "SS Lin"
+      ],
+      "authorsRaw": "SS Lin - 2011 - philpapers.org",
+      "year": 2011,
+      "abstract": "Shing-Shang Lin, Von den modernen zu den postmodernen Zeitvorstellungen: Kant, Heidegger, Virilio, Baudrillard - PhilPapers Sign in | Create an account PhilPapers PhilPeople \u2026",
+      "citationCount": 1,
+      "link": "https://philpapers.org/rec/LINVDM",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "F6tCyML3MOwJ",
+      "scholarId": "F6tCyML3MOwJ",
+      "clusterId": "F6tCyML3MOwJ",
+      "title": "Garbage as Literature\u2013Abfallmotive in DeLillos\" Underworld\" und Austers\" In the Country of Last Things\"",
+      "authors": [
+        "S Orth"
+      ],
+      "authorsRaw": "S Orth - 2011 - GRIN Verlag",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "erKGmHjSkr0J",
+      "scholarId": "erKGmHjSkr0J",
+      "clusterId": "erKGmHjSkr0J",
+      "title": "ETHNOLITTERATURE: SURVIE DE L'ETHNOGRAPHE OU DU ROMANCIER? MIREILLE ROSELLO",
+      "authors": [
+        "LA Femme"
+      ],
+      "authorsRaw": "LA Femme - search.ebscohost.com",
+      "year": null,
+      "abstract": "Fouad Laroui, qui, selon les contextes o\u00f9 il intervient, se d\u00e9finit comme un po\u00e8te ou un romancier, un critique litt\u00e9raire ou un professeur de litt\u00e9rature, mais aussi un \u00e9conomiste ou \u2026",
+      "citationCount": 0,
+      "link": "https://search.ebscohost.com/login.aspx?direct=true&profile=ehost&scope=site&authtype=crawler&jrnl=00357995&asa=N&AN=64447832&h=Csw%2FOu%2B%2BVBPBBT4wzBfaKGtA2yDC0CF0gcU8sZ%2BmIN%2BqlaMuoqEYCqGEHkN%2FuBvTnHzYQPvgJyXCx0Sjc814hw%3D%3D&crl=c",
+      "venue": "search.ebscohost.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "A6o2MSr8-ToJ",
+      "scholarId": "A6o2MSr8-ToJ",
+      "clusterId": "A6o2MSr8-ToJ",
+      "title": "GOUVERNEMENTALIT\u00c9S CONTEMPORAINES ET TERRITOIRES",
+      "authors": [
+        "A Vuattoux"
+      ],
+      "authorsRaw": "A Vuattoux - reseau-terra.eu",
+      "year": null,
+      "abstract": "Ce m\u00e9moire prend pour objet l'analyse g\u00e9ographique des rapports de pouvoir, en en faisant l'\u00e9pist\u00e9mologie, dans l'oeuvre de Michel Foucault et en l'illustrant par des exemples puis\u00e9s \u2026",
+      "citationCount": 0,
+      "link": "http://reseau-terra.eu/IMG/pdf/VUATTOUX_Arthur.pdf",
+      "venue": "reseau-terra.eu",
+      "source": "google_scholar"
+    },
+    {
+      "id": "-uXjvo-_PYUJ",
+      "scholarId": "-uXjvo-_PYUJ",
+      "clusterId": "-uXjvo-_PYUJ",
+      "title": "Limites du lieu et barri\u00e8res de l'espace",
+      "authors": [
+        "T Veneri"
+      ],
+      "authorsRaw": "T Veneri - 2011 - ojs.unica.it",
+      "year": 2011,
+      "abstract": "La production culturelle qui remonte \u00e0 une p\u00e9riode historique marqu\u00e9e par des c\u00e9sures\u2013ou des retournements, selon les points de vue\u2013\u00e9pist\u00e9mologiques, telle que la Renaissance \u2026",
+      "citationCount": 0,
+      "link": "https://ojs.unica.it/index.php/between/article/download/180/169/0",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "12431869339054103175",
+      "scholarId": "12431869339054103175",
+      "clusterId": "h9pjCEzfhqwJ",
+      "title": "Hist\u00f3ria e colonialismo: por uma inter-historicidade",
+      "authors": [
+        "CA Gomes",
+        "MP Meneses"
+      ],
+      "authorsRaw": "CA Gomes, MP Meneses - Recueil Alexandries, 2011 - Reseau Terra",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 21,
+      "link": null,
+      "venue": "Recueil Alexandries",
+      "source": "google_scholar"
+    },
+    {
+      "id": "11367140331908297802",
+      "scholarId": "11367140331908297802",
+      "clusterId": "SvRo--cxwJ0J",
+      "title": "\u00c9conomie culturelle globalis\u00e9e et anthropologie de l'exil: une analyse critique des enjeux de la mondialisation \u00e0 partir de la lecture de Apr\u00e8s le \u2026",
+      "authors": [
+        "S Aliana"
+      ],
+      "authorsRaw": "S Aliana - Les cons\u00e9quences culturelles de la globalisation d' \u2026, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 1,
+      "link": null,
+      "venue": "Les cons\u00e9quences culturelles de la globalisation d' \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "1HEH2ba5YScJ",
+      "scholarId": "1HEH2ba5YScJ",
+      "clusterId": "1HEH2ba5YScJ",
+      "title": "VERSION PROVISOIRE VERSION PROVISOIRE NE PAS CITER NE PAS CITER",
+      "authors": [
+        "ASB Emmanuel"
+      ],
+      "authorsRaw": "ASB Emmanuel",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "Pl7FoSYTN0kJ",
+      "scholarId": "Pl7FoSYTN0kJ",
+      "clusterId": "Pl7FoSYTN0kJ",
+      "title": "D'une th\u00e9orie sur la structure \u00e0 sa mise en oeuvre",
+      "authors": [
+        "JF Blassel",
+        "G Morel-Journel"
+      ],
+      "authorsRaw": "JF Blassel, G Morel-Journel - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "14759266608232818411",
+      "scholarId": "14759266608232818411",
+      "clusterId": "62YAQchy08wJ",
+      "title": "La representaci\u00f3n de la caricatura pol\u00edtica: la pugna Madrazo-Gordillo en el PRI",
+      "authors": [
+        "AS Gimate-Welsh"
+      ],
+      "authorsRaw": "AS Gimate-Welsh - Letra. Imagen. Sonido: Ciudad Mediatizada, 2011 - dialnet.unirioja.es",
+      "year": 2011,
+      "abstract": "La tem\u00e1tica de este trabajo la inscribo en una preocupaci\u00f3n que compete no s\u00f3lo a la semi\u00f3tica en general, ya la semi\u00f3tica visual en particular, sino que forma parte de una \u2026",
+      "citationCount": 3,
+      "link": "https://dialnet.unirioja.es/descarga/articulo/5837823.pdf",
+      "venue": "Letra. Imagen. Sonido: Ciudad Mediatizada",
+      "source": "google_scholar"
+    },
+    {
+      "id": "17991554061473385594",
+      "scholarId": "17991554061473385594",
+      "clusterId": "eoxbdxjXrvkJ",
+      "title": "\" Fiesten\" una pastorela cabaretera multitudinaria de Las Reinas Chulas",
+      "authors": [
+        "GA Alzate"
+      ],
+      "authorsRaw": "GA Alzate - Letras femeninas, 2011 - JSTOR",
+      "year": 2011,
+      "abstract": "Este ensayo estudia la obra de teatro cabaret Fiesten: unafamilia de tontas, per don, de tantas (2006-2007), de la compania teatral Las Reinas Chulas, conformada por Ana Francis \u2026",
+      "citationCount": 3,
+      "link": "https://www.jstor.org/stable/23021844",
+      "venue": "Letras femeninas",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2689345620916269054",
+      "scholarId": "2689345620916269054",
+      "clusterId": "_m_37Jd5UiUJ",
+      "title": "La obra de arte musical; sonoridad y silencio",
+      "authors": [
+        "M Mallamaci"
+      ],
+      "authorsRaw": "M Mallamaci - Revista de est\u00e9tica Coir\u00f3n. Arte y Pol\u00edtica, 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "En 1952 John Cage ofrec\u00eda algunos minutos de silencio en un auditorio pretendiendo que aquello sea acogido como\u00bf m\u00fasica?(Silence). Aquella propuesta pareciera traspasar los \u2026",
+      "citationCount": 2,
+      "link": "https://www.academia.edu/download/39404326/La_obra_de_arte_musical.__Sonoridad_y_silencio..pdf",
+      "venue": "Revista de est\u00e9tica Coir\u00f3n. Arte y Pol\u00edtica",
+      "source": "google_scholar"
+    },
+    {
+      "id": "HhR8WkpkIqQJ",
+      "scholarId": "HhR8WkpkIqQJ",
+      "clusterId": "HhR8WkpkIqQJ",
+      "title": "John J. Macionis",
+      "authors": [
+        "K Plummer"
+      ],
+      "authorsRaw": "K Plummer - academia.edu",
+      "year": null,
+      "abstract": "Sociolog\u00eda Page 1 ed. Sociolog\u00eda 4\u00aa edici\u00f3n Sociolog\u00eda John J. Macionis Ken Plummer Page 2 Page 3 SOCIOLOG\u00cdA 4.a edici\u00f3n Page 4 CANAD \u00c1 OC \u00c9 ANO ATL \u00c1 NTICO ESTADOSUNIDOS \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/60400520/261458861-Sociologia-Macionis-y-Plummer20190826-82779-1t47lpx.pdf",
+      "venue": "academia.edu",
+      "source": "google_scholar"
+    },
+    {
+      "id": "pm-YzQNNYJAJ",
+      "scholarId": "pm-YzQNNYJAJ",
+      "clusterId": "pm-YzQNNYJAJ",
+      "title": "LA ANIMACI\u00d3N INFOGR\u00c1FICA EN LA CULTURA AUDIOVISUAL CONTEMPOR\u00c1NEA",
+      "authors": [
+        "M MART\u00cdN",
+        "MM N\u00fa\u00f1ez"
+      ],
+      "authorsRaw": "M MART\u00cdN, MM N\u00fa\u00f1ez - repositori.uji.es",
+      "year": null,
+      "abstract": "1 El presente trabajo ha sido realizado con la ayuda del Proyecto de Investigaci\u00f3n \u201cNuevas Tendencias e hibridaciones de los discursos audiovisuales contempor\u00e1neos\u201d, financiado \u2026",
+      "citationCount": 0,
+      "link": "https://repositori.uji.es/bitstreams/82f22fc5-314d-47b2-9766-17cb9184ff5d/download",
+      "venue": "repositori.uji.es",
+      "source": "google_scholar"
+    },
+    {
+      "id": "1KTfkgXh4HkJ",
+      "scholarId": "1KTfkgXh4HkJ",
+      "clusterId": "1KTfkgXh4HkJ",
+      "title": "M\u00fasica, marcas y algunos mafiosos: tres versiones de lo pop en la literatura y el cine anglo-norteamericano",
+      "authors": [
+        "M Almagro Jim\u00e9nez"
+      ],
+      "authorsRaw": "M Almagro Jim\u00e9nez - 2011 - idus.us.es",
+      "year": 2011,
+      "abstract": "En el a\u00f1o 2006, coincidieron en casi todas las emisoras de radio de Espa\u00f1a y en muchas de todo el mundo dos canciones que, en la mejor tradici\u00f3n de la cultura musical pop, ven\u00edan \u2026",
+      "citationCount": 0,
+      "link": "https://idus.us.es/bitstreams/2ec14273-bb6e-46f5-a7fd-ced2d8dbb490/download",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "R7ToUzZ4N1EJ",
+      "scholarId": "R7ToUzZ4N1EJ",
+      "clusterId": "R7ToUzZ4N1EJ",
+      "title": "DOCTOR EN ANTROPOLOG\u00cdA",
+      "authors": [
+        "MI RAZA"
+      ],
+      "authorsRaw": "MI RAZA - 2011 - ru.dgb.unam.mx",
+      "year": 2011,
+      "abstract": "TESIS DOCTOR EN ANTROPOLOG\u00cdA JES\u00daS CARLOS LAZCANO ARCE Page 1 POR MI RAZA H A B L R A A SPIRIT V E E L UNIVERSIDAD NACIONAL AUT\u00d3NOMA DE M\u00c9XICO \u2026",
+      "citationCount": 0,
+      "link": "https://ru.dgb.unam.mx/bitstream/20.500.14330/TES01000677581/3/0677581_A1.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "BD5bvW6foQwJ",
+      "scholarId": "BD5bvW6foQwJ",
+      "clusterId": "BD5bvW6foQwJ",
+      "title": "M\u00fasica, marcas y algunos mafiosos: Tres versiones de lo Pop en la literatura y el cine anglo-norteamericano",
+      "authors": [
+        "MA Jim\u00e9nez"
+      ],
+      "authorsRaw": "MA Jim\u00e9nez - Representaciones de la postmodernidad: Una \u2026, 2011 - dialnet.unirioja.es",
+      "year": 2011,
+      "abstract": "En el a\u00f1o 2006, coincidieron en casi todas las emisoras de radio de Espa\u00f1a y en muchas de todo el mundo dos canciones que, en la mejor tradici\u00f3n de la cultura musical pop, ven\u00edan \u2026",
+      "citationCount": 0,
+      "link": "https://dialnet.unirioja.es/descarga/articulo/3757797.pdf",
+      "venue": "Representaciones de la postmodernidad: Una \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "5677885631670030765",
+      "scholarId": "5677885631670030765",
+      "clusterId": "rZH8Nubmy04J",
+      "title": "Procedimientos mim\u00e9ticos y antimim\u00e9ticos en obras del \u0301 \u0301post-boom \u0301 \u0301",
+      "authors": [
+        "D Blaustein"
+      ],
+      "authorsRaw": "D Blaustein - 2011 - Georg Olms Verlag",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 15,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "7417163182605462964",
+      "scholarId": "7417163182605462964",
+      "clusterId": "tO1N5J0O72YJ",
+      "title": "Para desarmar la narrativa maestra: un ensayo sobre la Guerra del Pac\u00edfico",
+      "authors": [
+        "R Naranjo"
+      ],
+      "authorsRaw": "R Naranjo - 2011 - Universidad Cat\u00f3lica del Norte",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 12,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "jb2mc3iT_IMJ",
+      "scholarId": "jb2mc3iT_IMJ",
+      "clusterId": "jb2mc3iT_IMJ",
+      "title": "Marcando la literatura posmoderna: Globalizaci\u00f3n y tecnolog\u00eda en El delirio de Turing por Edmundo Paz Sold\u00e1n",
+      "authors": [
+        "F Jameson"
+      ],
+      "authorsRaw": "F Jameson",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "5GaiQ1UhUaIJ",
+      "scholarId": "5GaiQ1UhUaIJ",
+      "clusterId": "5GaiQ1UhUaIJ",
+      "title": "TELEVISION Y AMNESIA HISTORICA: LA RECUPERACION DEL PASADO EN LOS INFORMATIVOS",
+      "authors": [
+        "P Francescutti"
+      ],
+      "authorsRaw": "P Francescutti",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "HjpXz4M3cUwJ",
+      "scholarId": "HjpXz4M3cUwJ",
+      "clusterId": "HjpXz4M3cUwJ",
+      "title": "Miradas sobre Espa\u00f1a",
+      "authors": [
+        "T Ferr\u00e9",
+        "BA Facundo",
+        "J Sof\u00eda"
+      ],
+      "authorsRaw": "T Ferr\u00e9, BA Facundo, J Sof\u00eda - Miradas sobre Espa\u00f1a, 2011 - Anthropos",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "Miradas sobre Espa\u00f1a",
+      "source": "google_scholar"
+    },
+    {
+      "id": "C1YRw0HLWg0J",
+      "scholarId": "C1YRw0HLWg0J",
+      "clusterId": "C1YRw0HLWg0J",
+      "title": "MEU EU, MEU MUNDO, MEU OUTRO: UM ESTUDO ETNOGR\u00c1FICO DA SOCIALIDADE EM AMBIENTES GR\u00c1FICOS MULTIUSU\u00c1RIO ONLINE (AGMUO) A \u2026",
+      "authors": [
+        "RS Krambeck"
+      ],
+      "authorsRaw": "RS Krambeck - lapecjor.wordpress.com",
+      "year": null,
+      "abstract": "RESUMO O presente trabalho procura obter uma compreens\u00e3o melhor acerca da socialidade em ambientes gr\u00e1ficos multiusu\u00e1rio online (AGMUO). Atrav\u00e9s da ado\u00e7\u00e3o da \u2026",
+      "citationCount": 0,
+      "link": "https://lapecjor.wordpress.com/wp-content/uploads/2011/04/rafael-soares-krambeck.pdf",
+      "venue": "lapecjor.wordpress.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "krOossI9Ll0J",
+      "scholarId": "krOossI9Ll0J",
+      "clusterId": "krOossI9Ll0J",
+      "title": "AS MARGENS DO PIRAQU\u00ca-A\u00c7U: ETNOG\u00caNESE E TERRIT\u00d3RIO; UMA ABORDAGEM GEOGR\u00c1FICA",
+      "authors": [
+        "CMDDALUZ FLOR\u00caNCIO"
+      ],
+      "authorsRaw": "CMDDALUZ FLOR\u00caNCIO - ape.es.gov.br",
+      "year": null,
+      "abstract": "Este trabalho aborda a \u201cEtnog\u00eanese\u201d de popula\u00e7\u00f5es Tupiniquim e Guarani do munic\u00edpio de Aracruz no Estado do Esp\u00edrito Santo Brasil, acontecida nos \u00faltimos cinquenta anos. Os \u2026",
+      "citationCount": 0,
+      "link": "https://ape.es.gov.br/Media/ape/PDF/Disserta%C3%A7%C3%B5es%20e%20Teses/Geografia/UFES_PPGG_CARLOS_MANUEL_DIOGO_LUZ_FLOR%C3%8ANCIO.pdf",
+      "venue": "ape.es.gov.br",
+      "source": "google_scholar"
+    },
+    {
+      "id": "BeThrWQBf6EJ",
+      "scholarId": "BeThrWQBf6EJ",
+      "clusterId": "BeThrWQBf6EJ",
+      "title": "Das margens para o centro: as geografias p\u00f3s-modernas no est\u00fadio da gentrifica\u00e7ao",
+      "authors": [
+        "L Mendes"
+      ],
+      "authorsRaw": "L Mendes - Revista Iberoamericana de Urbanismo, 2011 - RIURB Editores",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "Revista Iberoamericana de Urbanismo",
+      "source": "google_scholar"
+    },
+    {
+      "id": "ZOx2xw1X2XAJ",
+      "scholarId": "ZOx2xw1X2XAJ",
+      "clusterId": "ZOx2xw1X2XAJ",
+      "title": "m\u00e1quina tribal: a quest\u00e3o da liberdade",
+      "authors": [
+        "AL Caldas"
+      ],
+      "authorsRaw": "AL Caldas - Volume XXVIII maio/agosto-2010 - primeiraversao.unir.br",
+      "year": 2010,
+      "abstract": "m\u00e1quina tribal: a quest\u00e3o da liberdade Page 38 m\u00e1quina tribal: a quest\u00e3o da liberdade Alberto Lins Caldas Resumo: desenvolvimento dos conceitos de singularidade, pol\u00edtica e liberdade a \u2026",
+      "citationCount": 0,
+      "link": "https://primeiraversao.unir.br/artigos_volumes/volume%20xxviii.pdf#page=38",
+      "venue": "Volume XXVIII maio/agosto-",
+      "source": "google_scholar"
+    },
+    {
+      "id": "afKbjKoLvNUJ",
+      "scholarId": "afKbjKoLvNUJ",
+      "clusterId": "afKbjKoLvNUJ",
+      "title": "Orlando de Virginia Woolf em Contexto: Leituras Intertextuais, Tradu\u00e7\u00f5es, Adapta\u00e7\u00f5es",
+      "authors": [
+        "MFF da Silva"
+      ],
+      "authorsRaw": "MFF da Silva - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Partindo da an\u00e1lise do romance Orlando\u2013A Biography, de Virginia Woolf, esta tese mostra como o conceito de intertextualidade gera permanente di\u00e1logo entre obras a serem \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/2676761d53f5d50fef3c5529dd607324/1?pq-origsite=gscholar&cbl=2026366&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "_q1o-lZvJ3MJ",
+      "scholarId": "_q1o-lZvJ3MJ",
+      "clusterId": "_q1o-lZvJ3MJ",
+      "title": "A arquitectura p\u00f3s-modernista: apropria\u00e7\u00f5es e transfer\u00eancias",
+      "authors": [
+        "J Costa"
+      ],
+      "authorsRaw": "J Costa - 2011 - Universidade do Minho. Centro de \u2026",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "6OWfAnql8nIJ",
+      "scholarId": "6OWfAnql8nIJ",
+      "clusterId": "6OWfAnql8nIJ",
+      "title": "Design de intera\u00e7\u00e3o para TV Digital: converg\u00eancia das m\u00eddias eo Sistema Brasileiro de TV Digital",
+      "authors": [
+        "S Silva",
+        "JP Amaral"
+      ],
+      "authorsRaw": "S Silva, JP Amaral - 2011 - researchgate.net",
+      "year": 2011,
+      "abstract": "Resumo O Sistema Brasileiro de TV Digital (SBTVD), adotado como padr\u00e3o de TV Digital no Brasil, traz consigo a alta resolu\u00e7\u00e3o de imagens, mais canais, a transmiss\u00e3o para \u2026",
+      "citationCount": 0,
+      "link": "https://www.researchgate.net/profile/Joao-Paulo-Schlittler/publication/278727389_Design_de_interacao_para_TV_Digital_convergencia_das_midias_e_o_Sistema_Brasileiro_de_TV_Digital/links/5584672708ae7bc2f448359f/Design-de-interacao-para-TV-Digital-convergencia-das-midias-e-o-Sistema-Brasileiro-de-TV-Digital.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "r-uMRvCxFhoJ",
+      "scholarId": "r-uMRvCxFhoJ",
+      "clusterId": "r-uMRvCxFhoJ",
+      "title": "Xerazade e os Outros, de Fernanda Botelho: Modernismo tardio ea dial\u00e9ctica entre a forma eo conte\u00fado inassimil\u00e1vel",
+      "authors": [
+        "MG Oliveira"
+      ],
+      "authorsRaw": "MG Oliveira - Navega\u00e7\u00f5es, 2011 - repositorio.ulisboa.pt",
+      "year": 2011,
+      "abstract": "A an\u00e1lise das caracter\u00edsticas formalmente inovadoras do romance Xerazade e os Outros, de Fernanda Botelho\u2013uma das obras que, publicadas nas d\u00e9cadas de 50 e 60 do s\u00e9culo XX \u2026",
+      "citationCount": 0,
+      "link": "https://repositorio.ulisboa.pt/bitstream/10451/28601/1/Marcelo_Oliveira.pdf",
+      "venue": "Navega\u00e7\u00f5es",
+      "source": "google_scholar"
+    },
+    {
+      "id": "We7HjS5nUwEJ",
+      "scholarId": "We7HjS5nUwEJ",
+      "clusterId": "We7HjS5nUwEJ",
+      "title": "Espa\u00e7os urbanos interiores: a arquitectura como limite",
+      "authors": [
+        "JPM Sp\u00ednola"
+      ],
+      "authorsRaw": "JPM Sp\u00ednola - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Os\" espa\u00e7os urbanos interiores de passagem e/ou perman\u00eancia\" incluem, no seu motivo, uma interioriza\u00e7\u00e3o de um modo de viver a cidade, onde o papel protagonizado pela Rua \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/2c249f416dcf69096f608cb66e7a3de1/1?pq-origsite=gscholar&cbl=2026366&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "5707997804159916889",
+      "scholarId": "5707997804159916889",
+      "clusterId": "WVupt8LhNk8J",
+      "title": "A cultura como categoria de interven\u00e7\u00e3o p\u00fablica no tempo e no territ\u00f3rio",
+      "authors": [
+        "LA Albuquerque"
+      ],
+      "authorsRaw": "LA Albuquerque - Porto: Universidade do Porto, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 9,
+      "link": null,
+      "venue": "Porto: Universidade do Porto",
+      "source": "google_scholar"
+    },
+    {
+      "id": "y_9l-S9JVS8J",
+      "scholarId": "y_9l-S9JVS8J",
+      "clusterId": "y_9l-S9JVS8J",
+      "title": "II. Abordagens disciplinares",
+      "authors": [
+        "VT Schall",
+        "CM Modena"
+      ],
+      "authorsRaw": "VT Schall, CM Modena",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "4wdwJ8QGADsJ",
+      "scholarId": "4wdwJ8QGADsJ",
+      "clusterId": "4wdwJ8QGADsJ",
+      "title": "diretor: Gilberto Velho",
+      "authors": [
+        "V Alberti",
+        "HS Becker",
+        "F Boas",
+        "C Castro\u2026"
+      ],
+      "authorsRaw": "V Alberti, HS Becker , F Boas, C Castro\u2026",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "DnQWOzwnW-AJ",
+      "scholarId": "DnQWOzwnW-AJ",
+      "clusterId": "DnQWOzwnW-AJ",
+      "title": "Rela\u00e7\u00f5es Conflituosas entre \u00c9tica e Est\u00e9tica na adapta\u00e7\u00e3o f\u00edlmica de Repara\u00e7\u00e3o (Atonement)",
+      "authors": [
+        "L Nobre"
+      ],
+      "authorsRaw": "L Nobre",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "nL80OM8kCusJ",
+      "scholarId": "nL80OM8kCusJ",
+      "clusterId": "nL80OM8kCusJ",
+      "title": "Alexis Bracke",
+      "authors": [
+        "M VAN",
+        "VAN DE GRAAD\u2026"
+      ],
+      "authorsRaw": "M VAN, VAN DE GRAAD\u2026",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "ylJD2PEt6jQJ",
+      "scholarId": "ylJD2PEt6jQJ",
+      "clusterId": "ylJD2PEt6jQJ",
+      "title": "Identiteiten van de lopende band?",
+      "authors": [
+        "S Borgman"
+      ],
+      "authorsRaw": "S Borgman",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "kNg1x_EjquwJ",
+      "scholarId": "kNg1x_EjquwJ",
+      "clusterId": "kNg1x_EjquwJ",
+      "title": "bEELDtERREURversus tERREURbEELD",
+      "authors": [
+        "T LEZER",
+        "D SLOMP",
+        "AOP DE VOORKANT"
+      ],
+      "authorsRaw": "T LEZER, D SLOMP, AOP DE VOORKANT",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "2QSDvrfJWLYJ",
+      "scholarId": "2QSDvrfJWLYJ",
+      "clusterId": "2QSDvrfJWLYJ",
+      "title": "Het onderzoek richt zich op het eerste seizoen van Glee waarin het koor een poging doet het regionale kampioenschap te winnen. De vraag waar dit \u2026",
+      "authors": [
+        "VS WB",
+        "WB Dawson's Creek"
+      ],
+      "authorsRaw": "VS WB, WB Dawson's Creek",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "z8j1i2tO0qcJ",
+      "scholarId": "z8j1i2tO0qcJ",
+      "clusterId": "z8j1i2tO0qcJ",
+      "title": "Identiteiten van de lopende band? Onderzoek naar identiteit en verbondenheid in Volkswagen-stad Wolfsburg.",
+      "authors": [
+        "SC Borgman"
+      ],
+      "authorsRaw": "SC Borgman - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "l-Fz2fzOmpIJ",
+      "scholarId": "l-Fz2fzOmpIJ",
+      "clusterId": "l-Fz2fzOmpIJ",
+      "title": "fundacji na rzecz nauki polskiej",
+      "authors": [
+        "J S\u0142awi\u0144ski",
+        "L Szczucki"
+      ],
+      "authorsRaw": "J S\u0142awi\u0144ski, L Szczucki - monografie.fnp.org.pl",
+      "year": null,
+      "abstract": "W 1895 roku zosta\u0142 opublikowany ostatni, czternasty tom monumentalnego S\u0142ownika geograficznego Kr\u00f3lestwa Polskiego i innych kraj\u00f3w s\u0142owia\u0144skich. Cel pracy by\u0142 ambitny \u2026",
+      "citationCount": 0,
+      "link": "https://monografie.fnp.org.pl/monografie/images/Files/HdZg3YSBtJui9X106NcEUozG7LprWeI2.pdf",
+      "venue": "monografie.fnp.org.pl",
+      "source": "google_scholar"
+    },
+    {
+      "id": "QEAAgoMmanoJ",
+      "scholarId": "QEAAgoMmanoJ",
+      "clusterId": "QEAAgoMmanoJ",
+      "title": "Partia Pirat\u00f3w jako egzemplifikacja ewolucji ruch\u00f3w spo\u0142eczno-politycznych",
+      "authors": [
+        "M Majorek",
+        "J Wojniak"
+      ],
+      "authorsRaw": "M Majorek , J Wojniak - 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "Procesy globalizacyjne, kt\u00f3re wymusi\u0142y pewne przesuni\u0119cie akcent\u00f3w w sposobie postrzegania znaczenia pa\u0144stwa narodowego, w podobny spos\u00f3b rzutuj\u0105 na wsp\u00f3\u0142czesn\u0105 \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/33980837/Majorek_Marta_Wojniak_Justyna_Partia_Piratow_2011.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "Q8thYYtr7VAJ",
+      "scholarId": "Q8thYYtr7VAJ",
+      "clusterId": "Q8thYYtr7VAJ",
+      "title": "Spo\u0142eczno-kulturowe uwarunkowania przemian systemowych Wielkiej Brytanii doby thatcheryzmu",
+      "authors": [
+        "S Rozmus"
+      ],
+      "authorsRaw": "S Rozmus - Studia Ekonomiczne/Uniwersytet Ekonomiczny w \u2026, 2011 - bazekon.icm.edu.pl",
+      "year": 2011,
+      "abstract": "Jednym z najbardziej rozpoznawalnych okres\u00f3w w nowo\u017cytnych dziejach Wielkiej Brytanii s\u0105 rz\u0105dy konserwatyst\u00f3w w latach 1979-1997. Czas ten charakteryzowa\u0142 si\u0119 odej\u015bciem od \u2026",
+      "citationCount": 0,
+      "link": "http://bazekon.icm.edu.pl/bazekon/element/bwmeta1.element.ekon-element-000171275143",
+      "venue": "Studia Ekonomiczne/Uniwersytet Ekonomiczny w \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "UtuBrE0zigQJ",
+      "scholarId": "UtuBrE0zigQJ",
+      "clusterId": "UtuBrE0zigQJ",
+      "title": "Postmodernizm z perspektywy krytycznej teorii kultury czyli o dominacji ideologii neoliberalnej i wsp\u00f3\u0142czesnych mechanizmach kontroli",
+      "authors": [
+        "M Abucewicz"
+      ],
+      "authorsRaw": "M Abucewicz - Prace Instytutu Profilaktyki Spo\u0142ecznej i Resocjalizacji, 2011 - ceeol.com",
+      "year": 2011,
+      "abstract": "Tekst prezentuje, w jaki spos\u00f3b poj\u0119cie i zjawisko postmodernizmu bywa interpretowane i wykorzystywane przez krytycznych badaczy kultury w budowie teorii dominacji ideologicznej \u2026",
+      "citationCount": 0,
+      "link": "https://www.ceeol.com/search/article-detail?id=192662",
+      "venue": "Prace Instytutu Profilaktyki Spo\u0142ecznej i Resocjalizacji",
+      "source": "google_scholar"
+    },
+    {
+      "id": "8lGy-L3XOlcJ",
+      "scholarId": "8lGy-L3XOlcJ",
+      "clusterId": "8lGy-L3XOlcJ",
+      "title": "Mimarl\u0131kta Geometri: Felsefi Ve Mimari Tart\u0131\u015fmalar \u00dczerine Geli\u015ftirilmi\u015f Bir Yakla\u015f\u0131m",
+      "authors": [
+        "AS Y\u00fccel"
+      ],
+      "authorsRaw": "AS Y\u00fccel - polen.itu.edu.tr",
+      "year": null,
+      "abstract": "\u00d6zet \u00dcniversitesi: \u0130stanbul Teknik \u00dcniversitesi Enstit\u00fcs\u00fc: Fen Bilimleri Anabilim Dal\u0131: Mimarl\u0131k Program\u0131: Mimari Tasar\u0131m Tez Dan\u0131\u015fman\u0131: Prof. Dr. Yurdanur D\u00dcLGERO\u011eLU \u2026",
+      "citationCount": 0,
+      "link": "https://polen.itu.edu.tr/handle/11527/6333",
+      "venue": "polen.itu.edu.tr",
+      "source": "google_scholar"
+    },
+    {
+      "id": "9292116967403392668",
+      "scholarId": "9292116967403392668",
+      "clusterId": "nI51bSY79IAJ",
+      "title": "Listening to Nothing in Particular: Boredom and Contemporary Experimental Music",
+      "authors": [
+        "E Priest"
+      ],
+      "authorsRaw": "E Priest - Postmodern Culture, 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "Abstract\" Listening to Nothing in Particular\" examines contemporary boredom through the lens of recent experimental composition. While boredom is typically treated in the arts as a \u2026",
+      "citationCount": 7,
+      "link": "https://www.academia.edu/download/13117838/Listening_to_Nothing.pdf",
+      "venue": "Postmodern Culture",
+      "source": "google_scholar"
+    },
+    {
+      "id": "16334823207356882755",
+      "scholarId": "16334823207356882755",
+      "clusterId": "Q19QVynzsOIJ",
+      "title": "Street stories: orality, media, popular culture and the postcolonial condition in Nigeria",
+      "authors": [
+        "N Otiono"
+      ],
+      "authorsRaw": "N Otiono - 2011 - ualberta.scholaris.ca",
+      "year": 2011,
+      "abstract": "This study unravels the curious politicization of everyday life in Nigeria. It trac s and redefines a seemingly simple and commonplace but peripheralized genre of everyday \u2026",
+      "citationCount": 4,
+      "link": "https://ualberta.scholaris.ca/bitstreams/b8b91669-3ac8-4b98-8a6f-a5e604320f97/download",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "11021243025289473281",
+      "scholarId": "11021243025289473281",
+      "clusterId": "AW2hcSNS85gJ",
+      "title": "Headphone\u2013Headset\u2013Jetset: DJ Culture, Mobility and Science Fictions of Listening",
+      "authors": [
+        "S Nye"
+      ],
+      "authorsRaw": "S Nye - Dancecult, 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "FIGURE 1: HEADPHONES AROUND THE GLOBE. SOURCE: NASA IMAGES.| mpire\u201d, a German chart hit by Members of Mayday, is an important representative of th \u00ab1eadphone \u2026",
+      "citationCount": 5,
+      "link": "https://www.academia.edu/download/31467373/90-527-3-PB.pdf",
+      "venue": "Dancecult",
+      "source": "google_scholar"
+    },
+    {
+      "id": "14615917338513217148",
+      "scholarId": "14615917338513217148",
+      "clusterId": "fJaNhGEr1soJ",
+      "title": "Lacan Avec Greimas: Formalization, Theory, and the \u201cOther Side\u201d of the Study of Culture",
+      "authors": [
+        "PE Wegner"
+      ],
+      "authorsRaw": "PE Wegner - the minnesota review, 2011 - read.dukeupress.edu",
+      "year": 2011,
+      "abstract": "I reflect upon the value of Jacques Lacan's 1969\u201370 Seminar XVII, The Other Side of Psychoanalysis, for thinking about the challenges we face as scholars and teachers working \u2026",
+      "citationCount": 5,
+      "link": "https://read.dukeupress.edu/the-minnesota-review/article-abstract/2011/77/62/67722",
+      "venue": "the minnesota review",
+      "source": "google_scholar"
+    },
+    {
+      "id": "11965653181210866084",
+      "scholarId": "11965653181210866084",
+      "clusterId": "pLGY6yuKDqYJ",
+      "title": "The \u201cI\u201d of the text: A psychoanalytic theory perspective on students' television criticism writing, subjectivity, and critical consciousness in visual culture art education",
+      "authors": [
+        "VS Daiello"
+      ],
+      "authorsRaw": "VS Daiello - 2011 - rave.ohiolink.edu",
+      "year": 2011,
+      "abstract": "This qualitative, interpretive case study uses a psychoanalytically informed theory base to examine students' perceptions of television criticism essays and writing processes created in \u2026",
+      "citationCount": 5,
+      "link": "https://rave.ohiolink.edu/etdc/view?acc_num=osu1293716652",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "10030333564506248147",
+      "scholarId": "10030333564506248147",
+      "clusterId": "05MS4zvnMosJ",
+      "title": "Postmodern transformations of art and authorship",
+      "authors": [
+        "C Marculescu"
+      ],
+      "authorsRaw": "C Marculescu - University of Bucharest Review. Literary and Cultural \u2026, 2011 - ceeol.com",
+      "year": 2011,
+      "abstract": "Postmodernism represents itself a cultural \u201cmutation\u201d, a systemic transformation affecting many aspects of life and art. It is the realm of consumer culture in contrast to what might be \u2026",
+      "citationCount": 3,
+      "link": "https://www.ceeol.com/search/article-detail?id=22185",
+      "venue": "University of Bucharest Review. Literary and Cultural \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2687832570758702767",
+      "scholarId": "2687832570758702767",
+      "clusterId": "rybMe3sZTSUJ",
+      "title": "The concept of sentimentality in critical approaches to film and its cultural antecedents",
+      "authors": [
+        "CAJ Burnetts"
+      ],
+      "authorsRaw": "CAJ Burnetts - 2011 - repository.royalholloway.ac.uk",
+      "year": 2011,
+      "abstract": "This thesis examines how sentimentality, as a term central to film criticism, has been mobilized, denigrated, quarantined or ignored over 300 years of aesthetic debate. It \u2026",
+      "citationCount": 4,
+      "link": "https://repository.royalholloway.ac.uk/file/3602c69e-176a-49a2-feb6-34c0efee8213/10/Burnetts_Thesis_Completed_and_Passed.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "936037739856026182",
+      "scholarId": "936037739856026182",
+      "clusterId": "Rlp6dF15_QwJ",
+      "title": "The postmodern ethics of global capitalism",
+      "authors": [
+        "GC Susanu"
+      ],
+      "authorsRaw": "GC Susanu - Annals of Spiru Haret University. Economic Series, 2011 - researchgate.net",
+      "year": 2011,
+      "abstract": "Global capitalism constitutes a concept surrounded by contention and controversy, fact which is evidenced by the abundance of studies regarding it, and probably the main feature \u2026",
+      "citationCount": 3,
+      "link": "https://www.researchgate.net/profile/Mariana-Man/publication/227489692_Green_accounting_-_a_new_dimension_in_the_performance_and_activity_reporting_of_the_enterprise/links/56716f1b08ae5252e6f3fcff/Green-accounting-a-new-dimension-in-the-performance-and-activity-reporting-of-the-enterprise.pdf?_sg%5B0%5D=started_experiment_milestone&origin=journalDetail&_rtd=e30%3D#page=49",
+      "venue": "Annals of Spiru Haret University. Economic Series",
+      "source": "google_scholar"
+    },
+    {
+      "id": "1248854359590860131",
+      "scholarId": "1248854359590860131",
+      "clusterId": "Y3WcX2zSVBEJ",
+      "title": "Cultural pillages of the leisure class",
+      "authors": [
+        "K Tavener-Smith"
+      ],
+      "authorsRaw": "K Tavener-Smith - Consuming expressions of identity, 2011 - ccms.ukzn.ac.za",
+      "year": 2011,
+      "abstract": "Society 'obscures itself'by presenting a world that is self-contained and logical (Barthes, 1973)\u2013a world underpinned by a transparency of its underlying systems of meaning. This \u2026",
+      "citationCount": 3,
+      "link": "https://ccms.ukzn.ac.za/Files/articles/MA_theses/tavener-smith_culturalpillages.pdf",
+      "venue": "Consuming expressions of identity",
+      "source": "google_scholar"
+    },
+    {
+      "id": "13268729163061014954",
+      "scholarId": "13268729163061014954",
+      "clusterId": "qjEegd_-I7gJ",
+      "title": "Poetry and History",
+      "authors": [
+        "R Baalbaki",
+        "SS Agha",
+        "T Khalidi"
+      ],
+      "authorsRaw": "R Baalbaki , SS Agha, T Khalidi - The Value of Poetry in - academia.edu",
+      "year": null,
+      "abstract": "At the high point of the Fatimids' two hundred and fifty plus years of rule, their territory spanned large parts of the Islamic realm\u2014all of North Africa, Egypt, Sicily, Syria, Palestine \u2026",
+      "citationCount": 2,
+      "link": "https://www.academia.edu/download/38777581/qutbuddin-Poetry_and_History.pdf",
+      "venue": "The Value of Poetry in",
+      "source": "google_scholar"
+    },
+    {
+      "id": "17869237725597780659",
+      "scholarId": "17869237725597780659",
+      "clusterId": "s8pDQQlJ_PcJ",
+      "title": "Globalization, Postmodern Theories of Culture, and the Trinity",
+      "authors": [
+        "T Rowland"
+      ],
+      "authorsRaw": "T Rowland - 2011 - academic.oup.com",
+      "year": 2011,
+      "abstract": "This article explores the relevance of the doctrine of the Trinity for discussions about globalization and postmodern theories of culture. It suggests that Trinitarian love infuses \u2026",
+      "citationCount": 2,
+      "link": "https://academic.oup.com/edited-volume/34341/chapter/327344207",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "xYDNuvVPgSkJ",
+      "scholarId": "xYDNuvVPgSkJ",
+      "clusterId": "xYDNuvVPgSkJ",
+      "title": "Advertising, once seen as 'the official art of capitalist society', is an increasingly commonplace component of a characteristically promotional culture. Iain \u2026",
+      "authors": [
+        "I MacRury"
+      ],
+      "authorsRaw": "I MacRury - ndl.ethernet.edu.et",
+      "year": null,
+      "abstract": "This book introduces some of the many ways that have developed to help people think about 'advertising'. An aspect of Advertising common to many media-based books, though \u2026",
+      "citationCount": 0,
+      "link": "http://ndl.ethernet.edu.et/bitstream/123456789/17614/1/53.pdf.pdf",
+      "venue": "ndl.ethernet.edu.et",
+      "source": "google_scholar"
+    },
+    {
+      "id": "wOtGp2NMfToJ",
+      "scholarId": "wOtGp2NMfToJ",
+      "clusterId": "wOtGp2NMfToJ",
+      "title": "12 Towards a Critique of Post-Huma n Reason: Revisiting 'Nature'and 'Humanity'in Horkheimer's 'The Concept of Man'",
+      "authors": [
+        "TW LUKE"
+      ],
+      "authorsRaw": "TW LUKE - CRITICAL ECOLOGIES: THE FRANKFURT SCHOOL \u2026 - utppublishing.com",
+      "year": null,
+      "abstract": "In this study of critical ecology, I revisit the Frankfurt School and critically examine 'the concept of man'as it was articulated in the analytical interventions of Max Horkheimer. I \u2026",
+      "citationCount": 0,
+      "link": "https://utppublishing.com/doi/pdf/10.3138/9780802095657#page=321",
+      "venue": "CRITICAL ECOLOGIES: THE FRANKFURT SCHOOL \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "9h7lo5Xja60J",
+      "scholarId": "9h7lo5Xja60J",
+      "clusterId": "9h7lo5Xja60J",
+      "title": "Photography is an up-to-date, clear and comprehensive introduction to debates about photography now and is particularly useful to media, photography and \u2026",
+      "authors": [
+        "S Bull"
+      ],
+      "authorsRaw": "S Bull - narrativeandcontextlevel1 \u2026",
+      "year": null,
+      "abstract": "In the space of one week, seven very different photographs were brought to the attention of the British public:\u2022 For 24 hours it was mistakenly hoped that a snapshot taken on a digital \u2026",
+      "citationCount": 0,
+      "link": "https://narrativeandcontextlevel1.wordpress.com/wp-content/uploads/2017/10/bull-stephen-photography-routledge-introductions-to-media-and-communications-2010-copy.pdf",
+      "venue": "narrativeandcontextlevel1 \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "w2IzTNAMpFIJ",
+      "scholarId": "w2IzTNAMpFIJ",
+      "clusterId": "w2IzTNAMpFIJ",
+      "title": "IN PURSUIT OF ARCHITECTURE FICTION",
+      "authors": [
+        "K Vamelis"
+      ],
+      "authorsRaw": "K Vamelis - search.ebscohost.com",
+      "year": null,
+      "abstract": "The article focuses on the use of architecture fiction as one of an architect's strategies during an economic downturn. Architecture fiction was defined by novelist Bruce Sterling and the \u2026",
+      "citationCount": 0,
+      "link": "https://search.ebscohost.com/login.aspx?direct=true&profile=ehost&scope=site&authtype=crawler&jrnl=13921630&asa=N&AN=60452852&h=jIJTj9ouV6GL3hJYb1fEvC%2FRsZkY6TEnr69Kf%2BF4W1vZTD6COp62tBrXZfoostoL%2Bi7nSN04vmGDUPDVr7VWAw%3D%3D&crl=c",
+      "venue": "search.ebscohost.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "11905617786730156631",
+      "scholarId": "11905617786730156631",
+      "clusterId": "V5KfYUxAOaUJ",
+      "title": "A Study on the Nexus between Theatre for Social Change and Donor Agencies",
+      "authors": [
+        "BB Thapa"
+      ],
+      "authorsRaw": "BB Thapa - IMAP Reader - soscbaha.org",
+      "year": null,
+      "abstract": "This paper deals with the dynamics resulting from the nexus between Nepali theatre groups and donor agencies. This nexus has led theatre groups to perform for educational purposes \u2026",
+      "citationCount": 1,
+      "link": "https://soscbaha.org/wp-content/uploads/2019/11/IMAP-reader.pdf#page=51",
+      "venue": "IMAP Reader",
+      "source": "google_scholar"
+    },
+    {
+      "id": "4DGtneVEbDEJ",
+      "scholarId": "4DGtneVEbDEJ",
+      "clusterId": "4DGtneVEbDEJ",
+      "title": "Reality for Sale: Role-playing, Ideology and Multi-user Dungeons1",
+      "authors": [
+        "K Moberly"
+      ],
+      "authorsRaw": "K Moberly - worksanddays2.net",
+      "year": null,
+      "abstract": "Proponents claim Multi-User-Dungeons (MUDs) offer participants the ultimate in agency: the chance to inhabit and master virtual worlds where things like race, gender, and age have no \u2026",
+      "citationCount": 0,
+      "link": "https://worksanddays2.net/2004/File23.Moberly_File23.Moberly.pdf",
+      "venue": "worksanddays2.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "LKFGaFRVqtYJ",
+      "scholarId": "LKFGaFRVqtYJ",
+      "clusterId": "LKFGaFRVqtYJ",
+      "title": "Prosthetic Memory: Total Recalhna",
+      "authors": [
+        "B Runner"
+      ],
+      "authorsRaw": "B Runner - Cyberspace/Cyberbodies/Cyberpunk - torrossa.com",
+      "year": null,
+      "abstract": "In the 1908 Edison film The Thieving Hand, a wealthy passer-by takes pity on an armless beggar and buys him a prosthetic arm. As the beggar soon discovers, however, the arm has \u2026",
+      "citationCount": 0,
+      "link": "https://www.torrossa.com/gs/resourceProxy?an=5017440&publisher=FZ7200#page=182",
+      "venue": "Cyberspace/Cyberbodies/Cyberpunk",
+      "source": "google_scholar"
+    },
+    {
+      "id": "7uGyk2WEt4gJ",
+      "scholarId": "7uGyk2WEt4gJ",
+      "clusterId": "7uGyk2WEt4gJ",
+      "title": "ARCHITECTURE: ENTRE POSTMODERNISME ET FENG SHUI",
+      "authors": [
+        "C CHENG"
+      ],
+      "authorsRaw": "C CHENG - \u00c9conomie, soci\u00e9t\u00e9, culture - torrossa.com",
+      "year": null,
+      "abstract": "Un d\u00e9tachement naval britannique accosta au nord-ouest de l'\u00eele de Hong Kong et hissa pour la premi\u00e8re fois les couleurs de l'Union Jack le 26 janvier 1841. Il s' ensuivit une \u2026",
+      "citationCount": 0,
+      "link": "https://www.torrossa.com/gs/resourceProxy?an=5097029&publisher=FZ2990#page=469",
+      "venue": "\u00c9conomie, soci\u00e9t\u00e9, culture",
+      "source": "google_scholar"
+    },
+    {
+      "id": "TkPX6XHd748J",
+      "scholarId": "TkPX6XHd748J",
+      "clusterId": "TkPX6XHd748J",
+      "title": "This dissertation, THE PERSISTENCE OF POLICY: A TROPOLOGICAL ANALYSIS OF CONTEMPORARY EDUCATION POLICY DISCOURSE IN THE UNITED \u2026",
+      "authors": [
+        "DR Boyles"
+      ],
+      "authorsRaw": "DR Boyles - researchgate.net",
+      "year": null,
+      "abstract": "ABSTRACT THE PERSISTENCE OF POLICY: A TROPOLOGICAL ANALYSIS OF CONTEMPORARY EDUCATION POLICY DISCOURSE IN THE UNITED STATES by F. Tony \u2026",
+      "citationCount": 0,
+      "link": "https://www.researchgate.net/profile/F-Tony-Carusi/publication/267805631_The_Persistence_of_Policy_A_Tropological_Analysis_of_Contemporary_Education_Policy_Discourse_in_the_United_States/links/5ec30850458515626cb4b465/The-Persistence-of-Policy-A-Tropological-Analysis-of-Contemporary-Education-Policy-Discourse-in-the-United-States.pdf",
+      "venue": "researchgate.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "1EO1UZprVIIJ",
+      "scholarId": "1EO1UZprVIIJ",
+      "clusterId": "1EO1UZprVIIJ",
+      "title": "Strategies in the metropolitan Merz",
+      "authors": [
+        "G Day"
+      ],
+      "authorsRaw": "G Day - radicalphilosophyarchive.com",
+      "year": null,
+      "abstract": "27 as a historian of architecture; nor, for that matter, does it seem quite right to see him as a theorist. A feature of much commentary on Tafuri\u02bcs writing has been the elision of the \u2026",
+      "citationCount": 0,
+      "link": "https://www.radicalphilosophyarchive.com/issue-files/rp133_article2_strategiesinthemetropolitanmerz_day.pdf",
+      "venue": "radicalphilosophyarchive.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "QggyKF9By_sJ",
+      "scholarId": "QggyKF9By_sJ",
+      "clusterId": "QggyKF9By_sJ",
+      "title": "Towards an Encyclopaedia as a Web of Knowledge. A Systematic Analysis of Paradigmatic Classes, Continuities, and Unifying Forces in the Work of",
+      "authors": [
+        "P Greenaway"
+      ],
+      "authorsRaw": "P Greenaway - phaidra.univie.ac.at",
+      "year": null,
+      "abstract": "The idea for a dissertation project on Peter Greenaway's work was born out of a state of bewilderment. Bewildered and discontented with the lack of attention paid to this versatile \u2026",
+      "citationCount": 0,
+      "link": "https://phaidra.univie.ac.at/open/o:1278110",
+      "venue": "phaidra.univie.ac.at",
+      "source": "google_scholar"
+    },
+    {
+      "id": "loWSaMEp380J",
+      "scholarId": "loWSaMEp380J",
+      "clusterId": "loWSaMEp380J",
+      "title": "SIMPLICITY AS SOCIAL CRITIQUE",
+      "authors": [
+        "XU XIAOFENG"
+      ],
+      "authorsRaw": "XU XIAOFENG",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "nMq8k5LgJxYJ",
+      "scholarId": "nMq8k5LgJxYJ",
+      "clusterId": "nMq8k5LgJxYJ",
+      "title": "Helena Cristina Ferreira Pereira Lopes",
+      "authors": [
+        "E Coen"
+      ],
+      "authorsRaw": "E Coen - academia.edu",
+      "year": null,
+      "abstract": "Lebowski (1998) and No Country for Old Men (2007). After having outlined the historical, social and cultural context of the Coen brothers, the following sections will focus specifically \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/107153994/Community_20and_20Crisis.pdf",
+      "venue": "academia.edu",
+      "source": "google_scholar"
+    },
+    {
+      "id": "UJ6e-DtBidsJ",
+      "scholarId": "UJ6e-DtBidsJ",
+      "clusterId": "UJ6e-DtBidsJ",
+      "title": "in Modern Languages), August 2010",
+      "authors": [
+        "C Chiu"
+      ],
+      "authorsRaw": "C Chiu - ore.exeter.ac.uk",
+      "year": null,
+      "abstract": "ABSTRACT The works of Tsai Ming-Liang and Kim Ki-Duk, two directors in contemporary Asian cinema, qualify as postmodern films transgressing the hegemonic dominance of \u2026",
+      "citationCount": 0,
+      "link": "https://ore.exeter.ac.uk/ndownloader/files/56695622",
+      "venue": "ore.exeter.ac.uk",
+      "source": "google_scholar"
+    },
+    {
+      "id": "pG9IBum0rLQJ",
+      "scholarId": "pG9IBum0rLQJ",
+      "clusterId": "pG9IBum0rLQJ",
+      "title": "E-ISSN: 1092-311X",
+      "authors": [
+        "T Gabrielson",
+        "J Locke"
+      ],
+      "authorsRaw": "T Gabrielson , J Locke - researchgate.net",
+      "year": null,
+      "abstract": "(1690, 49)\u2015Everyone gets a new life on this island.\u2016 John Locke, character on Lost (\u2015\u2026 In Translation\u2016 2/23/2005)\u2015That morning of the day I got sick? I 'd been thinking: it's good \u2026",
+      "citationCount": 0,
+      "link": "https://www.researchgate.net/profile/Teena-Gabrielson/publication/236805767_The_End_of_New_Beginnings_Nature_and_the_American_Dream_in_The_Sopranos_Weeds_and_Lost/links/57fe560f08ae727564015dd5/The-End-of-New-Beginnings-Nature-and-the-American-Dream-in-The-Sopranos-Weeds-and-Lost.pdf",
+      "venue": "researchgate.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "7R2UNcDWal4J",
+      "scholarId": "7R2UNcDWal4J",
+      "clusterId": "7R2UNcDWal4J",
+      "title": "The Multicultural Christ",
+      "authors": [
+        "J Crossley"
+      ],
+      "authorsRaw": "J Crossley - bibleandcriticaltheory.com",
+      "year": null,
+      "abstract": "In a recent book I argued that the contemporary scholarly rhetoric of a 'Jewish Jesus' who consistently transcends the Judaism (s) constructed by scholarship is, in part, the product of \u2026",
+      "citationCount": 0,
+      "link": "https://bibleandcriticaltheory.com/wp-content/uploads/2018/05/vol7-no2-2011-the-multicultural-christ-crossley-418-1667-1-PB-x33dgp.pdf",
+      "venue": "bibleandcriticaltheory.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "9ssHdgyZyiQJ",
+      "scholarId": "9ssHdgyZyiQJ",
+      "clusterId": "9ssHdgyZyiQJ",
+      "title": "Modernity, or the Rhetorical Domain: Remarks On (and Beyond) Fredric Jameson",
+      "authors": [
+        "G Karampelas"
+      ],
+      "authorsRaw": "G Karampelas - RHETORIC, POLITICS AND CONCEPTUAL CHANGE - academia.edu",
+      "year": null,
+      "abstract": "Among the various terms composing the core international idiom of contemporary social and human sciences, the term modernity occupies a unique place. Its salient feature is not only \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/37759346/Book2011_Rhetoric_Politics_ConcChange.PDF#page=36",
+      "venue": "RHETORIC, POLITICS AND CONCEPTUAL CHANGE",
+      "source": "google_scholar"
+    },
+    {
+      "id": "mQhTuuQHMgcJ",
+      "scholarId": "mQhTuuQHMgcJ",
+      "clusterId": "mQhTuuQHMgcJ",
+      "title": "Fantasy, Imagination and History",
+      "authors": [
+        "G Wolfe's",
+        "C Finander"
+      ],
+      "authorsRaw": "G Wolfe's, C Finander - research-repository.uwa.edu.au",
+      "year": null,
+      "abstract": "Encounters with Enchantment Page 1 Fantasy, Imagination and History: A Historiographical Study of JRR Tolkien\u2019s The Lord of the Rings and Gene Wolfe\u2019s The Book of the New Sun \u2026",
+      "citationCount": 0,
+      "link": "https://research-repository.uwa.edu.au/files/3217640/Finander_Caroline_2010.pdf",
+      "venue": "research-repository.uwa.edu.au",
+      "source": "google_scholar"
+    },
+    {
+      "id": "i0MXOsarYJUJ",
+      "scholarId": "i0MXOsarYJUJ",
+      "clusterId": "i0MXOsarYJUJ",
+      "title": "The Televised Community",
+      "authors": [
+        "B Ohm"
+      ],
+      "authorsRaw": "B Ohm - researchgate.net",
+      "year": null,
+      "abstract": "This book was not meant to be a study on Hindu nationalism and television in India, at least not to the degree it has turned out to be. It was meant to be a study on the negotiation of the \u2026",
+      "citationCount": 0,
+      "link": "https://www.researchgate.net/profile/Britta-Ohm/publication/283067976_The_Televised_Community_Culture_Politics_and_the_Market_of_Visual_Representation_in_India/links/6622759a66ba7e2359e90e17/The-Televised-Community-Culture-Politics-and-the-Market-of-Visual-Representation-in-India.pdf",
+      "venue": "researchgate.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "IZO5RdeIDMgJ",
+      "scholarId": "IZO5RdeIDMgJ",
+      "clusterId": "IZO5RdeIDMgJ",
+      "title": "Arthur Miller's Death of a Salesman",
+      "authors": [
+        "N Hooti",
+        "F Azizpour"
+      ],
+      "authorsRaw": "N Hooti, F Azizpour - letras.ufmg.br",
+      "year": null,
+      "abstract": "This study makes an attempt to analyze Death of a Salesman in an attempt to mirror the struggling modern characters who live in the world of postmodernism but are the slave of the \u2026",
+      "citationCount": 0,
+      "link": "http://www.letras.ufmg.br/padrao_cms/documentos/profs/marcel/Miller2.pdf",
+      "venue": "letras.ufmg.br",
+      "source": "google_scholar"
+    },
+    {
+      "id": "_ChWFzC-iK4J",
+      "scholarId": "_ChWFzC-iK4J",
+      "clusterId": "_ChWFzC-iK4J",
+      "title": "Peer to Peer Financing",
+      "authors": [
+        "D Pop"
+      ],
+      "authorsRaw": "D Pop - THE DIGITAL GENERATION - academia.edu",
+      "year": null,
+      "abstract": "OF LATE CApITALISM From the very beginning cinema-making was linked with capitalist production and capitalism. As David Kunzle suggested, cinemamaking was influenced by \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/30929482/Proceedings_of_The_Digital_Generation_International_Conference.pdf#page=162",
+      "venue": "THE DIGITAL GENERATION",
+      "source": "google_scholar"
+    },
+    {
+      "id": "qA8s3-wEJ3wJ",
+      "scholarId": "qA8s3-wEJ3wJ",
+      "clusterId": "qA8s3-wEJ3wJ",
+      "title": "Postmodern Openings",
+      "authors": [
+        "P Quest",
+        "AI Commons",
+        "S Journalseek"
+      ],
+      "authorsRaw": "P Quest, AI Commons, S Journalseek - ceeol.com",
+      "year": null,
+      "abstract": "Youth unemployment in Africa challenges governments and development partners alike. This problem is hard to tackle because of the lack of reliable data and related analysis on \u2026",
+      "citationCount": 0,
+      "link": "https://www.ceeol.com/search/article-detail?id=27108",
+      "venue": "ceeol.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "HFwdkhOOmhkJ",
+      "scholarId": "HFwdkhOOmhkJ",
+      "clusterId": "HFwdkhOOmhkJ",
+      "title": "Towards a Postmodern Poetics of Graphic Novels (draft copy-currently under revision for conference presentation)",
+      "authors": [
+        "H Clitheroe"
+      ],
+      "authorsRaw": "H Clitheroe - lectio.ca",
+      "year": null,
+      "abstract": "The impulse for a poetics of graphic novels is grounded in the desire to work towards a better description of the qualities and characteristics of the form: fluid, challenging one that \u2026",
+      "citationCount": 0,
+      "link": "http://www.lectio.ca/wp-content/uploads/2011/07/pmod_poetics_revision.pdf",
+      "venue": "lectio.ca",
+      "source": "google_scholar"
+    },
+    {
+      "id": "ysUygOFoLCMJ",
+      "scholarId": "ysUygOFoLCMJ",
+      "clusterId": "ysUygOFoLCMJ",
+      "title": "LONDONGRIP... LITERATURE",
+      "authors": [
+        "J Fabian"
+      ],
+      "authorsRaw": "J Fabian - londongrip.co.uk",
+      "year": null,
+      "abstract": "Over a century after George Eliot penned 'The Mill on the Floss' and brought the troubles of Maggie Tulliver to our attention, feminism had become one of the 'new literary voices' of post \u2026",
+      "citationCount": 0,
+      "link": "http://londongrip.co.uk/wp-content/uploads/2011/06/Literature_Angela_Carter_Jenny_Fabian.pdf",
+      "venue": "londongrip.co.uk",
+      "source": "google_scholar"
+    },
+    {
+      "id": "7Tn9kHjTjO8J",
+      "scholarId": "7Tn9kHjTjO8J",
+      "clusterId": "7Tn9kHjTjO8J",
+      "title": "Resistance to History",
+      "authors": [
+        "DR Shumway"
+      ],
+      "authorsRaw": "DR Shumway - worksanddays2.net",
+      "year": null,
+      "abstract": "Magazines, Markets, and Class at the Turn of the Century, ought to be recognized as one of its two or three leading practitioners. The fact that he is not typically recognized as such is \u2026",
+      "citationCount": 0,
+      "link": "https://worksanddays2.net/2005/File05.Shumway_File05.Shumway.pdf",
+      "venue": "worksanddays2.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "pKGlD8LFThkJ",
+      "scholarId": "pKGlD8LFThkJ",
+      "clusterId": "pKGlD8LFThkJ",
+      "title": "Richard Ohmann, Administration and Articulation",
+      "authors": [
+        "P Harkin"
+      ],
+      "authorsRaw": "P Harkin - worksanddays2.net",
+      "year": null,
+      "abstract": "Richard Ohmann's work as an administrator is rarely spoken of in tributes to him in this volume and elsewhere, but to think carefully about his influence is to realize that he has \u2026",
+      "citationCount": 0,
+      "link": "https://worksanddays2.net/2005/File14.Harkin_File14.Harkin.pdf",
+      "venue": "worksanddays2.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "bXHc2W6T5fIJ",
+      "scholarId": "bXHc2W6T5fIJ",
+      "clusterId": "bXHc2W6T5fIJ",
+      "title": "Tanamedrove politikuri mecniereba",
+      "authors": [
+        "II Tavi"
+      ],
+      "authorsRaw": "II Tavi - cssge.ge",
+      "year": null,
+      "abstract": "3 winasityvaoba politikuri mecnierebis swavlebis sferoSi arsebulma gamocdilebam cxadad gvaCvena, rom is saxelmZRvaneloebi socialur mecnierebaTa sferoSi, romlebic dRes \u2026",
+      "citationCount": 0,
+      "link": "https://cssge.ge/wp-content/uploads/2012/02/tanamedrove-politikuri-mecniereba.pdf",
+      "venue": "cssge.ge",
+      "source": "google_scholar"
+    },
+    {
+      "id": "EgmFdhOZ2EcJ",
+      "scholarId": "EgmFdhOZ2EcJ",
+      "clusterId": "EgmFdhOZ2EcJ",
+      "title": "LEONARDO THINKS",
+      "authors": [
+        "D Carrier"
+      ],
+      "authorsRaw": "D Carrier - leoalmanac.org",
+      "year": null,
+      "abstract": "For some time now-starting in the era of modernism and continuing into our own postmodern era-much of the analytical vocabulary of American art criticism has come out of Marxism \u2026",
+      "citationCount": 0,
+      "link": "https://leoalmanac.org/wp-content/uploads/2011/09/LeonardoThinks_Carrier.pdf",
+      "venue": "leoalmanac.org",
+      "source": "google_scholar"
+    },
+    {
+      "id": "w8fdHrauxwYJ",
+      "scholarId": "w8fdHrauxwYJ",
+      "clusterId": "w8fdHrauxwYJ",
+      "title": "Walter Abish's Deconstruction of the Holocaust in\" How German Is It\"",
+      "authors": [
+        "R Nitta"
+      ],
+      "authorsRaw": "R Nitta - Studies in American Jewish Literature (1981-), 2011 - JSTOR",
+      "year": 1981,
+      "abstract": "Since his first startling novel, Alphabetical Africa (1974, hereafter, AA), Walter Abish has always been recognized as a provocative writer who challenges the limitations of language \u2026",
+      "citationCount": 0,
+      "link": "https://www.jstor.org/stable/41228663",
+      "venue": "Studies in American Jewish Literature (-)",
+      "source": "google_scholar"
+    },
+    {
+      "id": "ALKJl9VpRZMJ",
+      "scholarId": "ALKJl9VpRZMJ",
+      "clusterId": "ALKJl9VpRZMJ",
+      "title": "Flotsam",
+      "authors": [
+        "J Henson"
+      ],
+      "authorsRaw": "J Henson - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Flotsam by Jacob Henson A Thesis Submitted to the Faculty of The Dorothy F. Schmidt College of Arts and Letters in Partial Fulfi Page 1 Flotsam by Jacob Henson A Thesis Submitted to the \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/e23ae3fe1edc2d7df62f06c25a08f586/1?pq-origsite=gscholar&cbl=18750&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "rMsATtvmIXoJ",
+      "scholarId": "rMsATtvmIXoJ",
+      "clusterId": "rMsATtvmIXoJ",
+      "title": "Characteristics of Sitcom in TV Series Animation",
+      "authors": [
+        "YO Park",
+        "JW Kim"
+      ],
+      "authorsRaw": "YO Park, JW Kim - The Journal of the Korea \u2026, 2011 - The Korea Contents Association",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "The Journal of the Korea \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "LQffMe_c6HgJ",
+      "scholarId": "LQffMe_c6HgJ",
+      "clusterId": "LQffMe_c6HgJ",
+      "title": "An Investigation of the Phenomenon of the Decentralization of the Asian Look and its Method",
+      "authors": [
+        "BH Seo"
+      ],
+      "authorsRaw": "BH Seo - Journal of the Korean Society of Costume, 2011 - The Korean Society of Costume",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "Journal of the Korean Society of Costume",
+      "source": "google_scholar"
+    },
+    {
+      "id": "smtBpVOlk3cJ",
+      "scholarId": "smtBpVOlk3cJ",
+      "clusterId": "smtBpVOlk3cJ",
+      "title": "The humanistic meaning of urban squares: The case of \u00c7ayyolu Urban Square Project/\u0130nsan g\u00f6z\u00fcyle kent meydanlar\u0131: \u00c7ayyolu Kent Meydan\u0131 Projesi \u2026",
+      "authors": [
+        "B Zeka"
+      ],
+      "authorsRaw": "B Zeka - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "OjMGArkhl3QJ",
+      "scholarId": "OjMGArkhl3QJ",
+      "clusterId": "OjMGArkhl3QJ",
+      "title": "Re-defining creativity, with particular reference to its sustainability, within the context of the creative industries discourse",
+      "authors": [
+        "A Barnum"
+      ],
+      "authorsRaw": "A Barnum - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Starting from a practitioner's standpoint, this study investigates creativity as a system in which individual talent, desire and ambition operate. In the context of sustaining these \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/a2863e3884872717ef6b1920984d3a4b/1?pq-origsite=gscholar&cbl=2026366&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "OPoXfb1UvHMJ",
+      "scholarId": "OPoXfb1UvHMJ",
+      "clusterId": "OPoXfb1UvHMJ",
+      "title": "Eastern Bodies that Dance: Difference and Otherness in the Economy of Contemporary Dance Performance",
+      "authors": [
+        "D Njaradi"
+      ],
+      "authorsRaw": "D Njaradi - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "This thesis locates at the intersection between the practice of dance and the notion of'cultural difference'in the discourses of contemporary globalization. Electing to focus on \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/44bf4613d4e21d9731125b4b55b5f3d2/1?pq-origsite=gscholar&cbl=51922&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "fwzG20QtQXEJ",
+      "scholarId": "fwzG20QtQXEJ",
+      "clusterId": "fwzG20QtQXEJ",
+      "title": "The Belief System and the Pop-esoteric Wave: a Theory on the Operational Belief System",
+      "authors": [
+        "JC Henriquez-Mendoza"
+      ],
+      "authorsRaw": "JC Henriquez-Mendoza - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "This work inquires about the subjectivity construction individuals perform in our contemporary media culture. It examines the structure of believing that can be inferred from \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/c83675422f13e8fb991efe8649735e73/1?pq-origsite=gscholar&cbl=18750",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "Ju5A4b-axGwJ",
+      "scholarId": "Ju5A4b-axGwJ",
+      "clusterId": "Ju5A4b-axGwJ",
+      "title": "Between the Exception and Biopolitical Security: A Critical Discourse Analysis of US and EU Securitization Strategies post-9/11",
+      "authors": [
+        "E Fiaccadori"
+      ],
+      "authorsRaw": "E Fiaccadori - 2011 - research.gold.ac.uk",
+      "year": 2011,
+      "abstract": "In line with Carl Schmitt's characterization of the sovereign as 'he who decides on the state of exception', Giorgio Agamben argues that the exception is not only central to contemporary \u2026",
+      "citationCount": 0,
+      "link": "https://research.gold.ac.uk/id/eprint/6476/",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "cmPSJ8T1EmsJ",
+      "scholarId": "cmPSJ8T1EmsJ",
+      "clusterId": "cmPSJ8T1EmsJ",
+      "title": "Modern Gothic Realism: How America Became Generic",
+      "authors": [
+        "R Peters-Golden"
+      ],
+      "authorsRaw": "R Peters-Golden - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Abstract Modern Gothic Realism: How America Became Generic examines the surplus of gothicisms present in American modernity. From the fin de si\u00e8cle to the post-war period \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/fec16551b7ef6b79be72937b0c4e8861/1?pq-origsite=gscholar&cbl=18750",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "qpqtV14jPGoJ",
+      "scholarId": "qpqtV14jPGoJ",
+      "clusterId": "qpqtV14jPGoJ",
+      "title": "the Degree of Master of Arts",
+      "authors": [
+        "SR Janz"
+      ],
+      "authorsRaw": "SR Janz - 2011 - Acadia University",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "Lw_hSy9P4WUJ",
+      "scholarId": "Lw_hSy9P4WUJ",
+      "clusterId": "Lw_hSy9P4WUJ",
+      "title": "Trapped in Between Interim Space/Time in Wong Kar-wai's In the Mood for Love and 2046",
+      "authors": [
+        "\u85e4\u57ce\u5b5d\u8f14"
+      ],
+      "authorsRaw": "\u85e4\u57ce\u5b5d\u8f14 - Cinema Studies, 2011 - jstage.jst.go.jp",
+      "year": 2011,
+      "abstract": "Hong Kong of the 1960s was marked by the consciousness of its identity emerging out of the confrontation of two ideologies. On the one hand, Hong Kong, then a British colony, had \u2026",
+      "citationCount": 0,
+      "link": "https://www.jstage.jst.go.jp/article/jscsj/6/0/6_62/_article/-char/ja/",
+      "venue": "Cinema Studies",
+      "source": "google_scholar"
+    },
+    {
+      "id": "IAdfdfbgTVsJ",
+      "scholarId": "IAdfdfbgTVsJ",
+      "clusterId": "IAdfdfbgTVsJ",
+      "title": "Projects of Humanitarianism",
+      "authors": [
+        "R Galusca"
+      ],
+      "authorsRaw": "R Galusca - 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "In 2009, the UK-based Helen Bamber Foundation embarked on a transnational artistic project, called Journey, described by its producers as an activist venture designed to bring \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/47496863/rgalusca_1.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "LvJc6L-aSFsJ",
+      "scholarId": "LvJc6L-aSFsJ",
+      "clusterId": "LvJc6L-aSFsJ",
+      "title": "John Updike's Rabbit, Run and Don DeLillo's White Noise: A Comparative Analysis",
+      "authors": [
+        "JU Olson"
+      ],
+      "authorsRaw": "JU Olson - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "AjietI8rRU0J",
+      "scholarId": "AjietI8rRU0J",
+      "clusterId": "AjietI8rRU0J",
+      "title": "TECHNOLOGICAL AND SPATIAL TURN. TRANSCULTURAL AND TRANSDISCIPLINAR APPROACH IN EDUCATION AND SOCIAL COMMUNICATION",
+      "authors": [
+        "T Stepien"
+      ],
+      "authorsRaw": "T Stepien - INTED2011 Proceedings, 2011 - library.iated.org",
+      "year": 2011,
+      "abstract": "Niklas Luhmann (1992) points out that \u201conly communication can communicate and that only within such a network of communication is what we understand as action created\u201d. The \u2026",
+      "citationCount": 0,
+      "link": "https://library.iated.org/view/STEPIEN2011TEC",
+      "venue": "INTED2011 Proceedings",
+      "source": "google_scholar"
+    },
+    {
+      "id": "uyJ2Wx14kkQJ",
+      "scholarId": "uyJ2Wx14kkQJ",
+      "clusterId": "uyJ2Wx14kkQJ",
+      "title": "Something Extraordinary Hovering Just Outside Our Touch",
+      "authors": [
+        "J Henneberg"
+      ],
+      "authorsRaw": "J Henneberg - 2011 - thestacks.libaac.de",
+      "year": 2011,
+      "abstract": "This paper discusses how the forces of postmodernity and technology combine to create a contemporary version of the romantic sublime, and how this new 'technological \u2026",
+      "citationCount": 0,
+      "link": "https://thestacks.libaac.de/handle/11858/2434",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "4XUWRfYPq0IJ",
+      "scholarId": "4XUWRfYPq0IJ",
+      "clusterId": "4XUWRfYPq0IJ",
+      "title": "Iconoclasm, autotelicity, narcissism, and cool beyond distinction",
+      "authors": [
+        "S Hong"
+      ],
+      "authorsRaw": "S Hong - ACR North American Advances, 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "Distinction as an imperative of consumer culture and a prerequisite for postmodern self- identity has been widely recognized and discussed by theorists ever since the \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/107927229/acr_v38_16098.pdf",
+      "venue": "ACR North American Advances",
+      "source": "google_scholar"
+    },
+    {
+      "id": "0OsqiWeYlDkJ",
+      "scholarId": "0OsqiWeYlDkJ",
+      "clusterId": "0OsqiWeYlDkJ",
+      "title": "A postcolonial symbiosis: magical realism and historical fiction in English Canada",
+      "authors": [
+        "B Haberpeuntner"
+      ],
+      "authorsRaw": "B Haberpeuntner - 2011 - phaidra.univie.ac.at",
+      "year": 2011,
+      "abstract": "Diese Diplomarbeit hat nachgewiesen, dass die betreffende Kandidatin oder der betreffende Kandidat bef\u00e4higt ist, wissenschaftliche Themen selbstst\u00e4ndig sowie inhaltlich \u2026",
+      "citationCount": 0,
+      "link": "https://phaidra.univie.ac.at/detail/o:1271838.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "oQ8iKPtCqTYJ",
+      "scholarId": "oQ8iKPtCqTYJ",
+      "clusterId": "oQ8iKPtCqTYJ",
+      "title": "\u201cCity, Bad Place\u201d: Architecture and Disorientation in New York City",
+      "authors": [
+        "JC Westgate"
+      ],
+      "authorsRaw": "JC Westgate - Urban Drama: The Metropolis in Contemporary North \u2026, 2011 - Springer",
+      "year": 2011,
+      "abstract": "H ow do people negotiate the city? This was the animating question behind Kevin Lynch's The Image of the City, which helped define a distinctly urban cartography. Written in 1960 \u2026",
+      "citationCount": 0,
+      "link": "https://link.springer.com/chapter/10.1057/9780230119581_3",
+      "venue": "Urban Drama: The Metropolis in Contemporary North \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "J920yasv3zIJ",
+      "scholarId": "J920yasv3zIJ",
+      "clusterId": "J920yasv3zIJ",
+      "title": "Nowhere to Hide: International Fugitives and American Power, 1880\u20131915",
+      "authors": [
+        "KR Unterman"
+      ],
+      "authorsRaw": "KR Unterman - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Abstract \u201cNowhere to Hide\u201d spotlights a notorious figure in American culture at the turn of the twentieth century: the international fugitive. The dissertation interrogates how Americans \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/8c631c0f91dff2ed109e96008f20cc33/1?pq-origsite=gscholar&cbl=18750",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "HjmhRH8W4y8J",
+      "scholarId": "HjmhRH8W4y8J",
+      "clusterId": "HjmhRH8W4y8J",
+      "title": "Dwelling in Passing: A Genealogy of Kon Wajir\u014d's 1929 \u201cNew Guidebook to Greater Tokyo\u201d",
+      "authors": [
+        "C Thouny"
+      ],
+      "authorsRaw": "C Thouny - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Abstract Jean-Fran\u00e7ois Lyotard defines the condition of modern urban as a dwelling in passing, thus calling for the definition of a new dwelling form appropriate to a global urban \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/c151063208de9a94c1cb1a3c1b92da1b/1?pq-origsite=gscholar&cbl=18750",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "lngVvAIOHi4J",
+      "scholarId": "lngVvAIOHi4J",
+      "clusterId": "lngVvAIOHi4J",
+      "title": "Modernist Ecology: Literary Modernism and the Reimagination of Nature",
+      "authors": [
+        "PR Saunders"
+      ],
+      "authorsRaw": "PR Saunders - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "Countering the trend in contemporary ecocriticism to advance realism as an environmentally responsible mode of representation, this essay argues that the anti-realist aesthetics of \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/aca8e5ed67444ed7cad3e2531d0eb9d6/1?pq-origsite=gscholar&cbl=18750&diss=y",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "xvIJ0CYxpikJ",
+      "scholarId": "xvIJ0CYxpikJ",
+      "clusterId": "xvIJ0CYxpikJ",
+      "title": "Travels in lounge space: placing the contemporary British motorway service area",
+      "authors": [
+        "S Austin"
+      ],
+      "authorsRaw": "S Austin - 2011 - orca.cardiff.ac.uk",
+      "year": 2011,
+      "abstract": "This thesis reads contemporary British motorway service areas as questions of place, and as instances of what I call 'lounge space', a space of transient consumption that conceals the \u2026",
+      "citationCount": 0,
+      "link": "https://orca.cardiff.ac.uk/id/eprint/28977/",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "jBcXdaYYsiAJ",
+      "scholarId": "jBcXdaYYsiAJ",
+      "clusterId": "jBcXdaYYsiAJ",
+      "title": "Critique of materialism in WB yeast's selected Poems",
+      "authors": [
+        "RP Chaudhari"
+      ],
+      "authorsRaw": "RP Chaudhari - 2011 - elibrary.tucl.edu.np",
+      "year": 2011,
+      "abstract": "The present research tries to analyze Yeats's selected poems in the light of Jameson's version of Marxism. This study not only portrays the human conditions alienated and \u2026",
+      "citationCount": 0,
+      "link": "https://elibrary.tucl.edu.np/items/2145d85b-56d7-4b44-9a82-c4672ca6e801",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "jxHQYtBnmRkJ",
+      "scholarId": "jxHQYtBnmRkJ",
+      "clusterId": "jxHQYtBnmRkJ",
+      "title": "Frames and Filters: Rethinking the Photographic Archive",
+      "authors": [
+        "D Wallace"
+      ],
+      "authorsRaw": "D Wallace - 2011 - arrow.tudublin.ie",
+      "year": 2011,
+      "abstract": "The basic premise of this thesis is that the photographic archive needs to be substantially rethought in the age of its assimilation by digital networked computing\u2013and not only in terms \u2026",
+      "citationCount": 0,
+      "link": "https://arrow.tudublin.ie/appadoc/72/",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "rJkwynMkzwIJ",
+      "scholarId": "rJkwynMkzwIJ",
+      "clusterId": "rJkwynMkzwIJ",
+      "title": "Farewell to Media Studies as a Science: An Analysis and Critique of Media Studies, Human Sciences and their Methodology",
+      "authors": [
+        "A Kadl\u010d\u00edk"
+      ],
+      "authorsRaw": "A Kadl\u010d\u00edk - 2011 - osuva.uwasa.fi",
+      "year": 2011,
+      "abstract": "At present, to borrow a phrase from Arnold Toynbee, American higher education seems to be in a\" time of troubles.\" From one standpoint this is nothing new. Higher education has \u2026",
+      "citationCount": 0,
+      "link": "https://osuva.uwasa.fi/handle/10024/1244",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "zT3wz7vb8AAJ",
+      "scholarId": "zT3wz7vb8AAJ",
+      "clusterId": "zT3wz7vb8AAJ",
+      "title": "Performing from the edge of the body",
+      "authors": [
+        "JL Thompson"
+      ],
+      "authorsRaw": "JL Thompson - 2011 - search.proquest.com",
+      "year": 2011,
+      "abstract": "As the means of production continue to become faster, cheaper and more accessible, and as mobile technologies such as smart phones become more sophisticated and more \u2026",
+      "citationCount": 0,
+      "link": "https://search.proquest.com/openview/f45e4f07851556323e0af829b9b609fc/1?pq-origsite=gscholar&cbl=18750",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2b6EZ4chHQAJ",
+      "scholarId": "2b6EZ4chHQAJ",
+      "clusterId": "2b6EZ4chHQAJ",
+      "title": "Fredric Jameson and Critical Architecture",
+      "authors": [
+        "P Eisenman"
+      ],
+      "authorsRaw": "P Eisenman - The Political Unconscious of Architecture: Re \u2026, 2011 - books.google.com",
+      "year": 2011,
+      "abstract": "In an important essay entitled \u201cCriticality\u201d and its Discontents' published in 2005, George Baird analyzed the shift away from'criticality'in the discourse of an emerging generation of \u2026",
+      "citationCount": 0,
+      "link": "https://books.google.com/books?hl=en&lr=lang_en&id=Q-8zk1QFztkC&oi=fnd&pg=PA171&dq=-%22m+%22&ots=y9bDuj7VGc&sig=QxG_Mh19cuNcV45sUcvOUgLnOWE",
+      "venue": "The Political Unconscious of Architecture: Re \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "irIiEbwDFbQJ",
+      "scholarId": "irIiEbwDFbQJ",
+      "clusterId": "irIiEbwDFbQJ",
+      "title": "Brian Finney",
+      "authors": [
+        "L Beach"
+      ],
+      "authorsRaw": "L Beach - martinamisweb.com",
+      "year": null,
+      "abstract": "In 2010 Martin Amis, possibly the most influential-and contentious-of contemporary British novelists, published The Pregnant Widow, his most acclaimed novel since The Information \u2026",
+      "citationCount": 0,
+      "link": "https://martinamisweb.com/scholarship_files/finney_pregwid.pdf",
+      "venue": "martinamisweb.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "muoB-nBKHkMJ",
+      "scholarId": "muoB-nBKHkMJ",
+      "clusterId": "muoB-nBKHkMJ",
+      "title": "A Time for Ethics: Janet Frame and WG Sebald",
+      "authors": [
+        "J Carter"
+      ],
+      "authorsRaw": "J Carter - 2011 - ourarchive.otago.ac.nz",
+      "year": 2011,
+      "abstract": "ABSTRACT'A Time for Ethics: Janet Frame and WG Sebald'identifies how literary texts which both respond to a traumatic past and adopt an openness towards the future enact an ethical \u2026",
+      "citationCount": 0,
+      "link": "https://ourarchive.otago.ac.nz/esploro/outputs/doctoral/A-Time-for-Ethics-Janet-Frame/9926478819301891",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "10316681484509885225",
+      "scholarId": "10316681484509885225",
+      "clusterId": "KbMPaSY3LI8J",
+      "title": "Auschwitz and Afterimages: Abjection, witnessing and representation",
+      "authors": [
+        "N Chare"
+      ],
+      "authorsRaw": "N Chare - (No Title), 2011 - cir.nii.ac.jp",
+      "year": 2011,
+      "abstract": "Auschwitz and afterimages : abjection, witnessing and representation | CiNii Research CiNii \u56fd\u7acb\u60c5\u5831\u5b66\u7814\u7a76\u6240 \u5b66\u8853\u60c5\u5831\u30ca\u30d3\u30b2\u30fc\u30bf[\u30b5\u30a4\u30cb\u30a3] \u8a73\u7d30\u3078\u79fb\u52d5 \u691c\u7d22\u30d5\u30a9\u30fc\u30e0\u3078\u79fb\u52d5 \u8ad6\u6587\u30fb\u30c7\u30fc\u30bf\u3092 \u2026",
+      "citationCount": 64,
+      "link": "https://cir.nii.ac.jp/crid/1130000797510790016",
+      "venue": "(No Title)",
+      "source": "google_scholar"
+    },
+    {
+      "id": "13484636589864267651",
+      "scholarId": "13484636589864267651",
+      "clusterId": "gy8YqIgNI7sJ",
+      "title": "The \u201cworld-system\u201d: Europe as \u201ccenter\u201d and its \u201cperiphery\u201d beyond Eurocentrism",
+      "authors": [
+        "E Dussel"
+      ],
+      "authorsRaw": "E Dussel - Colonialism and its legacies, 2011 - Lexington Books Lanham, MD",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 35,
+      "link": null,
+      "venue": "Colonialism and its legacies",
+      "source": "google_scholar"
+    },
+    {
+      "id": "4345452487725320823",
+      "scholarId": "4345452487725320823",
+      "clusterId": "d4o0rwMmTjwJ",
+      "title": "An exploration of the identities of Asian graduate student mothers in the United States",
+      "authors": [
+        "Q Zhang"
+      ],
+      "authorsRaw": "Q Zhang - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 14,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "5740743757739923264",
+      "scholarId": "5740743757739923264",
+      "clusterId": "QBehKgg4q08J",
+      "title": "New Zealand cinema: Interpreting the past",
+      "authors": [
+        "A Fox",
+        "BK Grant",
+        "H Radner"
+      ],
+      "authorsRaw": "A Fox, BK Grant , H Radner - (No Title), 2011 - cir.nii.ac.jp",
+      "year": 2011,
+      "abstract": "New Zealand cinema : interpreting the past | CiNii Research CiNii \u56fd\u7acb\u60c5\u5831\u5b66\u7814\u7a76\u6240 \u5b66\u8853\u60c5\u5831 \u30ca\u30d3\u30b2\u30fc\u30bf[\u30b5\u30a4\u30cb\u30a3] \u8a73\u7d30\u3078\u79fb\u52d5 \u691c\u7d22\u30d5\u30a9\u30fc\u30e0\u3078\u79fb\u52d5 \u8ad6\u6587\u30fb\u30c7\u30fc\u30bf\u3092\u3055\u304c\u3059 \u5927\u5b66\u56f3\u66f8\u9928\u306e\u672c\u3092\u3055\u304c\u3059 \u2026",
+      "citationCount": 15,
+      "link": "https://cir.nii.ac.jp/crid/1130000796049264896",
+      "venue": "(No Title)",
+      "source": "google_scholar"
+    },
+    {
+      "id": "13421695333174943958",
+      "scholarId": "13421695333174943958",
+      "clusterId": "1iBpWctwQ7oJ",
+      "title": "The historical consciousness of sunshine pop",
+      "authors": [
+        "K Keightley"
+      ],
+      "authorsRaw": "K Keightley - Journal of Popular Music Studies, 2011 - Wiley Online Library",
+      "year": 2011,
+      "abstract": "This \u201cAmplifier\u201d piece is largely motivated by that most basic desire of the fan, to share a discovery\u2014it's an excuse for me to play you a cool song I found called \u201cPoor Old Organ \u2026",
+      "citationCount": 10,
+      "link": "https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1533-1598.2011.01297.x",
+      "venue": "Journal of Popular Music Studies",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2398296056405752872",
+      "scholarId": "2398296056405752872",
+      "clusterId": "KPxIfI51SCEJ",
+      "title": "Historical Fiction After 9/11: Thomas Pynchon's\" Against the Day\"",
+      "authors": [
+        "P Simonetti"
+      ],
+      "authorsRaw": "P Simonetti - Modern Language Studies, 2011 - iris.uniroma1.it",
+      "year": 2011,
+      "abstract": "Historical Fiction After 9/11: Thomas Pynchon's \"Against the Day\" IRIS IRIS Home Sfoglia Macrotipologie & tipologie Autore Titolo Riviste Serie IT Italiano Italiano English English 1.IRIS \u2026",
+      "citationCount": 9,
+      "link": "https://iris.uniroma1.it/handle/11573/400008",
+      "venue": "Modern Language Studies",
+      "source": "google_scholar"
+    },
+    {
+      "id": "4122753030191225181",
+      "scholarId": "4122753030191225181",
+      "clusterId": "XZk2pQn2NjkJ",
+      "title": "The Single Seam in\" The Double Dream of Spring\": John Ashbery's Natural Sublime.",
+      "authors": [
+        "J Graves"
+      ],
+      "authorsRaw": "J Graves - South Carolina Review, 2011 - search.ebscohost.com",
+      "year": 2011,
+      "abstract": "As the rich and controversial public life of John Ashbery's poetry settles into its sixth decade\u2014 his volume Some Trees won the 1956 Yale Younger Poets Prize\u2014the time seems right to \u2026",
+      "citationCount": 5,
+      "link": "https://search.ebscohost.com/login.aspx?direct=true&profile=ehost&scope=site&authtype=crawler&jrnl=00383163&asa=N&AN=74260509&h=61aR7LMSfIFrzyWfxszKACfYwXPTNFkXla3ZqJg1hjZLoDGk4P3U01k0JfjNFuhffrM1sDIoXtjhD7vw%2Fg8OIQ%3D%3D&crl=c",
+      "venue": "South Carolina Review",
+      "source": "google_scholar"
+    },
+    {
+      "id": "13904883807654168454",
+      "scholarId": "13904883807654168454",
+      "clusterId": "hsdO3iYS-MAJ",
+      "title": "A certain idea of reality: Possible worlds in the films of Michael Winterbottom",
+      "authors": [
+        "AJ Crous"
+      ],
+      "authorsRaw": "AJ Crous - 2011 - Stellenbosch: University of \u2026",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 4,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "5478022129823256015",
+      "scholarId": "5478022129823256015",
+      "clusterId": "zw3YbxrYBUwJ",
+      "title": "115 Wanda's Wonderland: Wanda G\u00e1g and Her Millions of Cats",
+      "authors": [
+        "N Op de Beeck"
+      ],
+      "authorsRaw": "N Op de Beeck - The Oxford Handbook of Children's \u2026, 2011 - Oxford University Press",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 4,
+      "link": null,
+      "venue": "The Oxford Handbook of Children's \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "12160839874338469566",
+      "scholarId": "12160839874338469566",
+      "clusterId": "vrZZUG_7w6gJ",
+      "title": "Agency and transnational mediation in the world literary space",
+      "authors": [
+        "F Oruc"
+      ],
+      "authorsRaw": "F Oruc - English Language Notes, 2011 - read.dukeupress.edu",
+      "year": 2011,
+      "abstract": "We need to think out our concrete reality and point out its specific features, because this is the only way we will discover what we have in common with every other area of the globe \u2026",
+      "citationCount": 3,
+      "link": "https://read.dukeupress.edu/english-language-notes/article-abstract/49/1/51/136088",
+      "venue": "English Language Notes",
+      "source": "google_scholar"
+    },
+    {
+      "id": "14939911775432325402",
+      "scholarId": "14939911775432325402",
+      "clusterId": "GrlRzpo6Vc8J",
+      "title": "The specificity of mathematics learning and the disavowal of the political in research",
+      "authors": [
+        "A Pais",
+        "P Valero"
+      ],
+      "authorsRaw": "A Pais , P Valero - 2011 - vbn.aau.dk",
+      "year": 2011,
+      "abstract": "The specificity of mathematics learning and the disavowal of the political in research - Aalborg University's Research Portal Skip to main navigation Skip to search Skip to main content \u2026",
+      "citationCount": 2,
+      "link": "https://vbn.aau.dk/en/publications/the-specificity-of-mathematics-learning-and-the-disavowal-of-the-",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "16822571597421345477",
+      "scholarId": "16822571597421345477",
+      "clusterId": "xfrf8LzHdekJ",
+      "title": "International Nationalisms: Nation, World, Event in Postcolonial Anglophone and Postimperial British Literatures",
+      "authors": [
+        "HC O'Connell"
+      ],
+      "authorsRaw": "HC O'Connell - PhD. diss., Michigan State University, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 2,
+      "link": null,
+      "venue": "PhD. diss., Michigan State University",
+      "source": "google_scholar"
+    },
+    {
+      "id": "7733692442219825497",
+      "scholarId": "7733692442219825497",
+      "clusterId": "WcmiJE2YU2sJ",
+      "title": "Cities within the City: Dissident Poets Unveil Jakarta the Metropolis City",
+      "authors": [
+        "R Bahari"
+      ],
+      "authorsRaw": "R Bahari - Jurnal Elektronik Jabatan Bahasa & Kebudayaan \u2026, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 1,
+      "link": null,
+      "venue": "Jurnal Elektronik Jabatan Bahasa & Kebudayaan \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "10572353905580366046",
+      "scholarId": "10572353905580366046",
+      "clusterId": "3tjUxdyLuJIJ",
+      "title": "History after the End",
+      "authors": [
+        "K Varnelis"
+      ],
+      "authorsRaw": "K Varnelis - Cornell Journal of Architecture, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 1,
+      "link": null,
+      "venue": "Cornell Journal of Architecture",
+      "source": "google_scholar"
+    },
+    {
+      "id": "16832360546799471468",
+      "scholarId": "16832360546799471468",
+      "clusterId": "bEtIU7yOmOkJ",
+      "title": "Don't Shoot the Messenger: Jeff Koons and the Aesthetics of Frivolity.",
+      "authors": [
+        "C Rosenberg"
+      ],
+      "authorsRaw": "C Rosenberg - International Journal of the Humanities, 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 2,
+      "link": null,
+      "venue": "International Journal of the Humanities",
+      "source": "google_scholar"
+    },
+    {
+      "id": "8021605485707654926",
+      "scholarId": "8021605485707654926",
+      "clusterId": "DvftX7B3Um8J",
+      "title": "From'The Freud Squad'to'The Good Freud Guide':: A genealogy of media images of psychoanalysis and reflections on their role in the public imagination",
+      "authors": [
+        "C Bainbridge"
+      ],
+      "authorsRaw": "C Bainbridge - Free Associations: Psychoanalysis and \u2026, 2011 - pure.roehampton.ac.uk",
+      "year": 2011,
+      "abstract": "From 'The Freud Squad' to 'The Good Freud Guide': A genealogy of media images of psychoanalysis and reflections on their role in the public imagination - University of \u2026",
+      "citationCount": 1,
+      "link": "https://pure.roehampton.ac.uk/portal/en/publications/from-the-freud-squad-to-the-good-freud-guide-a-genealogy-of-media",
+      "venue": "Free Associations: Psychoanalysis and \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "4726049118709808196",
+      "scholarId": "4726049118709808196",
+      "clusterId": "RPy-P6JMlkEJ",
+      "title": "Modern and Contemporary Asian Art: A Working Bibliography",
+      "authors": [
+        "J Clark",
+        "T Berghuis",
+        "A Proctor",
+        "P Scott\u2026"
+      ],
+      "authorsRaw": "J Clark, T Berghuis, A Proctor, P Scott\u2026 - 2011 - Department of Art History and Film \u2026",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 1,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "12802553075441852870",
+      "scholarId": "12802553075441852870",
+      "clusterId": "xuHL9zDOq7EJ",
+      "title": "Stylistic Innovations in Quentin Tarantino's\" Pulp Fiction\": Toward an Aesthetics of Violence",
+      "authors": [
+        "J Sander"
+      ],
+      "authorsRaw": "J Sander - 2011 - GRIN Verlag",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 1,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "TPUY-bQRkwUJ",
+      "scholarId": "TPUY-bQRkwUJ",
+      "clusterId": "TPUY-bQRkwUJ",
+      "title": "Distorted Notions Of Who We Are, What We Consume, And How We Perceive",
+      "authors": [
+        "P Lindeman"
+      ],
+      "authorsRaw": "P Lindeman",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "XoLbcRtF69AJ",
+      "scholarId": "XoLbcRtF69AJ",
+      "clusterId": "XoLbcRtF69AJ",
+      "title": "Reception:'Effects' to'Uses' 257 27. Desensitization, Violence and the Media Hans Eysenck and DKB Nias 260 28. On the Social Effects of Television",
+      "authors": [
+        "JD Halloran",
+        "D McQuail",
+        "JG Blumler",
+        "JR Brown \u2026"
+      ],
+      "authorsRaw": "JD Halloran, D McQuail, JG Blumler, JR Brown \u2026 - Media Studies: A Reader",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "Media Studies: A Reader",
+      "source": "google_scholar"
+    },
+    {
+      "id": "AZnhZVA4kkgJ",
+      "scholarId": "AZnhZVA4kkgJ",
+      "clusterId": "AZnhZVA4kkgJ",
+      "title": "THEBEATLES",
+      "authors": [
+        "K WOMACK",
+        "TF DAVIS"
+      ],
+      "authorsRaw": "K WOMACK , TF DAVIS",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "-ZoFONQAJl0J",
+      "scholarId": "-ZoFONQAJl0J",
+      "clusterId": "-ZoFONQAJl0J",
+      "title": "POLIS Master Thesis",
+      "authors": [
+        "R Grimm"
+      ],
+      "authorsRaw": "R Grimm",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "40tjXkBPtAMJ",
+      "scholarId": "40tjXkBPtAMJ",
+      "clusterId": "40tjXkBPtAMJ",
+      "title": "Ideology at the gates: a critical essay on the issue of transfer",
+      "authors": [
+        "A Pais"
+      ],
+      "authorsRaw": "A Pais",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "htXmQ2wzsiQJ",
+      "scholarId": "htXmQ2wzsiQJ",
+      "clusterId": "htXmQ2wzsiQJ",
+      "title": "Synopsis Submitted for P. Hd. Registration in Mahatma Gandhi University, Kottayam.",
+      "authors": [
+        "S Varghese"
+      ],
+      "authorsRaw": "S Varghese",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "XIRh62_fipIJ",
+      "scholarId": "XIRh62_fipIJ",
+      "clusterId": "XIRh62_fipIJ",
+      "title": "Publication Reviews",
+      "authors": [
+        "W Doesn't Traditionalism",
+        "C First"
+      ],
+      "authorsRaw": "W Doesn't Traditionalism, C First - Built Environment",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "Built Environment",
+      "source": "google_scholar"
+    },
+    {
+      "id": "2cc_esieYF0J",
+      "scholarId": "2cc_esieYF0J",
+      "clusterId": "2cc_esieYF0J",
+      "title": "The Creation of Memory through the Classical Hybrid",
+      "authors": [
+        "J Steele"
+      ],
+      "authorsRaw": "J Steele - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "hWJHQE7WRpQJ",
+      "scholarId": "hWJHQE7WRpQJ",
+      "clusterId": "hWJHQE7WRpQJ",
+      "title": "Collaging a Text: Sources and Techniques",
+      "authors": [
+        "K Acharya"
+      ],
+      "authorsRaw": "K Acharya",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "8TdROeEw0QcJ",
+      "scholarId": "8TdROeEw0QcJ",
+      "clusterId": "8TdROeEw0QcJ",
+      "title": "THE FAME MONSTER: PASTICHE VERSUS PAROdy IN THE CONTExT OF SURPLUS ECONOMy",
+      "authors": [
+        "IN PAROdy"
+      ],
+      "authorsRaw": "IN PAROdy - Philippine Humanities Review, 2011 - ovcrd.upd.edu.ph",
+      "year": 2011,
+      "abstract": "At a time when the world is still attempting to recover from the shock of the global financial crisis, the music videos of American performance artist, Lady Gaga, are of particular interest \u2026",
+      "citationCount": 0,
+      "link": "https://ovcrd.upd.edu.ph/phr/article/view/4720",
+      "venue": "Philippine Humanities Review",
+      "source": "google_scholar"
+    },
+    {
+      "id": "6mTUpIURaNEJ",
+      "scholarId": "6mTUpIURaNEJ",
+      "clusterId": "6mTUpIURaNEJ",
+      "title": "OUCH, MAN!",
+      "authors": [
+        "C Mattos"
+      ],
+      "authorsRaw": "C Mattos",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "fm-F2pDbx4YJ",
+      "scholarId": "fm-F2pDbx4YJ",
+      "clusterId": "fm-F2pDbx4YJ",
+      "title": "Avatar-Racism Reinforced: They Know What They Are Doing, Yet They Are Still Doing It",
+      "authors": [
+        "P Wedderburn"
+      ],
+      "authorsRaw": "P Wedderburn - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "qf2RYc0KL3gJ",
+      "scholarId": "qf2RYc0KL3gJ",
+      "clusterId": "qf2RYc0KL3gJ",
+      "title": "Human Trafficking: How Media Portrayal Impacts the Public",
+      "authors": [
+        "G Hollister"
+      ],
+      "authorsRaw": "G Hollister - 2011 - North Central College",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "_VOw4-u4zokJ",
+      "scholarId": "_VOw4-u4zokJ",
+      "clusterId": "_VOw4-u4zokJ",
+      "title": "The Development of Capitalism: profit, finance capital and crisis",
+      "authors": [
+        "K Plys"
+      ],
+      "authorsRaw": "K Plys",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "DbVuRiTbxWoJ",
+      "scholarId": "DbVuRiTbxWoJ",
+      "clusterId": "DbVuRiTbxWoJ",
+      "title": "Aesthetics Of Empire",
+      "authors": [
+        "K DeFazio"
+      ],
+      "authorsRaw": "K DeFazio - 2011 - philpapers.org",
+      "year": 2011,
+      "abstract": "Kimberly DeFazio, Aesthetics Of Empire - PhilPapers Sign in | Create an account PhilPapers PhilPeople PhilArchive PhilEvents PhilJobs PhilPapers home Syntax Advanced \u2026",
+      "citationCount": 0,
+      "link": "https://philpapers.org/rec/DEFAOE",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "CA4Z0n9DaFkJ",
+      "scholarId": "CA4Z0n9DaFkJ",
+      "clusterId": "CA4Z0n9DaFkJ",
+      "title": "The Struggle To Breathe: ABC No Rio, Bullet Space and the Recovery of Utopia",
+      "authors": [
+        "J Schonewolf"
+      ],
+      "authorsRaw": "J Schonewolf - 2011",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "KoUesAgi4AIJ",
+      "scholarId": "KoUesAgi4AIJ",
+      "clusterId": "KoUesAgi4AIJ",
+      "title": "Spolarized geography of 1980s New York City, Bret Easton Ellis's neo",
+      "authors": [
+        "T HEISE"
+      ],
+      "authorsRaw": "T HEISE - The Arizona Quarterly, 2011 - University of Arizona.",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "The Arizona Quarterly",
+      "source": "google_scholar"
+    },
+    {
+      "id": "xTu1w74FBoYJ",
+      "scholarId": "xTu1w74FBoYJ",
+      "clusterId": "xTu1w74FBoYJ",
+      "title": "Design Issues",
+      "authors": [
+        "University of Illinois at Chicago. School of Art\u2026"
+      ],
+      "authorsRaw": "University of Illinois at Chicago. School of Art\u2026 - 2011 - University of Illinois at Chicago",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "iZ9Ps8NvC68J",
+      "scholarId": "iZ9Ps8NvC68J",
+      "clusterId": "iZ9Ps8NvC68J",
+      "title": "The Japanization of Modernity",
+      "authors": [
+        "M Haruki"
+      ],
+      "authorsRaw": "M Haruki - brill.com",
+      "year": null,
+      "abstract": "The subject of my work is the role of the contemporary Japanese writer Murakami Haruki as a cultural mediator between Japan and the United States. Murakami is probably the most \u2026",
+      "citationCount": 0,
+      "link": "https://brill.com/downloadpdf/display/title/57746.pdf",
+      "venue": "brill.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "bbq8Gdu8rVwJ",
+      "scholarId": "bbq8Gdu8rVwJ",
+      "clusterId": "bbq8Gdu8rVwJ",
+      "title": "Re-charting French Space: Transnationalism, Travel and Identity from the Postcolonial Banlieue to post-Wall Europe",
+      "authors": [
+        "M Johnson",
+        "M Mallapragada"
+      ],
+      "authorsRaw": "M Johnson, M Mallapragada - repositories.lib.utexas.edu",
+      "year": null,
+      "abstract": "Contemporary French identity issues are often conceived of in spatial terms in popular and political discourses. France and French identity have been mapped into a series of imagined \u2026",
+      "citationCount": 0,
+      "link": "https://repositories.lib.utexas.edu/server/api/core/bitstreams/58041d6a-0466-471f-91c2-188765d6603d/content",
+      "venue": "repositories.lib.utexas.edu",
+      "source": "google_scholar"
+    },
+    {
+      "id": "XU2vEj4G-sIJ",
+      "scholarId": "XU2vEj4G-sIJ",
+      "clusterId": "XU2vEj4G-sIJ",
+      "title": "Surplus consciousness",
+      "authors": [
+        "M Ryle"
+      ],
+      "authorsRaw": "M Ryle - radicalphilosophyarchive.com",
+      "year": null,
+      "abstract": "Michel Houellebecq\u02bcs fiction is said to be selling better outside France than that of any French novelist since Camus. Atomised (1999) and Platform (2001), his two more recent \u2026",
+      "citationCount": 0,
+      "link": "https://radicalphilosophyarchive.com/issue-files/rp126_article3_surplusconciousness_ryle.pdf",
+      "venue": "radicalphilosophyarchive.com",
+      "source": "google_scholar"
+    },
+    {
+      "id": "ZTiwSxdT8XgJ",
+      "scholarId": "ZTiwSxdT8XgJ",
+      "clusterId": "ZTiwSxdT8XgJ",
+      "title": "\u201cA Tent for Longing\u201d: Ma\u1e25m\u016bd Darw\u012bsh and al-Andalus",
+      "authors": [
+        "M Jarrar"
+      ],
+      "authorsRaw": "M Jarrar",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "TK2ZMVyEEFQJ",
+      "scholarId": "TK2ZMVyEEFQJ",
+      "clusterId": "TK2ZMVyEEFQJ",
+      "title": "TRAPPED IN TV LAND: ENCOUNTERING THE HYPERREAL IN SUPERNATURAL MICHAEL FUCHS, UNIVERSITY OF GRAZ",
+      "authors": [
+        "M FUCHS"
+      ],
+      "authorsRaw": "M FUCHS",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "795349016486573653",
+      "scholarId": "795349016486573653",
+      "clusterId": "VXYjcLelCQsJ",
+      "title": "A Postmodern Experience? The Case of Japanese Architecture",
+      "authors": [
+        "M Gharipour"
+      ],
+      "authorsRaw": "M Gharipour - electronic journal of contemporary japanese \u2026, 2011 - japanesestudies.org.uk",
+      "year": 2011,
+      "abstract": "Since the late 1970s, philosophers, critics, and artists have written about modernism and the socio-economic reasons behind its failure.'Modernity'originated in Europe and the United \u2026",
+      "citationCount": 2,
+      "link": "http://www.japanesestudies.org.uk/articles/2011/Gharipour.html",
+      "venue": "electronic journal of contemporary japanese \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "CLHmBprzhbAJ",
+      "scholarId": "CLHmBprzhbAJ",
+      "clusterId": "CLHmBprzhbAJ",
+      "title": "The socio-political syntax of postmodernism: Lyotard in the 21st century",
+      "authors": [
+        "ME Morin"
+      ],
+      "authorsRaw": "ME Morin - academia.edu",
+      "year": null,
+      "abstract": "1) I am not a Lyotard specialist. I read Lyotard some time ago, this reading was accidental: I was asked to take part in a panel on \u201c25 years of the postmodern condition\u201d. My interest in \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/15389974/morin-rwl.pdf",
+      "venue": "academia.edu",
+      "source": "google_scholar"
+    },
+    {
+      "id": "_mj0CvH9L2sJ",
+      "scholarId": "_mj0CvH9L2sJ",
+      "clusterId": "_mj0CvH9L2sJ",
+      "title": "Experience in Virtual Environments: Scenarios of Spacetime Transcendence",
+      "authors": [
+        "T Ioannis",
+        "M Sofia",
+        "S Evaggelia"
+      ],
+      "authorsRaw": "T Ioannis, M Sofia , S Evaggelia - researchgate.net",
+      "year": null,
+      "abstract": "Experience in Virtual Environments: Page 1 1 Experience in Virtual Environments: Scenarios of Spacetime Transcendence Tallis Ioannis1,Mytilnaiou Sofia2, Sampanikou \u2026",
+      "citationCount": 0,
+      "link": "https://www.researchgate.net/profile/Sofia-Mytilinaiou/publication/281819243_Experience_in_Virtual_Environments_Scenarios_of_Spacetime_Transcendence/links/55f96e4e08aec948c4927438/Experience-in-Virtual-Environments-Scenarios-of-Spacetime-Transcendence.pdf",
+      "venue": "researchgate.net",
+      "source": "google_scholar"
+    },
+    {
+      "id": "6jMopMo_DFoJ",
+      "scholarId": "6jMopMo_DFoJ",
+      "clusterId": "6jMopMo_DFoJ",
+      "title": "Inter/Multi/Cross/Trans. The Uncertain Territory of Art Theory in the Age of Academic Capitalism",
+      "authors": [
+        "YH Velazquez",
+        "YM Hern\u00e1ndez Vel\u00e1zquez"
+      ],
+      "authorsRaw": "YH Velazquez, YM Hern\u00e1ndez Vel\u00e1zquez - 2011 - research.gold.ac.uk",
+      "year": 2011,
+      "abstract": "This book is a part of the project \u201cProceedings\u201d, publications collecting the different seminars and courses developed within Montehermoso's programming. This is a compilation of the \u2026",
+      "citationCount": 0,
+      "link": "https://research.gold.ac.uk/id/eprint/26954/",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "zZe3rp82ARMJ",
+      "scholarId": "zZe3rp82ARMJ",
+      "clusterId": "zZe3rp82ARMJ",
+      "title": "The problem of the poetic revolutionary",
+      "authors": [
+        "MM Campbell"
+      ],
+      "authorsRaw": "MM Campbell - 2011 - vuir.vu.edu.au",
+      "year": 2011,
+      "abstract": "This thesis is a critical and creative exploration of the dynamics by which intertextual literary practices can gain critical and transformative traction in their sociocultural context. From an \u2026",
+      "citationCount": 0,
+      "link": "https://vuir.vu.edu.au/21294",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "rqrq23xkQAwJ",
+      "scholarId": "rqrq23xkQAwJ",
+      "clusterId": "rqrq23xkQAwJ",
+      "title": "Utopia, archive, and anarchy in Los siete hijos de Simenon by Ramon Diaz Eterovic",
+      "authors": [
+        "LMD Carlsen"
+      ],
+      "authorsRaw": "LMD Carlsen - Studies in 20th & 21st Century Literature, 2011 - newprairiepress.org",
+      "year": 2011,
+      "abstract": "The detective narratives by Ram\u00f3n D\u00edaz Eterovic (Chile 1956) address some of Latin America's most relevant socio-political problems, such as the disappeared, racial \u2026",
+      "citationCount": 0,
+      "link": "https://newprairiepress.org/sttcl/vol35/iss2/4/",
+      "venue": "Studies in 20th & 21st Century Literature",
+      "source": "google_scholar"
+    },
+    {
+      "id": "tR8dzpmBBAkJ",
+      "scholarId": "tR8dzpmBBAkJ",
+      "clusterId": "tR8dzpmBBAkJ",
+      "title": "Parody as a Postmodernist Technique to Reinterpret Fictional Forms: A Case Study of Arundhati Roy's The God of Small Things",
+      "authors": [
+        "MS Awan"
+      ],
+      "authorsRaw": "MS Awan - 2011 - theses.iiu.edu.pk",
+      "year": 2011,
+      "abstract": "ABSTRACT Anmdhati Roy's novel The God of Small Things received a great amount of critical appreciation as regards its unique narrative structure and overall form. However, the \u2026",
+      "citationCount": 0,
+      "link": "http://theses.iiu.edu.pk:8002/greenstone/collect/electron/index/assoc/HASH01a9/f7ab36fa.dir/doc.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "pCMv9WEQvkkJ",
+      "scholarId": "pCMv9WEQvkkJ",
+      "clusterId": "pCMv9WEQvkkJ",
+      "title": "North American Society For Sport History",
+      "authors": [
+        "SJ Rayl",
+        "J Wong",
+        "M Llewellyn"
+      ],
+      "authorsRaw": "SJ Rayl, J Wong, M Llewellyn - 2011 - academia.edu",
+      "year": 2011,
+      "abstract": "North American Society for Sport History Proceedings of the 39th Annual Conference University of Texas at Austin May 27-30, 201 Page 1 2011 North American Society for Sport \u2026",
+      "citationCount": 0,
+      "link": "https://www.academia.edu/download/28511172/nassh_2011-proceedings.pdf",
+      "venue": "",
+      "source": "google_scholar"
+    },
+    {
+      "id": "A75WOigl8xAJ",
+      "scholarId": "A75WOigl8xAJ",
+      "clusterId": "A75WOigl8xAJ",
+      "title": "Modernism and the Women's Popular Romance",
+      "authors": [
+        "MR HiPsky"
+      ],
+      "authorsRaw": "MR HiPsky",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "TrTb9K_qP_YJ",
+      "scholarId": "TrTb9K_qP_YJ",
+      "clusterId": "TrTb9K_qP_YJ",
+      "title": "AFFILIATION & CONTACT DETAILS",
+      "authors": [
+        "M Arias",
+        "S Castles",
+        "C Kim",
+        "E Koleth",
+        "D Ozkul\u2026"
+      ],
+      "authorsRaw": "M Arias, S Castles , C Kim, E Koleth, D Ozkul\u2026",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "13370115818971216447",
+      "scholarId": "13370115818971216447",
+      "clusterId": "Pzqc238xjLkJ",
+      "title": "Fidelity and period aesthetics in comics adaptation",
+      "authors": [
+        "M Bolton"
+      ],
+      "authorsRaw": "M Bolton - ImageTexT: Interdisciplinary Comics \u2026, 2011 - Dept of English, U of Florida",
+      "year": 2011,
+      "abstract": "",
+      "citationCount": 14,
+      "link": null,
+      "venue": "ImageTexT: Interdisciplinary Comics \u2026",
+      "source": "google_scholar"
+    },
+    {
+      "id": "jIBSl3Mu5PAJ",
+      "scholarId": "jIBSl3Mu5PAJ",
+      "clusterId": "jIBSl3Mu5PAJ",
+      "title": "Historical Materialism Book Series",
+      "authors": [
+        "S Budgen",
+        "S Edwards",
+        "M van der Linden",
+        "P Thomas"
+      ],
+      "authorsRaw": "S Budgen, S Edwards , M van der Linden , P Thomas - Imprint - brill.com",
+      "year": null,
+      "abstract": "At the close of the Communist International's Fourth Congress, held in Petrograd and Moscow between 5 November and 5 December 1922, the world movement's president \u2026",
+      "citationCount": 0,
+      "link": "https://brill.com/downloadpdf/display/title/19613.pdf",
+      "venue": "Imprint",
+      "source": "google_scholar"
+    },
+    {
+      "id": "wBCWDbz48IAJ",
+      "scholarId": "wBCWDbz48IAJ",
+      "clusterId": "wBCWDbz48IAJ",
+      "title": "\u201cI Wupped Batman's Ass!\u201d: Lyotard, Deleuze, and the Musical Act of Desubjectivation in the Music of Wesley Willis",
+      "authors": [
+        "M Vallee"
+      ],
+      "authorsRaw": "M Vallee",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    },
+    {
+      "id": "s0mxTv8RgP0J",
+      "scholarId": "s0mxTv8RgP0J",
+      "clusterId": "s0mxTv8RgP0J",
+      "title": "10/4/10 Bibliography Ackelsberg, Martha A. Free Women of Spain: Anarchism and the Struggle for the Emancipation of Women. Bloomington, IN: Indiana \u2026",
+      "authors": [
+        "MA Ackelsberg"
+      ],
+      "authorsRaw": "MA Ackelsberg",
+      "year": null,
+      "abstract": "",
+      "citationCount": 0,
+      "link": null,
+      "venue": null,
+      "source": "google_scholar"
+    }
+  ]
+}
