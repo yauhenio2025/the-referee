@@ -6940,13 +6940,15 @@ a.paper-title-minimal:hover {
   padding: 1.5rem 3rem;
 }
 
-/* Papers view - full width */
+/* Papers view - full width always */
 .papers-view {
+  width: 100%;
   max-width: none;
 }
 
-/* Paper list container */
+/* Paper list container - full width always */
 .paper-list {
+  width: 100%;
   max-width: none;
 }
 
