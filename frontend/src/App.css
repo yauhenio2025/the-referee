@@ -6708,3 +6708,213 @@ a.paper-title-minimal:hover {
     max-width: 200px;
   }
 }
+
+/* ============================================
+   READABILITY FIXES - Higher Contrast
+   ============================================ */
+
+/* Card background - more distinct */
+.paper-card-minimal {
+  background: var(--bg-card, #2d2d2d);
+}
+
+.paper-card-minimal:hover {
+  background: var(--bg-card-hover, #363636);
+}
+
+/* Title - bolder, more prominent */
+.paper-title-minimal {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #f0f0f0);
+}
+
+/* Meta text - much more visible */
+.paper-meta-minimal {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #b0b0b0);
+}
+
+.meta-authors {
+  color: var(--text-secondary, #b0b0b0);
+  font-weight: 500;
+}
+
+.meta-year {
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.meta-venue {
+  color: var(--text-secondary, #909090);
+}
+
+/* Stats - more readable */
+.paper-stats-minimal {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #a0a0a0);
+  margin-top: 6px;
+}
+
+.stat-item {
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.stat-item.editions {
+  color: var(--primary, #60a5fa);
+  font-weight: 500;
+}
+
+/* Harvest bar - more visible */
+.harvest-bar-mini {
+  width: 60px;
+  height: 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.harvest-text-mini {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+/* Badges - higher contrast */
+.badge-mini.foreign {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fbbf24;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+.badge-mini.collection {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+/* Foreign needed card - clearer highlight */
+.paper-card-minimal.foreign-needed {
+  border-left: 4px solid #f59e0b;
+  background: rgba(234, 179, 8, 0.08);
+}
+
+.paper-card-minimal.foreign-needed:hover {
+  background: rgba(234, 179, 8, 0.12);
+}
+
+/* Selected card */
+.paper-card-minimal.selected {
+  background: rgba(59, 130, 246, 0.12);
+  border-left: 4px solid var(--primary);
+}
+
+/* Paper count header */
+.paper-count {
+  font-size: 0.95rem;
+  color: var(--text-primary, #e0e0e0);
+  font-weight: 600;
+}
+
+/* Batch actions - more visible */
+.selected-indicator {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.btn-text {
+  color: var(--text-secondary, #a0a0a0);
+  font-weight: 500;
+}
+
+.btn-text:hover {
+  color: #60a5fa;
+}
+
+/* Pagination - better contrast */
+.page-num {
+  color: var(--text-secondary, #a0a0a0);
+  font-weight: 500;
+}
+
+.page-num:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.page-num.active {
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.page-nav {
+  color: var(--text-secondary, #909090);
+  font-weight: 600;
+}
+
+.page-nav:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+/* Action buttons - clearer */
+.action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary, #b0b0b0);
+  font-weight: 500;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--text-primary);
+}
+
+.action-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.action-btn.icon {
+  color: var(--text-secondary, #909090);
+}
+
+.action-btn.icon:hover {
+  color: var(--text-primary);
+}
+
+.action-btn.foreign-toggle {
+  opacity: 0.7;
+}
+
+.action-btn.foreign-toggle:hover {
+  opacity: 1;
+}
+
+.action-btn.foreign-toggle.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #000;
+  opacity: 1;
+}
+
+/* Abstract - readable */
+.paper-abstract-minimal {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #909090);
+  line-height: 1.5;
+}
+
+.paper-abstract-minimal:hover {
+  color: var(--text-primary, #c0c0c0);
+}
+
+/* Select indicator */
+.select-indicator {
+  border: 2px solid var(--text-muted, #606060);
+}
+
+.select-indicator.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
