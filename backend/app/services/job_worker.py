@@ -1255,50 +1255,39 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     except json.JSONDecodeError:
                         log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state, starting fresh")
                 else:
-                    # No saved state - RECONSTRUCT completed_years from existing citations in DB
-                    # This prevents re-scanning years that are already fully harvested
-                    if edition.harvested_citation_count and edition.harvested_citation_count > 100:
-                        log_now(f"[EDITION {i+1}] 🔧 No saved state but {edition.harvested_citation_count:,} citations exist - reconstructing completed years from DB...")
+                    # No saved state - RECONSTRUCT completed_years from harvest_targets table
+                    # This is the authoritative source for which years have been fully harvested
+                    log_now(f"[EDITION {i+1}] 🔧 No saved state - checking harvest_targets for completed years...")
 
-                        # Query citations grouped by year to find which years have data
-                        year_counts_result = await db.execute(
-                            select(Citation.year, func.count(Citation.id).label('count'))
-                            .where(Citation.edition_id == edition.id)
-                            .where(Citation.year.isnot(None))
-                            .group_by(Citation.year)
-                            .order_by(Citation.year.desc())
+                    # Query harvest_targets for completed years (the authoritative source)
+                    completed_targets_result = await db.execute(
+                        select(HarvestTarget.year)
+                        .where(HarvestTarget.edition_id == edition.id)
+                        .where(HarvestTarget.status == 'complete')
+                    )
+                    completed_from_targets = {row.year for row in completed_targets_result.fetchall()}
+
+                    if completed_from_targets:
+                        completed_years = completed_from_targets
+                        log_now(f"[EDITION {i+1}] 🔧 Found {len(completed_years)} completed years in harvest_targets: {sorted(completed_years, reverse=True)[:10]}...")
+
+                        # Save this reconstructed state so future resumes are faster
+                        reconstructed_state = {
+                            "mode": "year_by_year",
+                            "current_year": None,  # Start fresh from current year
+                            "current_page": 0,
+                            "completed_years": sorted(list(completed_years), reverse=True),
+                            "reconstructed": True,  # Mark as reconstructed
+                        }
+                        await db.execute(
+                            update(Edition)
+                            .where(Edition.id == edition.id)
+                            .values(harvest_resume_state=json.dumps(reconstructed_state))
                         )
-                        year_counts = {row.year: row.count for row in year_counts_result.fetchall()}
-
-                        if year_counts:
-                            # Years with significant citations (>50) are likely complete
-                            # Mark them as completed so we skip them
-                            for year, count in year_counts.items():
-                                if count >= 50:  # Threshold: year with 50+ citations is probably complete
-                                    completed_years.add(year)
-
-                            log_now(f"[EDITION {i+1}] 🔧 Reconstructed {len(completed_years)} completed years from DB: {sorted(completed_years, reverse=True)[:10]}...")
-                            log_now(f"[EDITION {i+1}] 🔧 Year counts sample: {dict(list(year_counts.items())[:5])}")
-
-                            # Save this reconstructed state so future resumes are faster
-                            reconstructed_state = {
-                                "mode": "year_by_year",
-                                "current_year": None,  # Start fresh from current year
-                                "current_page": 0,
-                                "completed_years": sorted(list(completed_years), reverse=True),
-                                "reconstructed": True,  # Mark as reconstructed
-                            }
-                            await db.execute(
-                                update(Edition)
-                                .where(Edition.id == edition.id)
-                                .values(harvest_resume_state=json.dumps(reconstructed_state))
-                            )
-                            await db.commit()
-                            log_now(f"[EDITION {i+1}] ✓ Saved reconstructed resume state")
-                        else:
-                            log_now(f"[EDITION {i+1}] ℹ️ No year data found in citations - will scan all years")
+                        await db.commit()
+                        log_now(f"[EDITION {i+1}] ✓ Saved reconstructed resume state")
                     else:
-                        log_now(f"[EDITION {i+1}] ℹ️ No saved year-by-year state - will scan all years")
+                        log_now(f"[EDITION {i+1}] ℹ️ No completed years in harvest_targets - will scan all years")
 
                 # Helper to save year-by-year resume state to edition
                 # IMPORTANT: Uses fresh DB session to avoid greenlet context issues
@@ -1493,10 +1482,11 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         )
 
                     # Track consecutive empty years for early termination
+                    # Use high threshold (10) since old papers may have scattered citations across decades
                     if year_citations == 0 and total_this_year == 0:
                         consecutive_empty_years += 1
-                        if consecutive_empty_years >= 3 and year < current_year - 5:
-                            log_now(f"[EDITION {i+1}] 📅 {consecutive_empty_years} consecutive empty years, stopping year-by-year fetch")
+                        if consecutive_empty_years >= 10 and year < current_year - 20:
+                            log_now(f"[EDITION {i+1}] 📅 {consecutive_empty_years} consecutive empty years (going back to {year}), stopping year-by-year fetch")
                             break
                     else:
                         consecutive_empty_years = 0
@@ -1504,14 +1494,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     # Small delay between year queries
                     await asyncio.sleep(2)
 
-                # Clear resume state on successful completion of all years
-                await db.execute(
-                    update(Edition)
-                    .where(Edition.id == edition.id)
-                    .values(harvest_resume_state=None)
-                )
-                await db.commit()
-                log_now(f"[EDITION {i+1}] ✓ Year-by-year harvest complete, cleared resume state")
+                # NOTE: Don't clear resume state - the completed_years in harvest_targets is the authoritative source
+                # This allows future jobs to correctly skip already-scanned years
+                log_now(f"[EDITION {i+1}] ✓ Year-by-year harvest complete for this job run")
 
             else:
                 # Standard fetch for editions with <=1000 citations
