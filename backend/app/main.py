@@ -2021,7 +2021,7 @@ async def add_manual_edition(
 
     input_text = request.input_text.strip()
 
-    # Check if it's a Google Scholar URL - extract info directly
+    # Check if it's a Google Scholar URL with cites= or cluster=
     scholar_url_match = re.search(r'scholar\.google\.[^/]+/scholar\?.*cites=(\d+)', input_text)
     cluster_id_match = re.search(r'cluster=(\d+)', input_text)
 
@@ -2029,19 +2029,69 @@ async def add_manual_edition(
     search_query = None
     expected_language = request.language_hint
 
+    # If we have a cites= or cluster= ID, fetch the paper directly
     if scholar_url_match or cluster_id_match:
-        # Direct Scholar link - we can fetch it directly
-        resolution_details["input_type"] = "scholar_url"
-        cluster_id = cluster_id_match.group(1) if cluster_id_match else None
-        cites_id = scholar_url_match.group(1) if scholar_url_match else None
-        resolution_details["cluster_id"] = cluster_id
-        resolution_details["cites_id"] = cites_id
-        # For now, we'll still use title-based search as we need scholar_id
-        # Extract any title from URL params
-        title_match = re.search(r'[?&]q=([^&]+)', input_text)
-        if title_match:
-            from urllib.parse import unquote
-            search_query = unquote(title_match.group(1))
+        scholar_id = cluster_id_match.group(1) if cluster_id_match else scholar_url_match.group(1)
+        resolution_details["input_type"] = "scholar_id_direct"
+        resolution_details["scholar_id"] = scholar_id
+
+        # Check if this edition already exists
+        if scholar_id in existing_scholar_ids:
+            return ManualEditionAddResponse(
+                success=False,
+                message=f"An edition with Scholar ID {scholar_id} already exists",
+                resolution_details=resolution_details,
+            )
+
+        # Fetch the paper directly by scholar ID
+        from .services.scholar_search import get_scholar_service
+        scholar_service = get_scholar_service()
+
+        try:
+            paper_data = await scholar_service.get_paper_by_scholar_id(scholar_id)
+            if paper_data:
+                # Create the edition directly
+                new_edition = Edition(
+                    paper_id=request.paper_id,
+                    scholar_id=scholar_id,
+                    title=paper_data.get("title", "Unknown"),
+                    authors=paper_data.get("authorsRaw") or ", ".join(paper_data.get("authors", [])),
+                    year=paper_data.get("year"),
+                    venue=paper_data.get("venue"),
+                    abstract=paper_data.get("abstract"),
+                    link=paper_data.get("link"),
+                    citation_count=paper_data.get("citationCount") or paper_data.get("citations") or 0,
+                    language=expected_language,
+                    confidence="high",
+                    auto_selected=False,
+                    selected=True,
+                    is_supplementary=True,
+                )
+                db.add(new_edition)
+                await db.commit()
+                await db.refresh(new_edition)
+
+                resolution_details["matched_title"] = paper_data.get("title")
+
+                return ManualEditionAddResponse(
+                    success=True,
+                    edition=build_edition_response_with_staleness(new_edition),
+                    message=f"Added edition: {new_edition.title}",
+                    resolution_details=resolution_details,
+                )
+            else:
+                return ManualEditionAddResponse(
+                    success=False,
+                    message=f"Could not find paper with Scholar ID {scholar_id}",
+                    resolution_details=resolution_details,
+                )
+        except Exception as e:
+            logging.error(f"Direct scholar ID lookup failed: {e}")
+            return ManualEditionAddResponse(
+                success=False,
+                message=f"Failed to fetch paper: {str(e)}",
+                resolution_details=resolution_details,
+            )
 
     if not search_query:
         # Use Claude to parse the input and generate a search query
