@@ -32,6 +32,7 @@ def log_now(msg: str, level: str = "info"):
 # Job timeout settings
 JOB_TIMEOUT_MINUTES = 30  # Mark job as failed if no progress for this long
 HEARTBEAT_INTERVAL = 60  # Seconds between heartbeat updates
+ZOMBIE_CHECK_INTERVAL_MINUTES = 5  # How often to check for zombie jobs
 
 # Staleness threshold (for UI indicators)
 STALENESS_THRESHOLD_DAYS = 90
@@ -47,6 +48,7 @@ _worker_running = False
 MAX_CONCURRENT_JOBS = 10  # How many jobs can run simultaneously
 _job_semaphore: Optional[asyncio.Semaphore] = None
 _running_jobs: set = set()  # Track currently running job IDs
+_last_zombie_check: Optional[datetime] = None  # Track when we last checked for zombies
 
 
 async def update_job_progress(
@@ -2035,11 +2037,76 @@ async def process_single_job(job_id: int):
             log_now(f"[Worker] Job {job_id} released slot ({len(_running_jobs)}/{MAX_CONCURRENT_JOBS} running)")
 
 
+async def check_and_reset_zombie_jobs() -> int:
+    """
+    Periodically check for zombie jobs - jobs marked as 'running' in the database
+    but not actually being processed by this worker instance.
+
+    This catches jobs that got stuck due to:
+    - Worker crashes mid-job
+    - Unhandled exceptions that didn't properly release the job
+    - Database connection issues
+
+    Returns the number of zombie jobs reset.
+    """
+    global _last_zombie_check, _running_jobs
+
+    now = datetime.utcnow()
+
+    # Only check every ZOMBIE_CHECK_INTERVAL_MINUTES
+    if _last_zombie_check and (now - _last_zombie_check).total_seconds() < ZOMBIE_CHECK_INTERVAL_MINUTES * 60:
+        return 0
+
+    _last_zombie_check = now
+    zombie_count = 0
+
+    try:
+        async with async_session() as db:
+            # Find jobs that are "running" in DB but:
+            # 1. Not in our in-memory _running_jobs set, OR
+            # 2. Have been running for longer than JOB_TIMEOUT_MINUTES
+            timeout_threshold = now - timedelta(minutes=JOB_TIMEOUT_MINUTES)
+
+            result = await db.execute(
+                select(Job).where(
+                    Job.status == "running",
+                    Job.started_at < timeout_threshold
+                )
+            )
+            stale_jobs = result.scalars().all()
+
+            if stale_jobs:
+                # Filter to only jobs not in our running set (true zombies)
+                zombie_jobs = [j for j in stale_jobs if j.id not in _running_jobs]
+
+                if zombie_jobs:
+                    zombie_ids = [j.id for j in zombie_jobs]
+                    zombie_count = len(zombie_jobs)
+
+                    log_now(f"[ZOMBIE CHECK] Found {zombie_count} zombie jobs: {zombie_ids}")
+
+                    # Reset them to pending
+                    await db.execute(
+                        update(Job)
+                        .where(Job.id.in_(zombie_ids))
+                        .values(status="pending", started_at=None)
+                    )
+                    await db.commit()
+
+                    log_now(f"[ZOMBIE CHECK] Reset {zombie_count} zombie jobs to 'pending'")
+
+    except Exception as e:
+        log_now(f"[ZOMBIE CHECK] Error checking for zombies: {e}", "error")
+
+    return zombie_count
+
+
 async def worker_loop():
     """Main worker loop - processes pending jobs with parallel execution"""
-    global _worker_running, _job_semaphore, _running_jobs
+    global _worker_running, _job_semaphore, _running_jobs, _last_zombie_check
     _worker_running = True
     _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    _last_zombie_check = None  # Reset on startup so first check runs immediately after startup detection
     _running_jobs = set()
 
     log_now(f"[Worker] Starting parallel job worker (max {MAX_CONCURRENT_JOBS} concurrent jobs)")
@@ -2189,6 +2256,9 @@ async def worker_loop():
             else:
                 # All slots full, wait for one to free up
                 await asyncio.sleep(3)
+
+            # Periodically check for zombie jobs (runs every ZOMBIE_CHECK_INTERVAL_MINUTES)
+            await check_and_reset_zombie_jobs()
 
         except Exception as e:
             log_now(f"[Worker] Loop error: {e}")
