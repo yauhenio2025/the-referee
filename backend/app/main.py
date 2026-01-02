@@ -4982,6 +4982,7 @@ async def external_analyze_papers(
             "options": options,
         }),
         callback_url=request.callback_url,
+        callback_secret=request.callback_secret,
     )
     db.add(master_job)
     await db.flush()
@@ -5105,6 +5106,7 @@ async def external_get_job_status(
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         "callback_url": job.callback_url,
+        "callback_sent_at": job.callback_sent_at.isoformat() if job.callback_sent_at else None,
         "callback_error": job.callback_error,
     }
 

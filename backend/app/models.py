@@ -249,8 +249,9 @@ class Job(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # Webhook callback (for external API integration)
-    # Note: callback_secret and callback_sent_at removed until DB migration is run
     callback_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    callback_secret: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, default=None)
+    callback_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     callback_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
 
     # Relationships
