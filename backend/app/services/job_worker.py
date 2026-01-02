@@ -1353,8 +1353,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     total_this_year = count_result.get('totalResults', 0) if isinstance(count_result, dict) else 0
 
                     # STEP 1.5: Record the expected count for this year (for completeness tracking)
-                    if total_this_year > 0:
-                        await create_or_update_harvest_target(db, edition.id, year, total_this_year)
+                    # IMPORTANT: Always create target, even for 0 citations - this marks year as checked
+                    await create_or_update_harvest_target(db, edition.id, year, total_this_year)
 
                     # Calculate year progress for dashboard
                     total_years = current_year - min_year + 1
@@ -1469,17 +1469,17 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
 
                     # Update HarvestTarget with actual results for this year
-                    if total_this_year > 0:
-                        await update_harvest_target_progress(
-                            db=db,
-                            edition_id=edition.id,
-                            year=year,
-                            actual_count=year_citations,
-                            pages_succeeded=year_pages_succeeded,
-                            pages_failed=year_pages_failed,
-                            pages_attempted=year_pages_attempted,
-                            mark_complete=True
-                        )
+                    # IMPORTANT: Always update, even for 0 citations - this marks year as complete
+                    await update_harvest_target_progress(
+                        db=db,
+                        edition_id=edition.id,
+                        year=year,
+                        actual_count=year_citations,
+                        pages_succeeded=year_pages_succeeded,
+                        pages_failed=year_pages_failed,
+                        pages_attempted=year_pages_attempted,
+                        mark_complete=True
+                    )
 
                     # Track consecutive empty years for early termination
                     # Use high threshold (10) since old papers may have scattered citations across decades
