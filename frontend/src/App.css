@@ -6918,3 +6918,112 @@ a.paper-title-minimal:hover {
   background: var(--primary);
   border-color: var(--primary);
 }
+
+/* ============================================
+   RESPONSIVE FULL-WIDTH LAYOUT
+   ============================================ */
+
+/* Override main container - use full width */
+.main {
+  max-width: none;
+  padding: 1.5rem 3rem;
+}
+
+/* Papers view - full width */
+.papers-view {
+  max-width: none;
+}
+
+/* Paper list container */
+.paper-list {
+  max-width: none;
+}
+
+/* Paper cards - responsive grid on large screens */
+@media (min-width: 1400px) {
+  .papers {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  
+  .paper-card-minimal {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 2000px) {
+  .papers {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Paper card - better proportions */
+.paper-card-minimal {
+  padding: 16px 20px;
+}
+
+/* Actions - horizontal on larger cards */
+.paper-actions-minimal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ============================================
+   DRAG AND DROP STYLING
+   ============================================ */
+
+/* Draggable papers get a grab cursor */
+.paper-card-minimal[draggable="true"] {
+  cursor: grab;
+}
+
+.paper-card-minimal[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.paper-card-minimal.dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.paper-card-minimal.drag-over {
+  border: 2px dashed var(--primary);
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.paper-card-minimal.drag-over-valid {
+  border-color: var(--success);
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.drag-handle {
+  cursor: grab;
+  padding: 4px 8px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Link indicator */
+.link-as-edition-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--success);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 10;
+}

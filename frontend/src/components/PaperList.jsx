@@ -19,6 +19,10 @@ export default function PaperList({ onSelectPaper }) {
   const [showProcessed, setShowProcessed] = useState(false)
   const [batchAddToCollection, setBatchAddToCollection] = useState(false)
 
+  // Drag-drop state for linking editions
+  const [draggingPaperId, setDraggingPaperId] = useState(null)
+  const [dragOverPaperId, setDragOverPaperId] = useState(null)
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const perPage = 25
@@ -222,6 +226,19 @@ export default function PaperList({ onSelectPaper }) {
     },
   })
 
+  // Link paper as edition (drag-drop)
+  const linkAsEdition = useMutation({
+    mutationFn: ({ sourcePaperId, targetPaperId }) =>
+      api.linkPaperAsEdition(sourcePaperId, targetPaperId, true),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries(['papers'])
+      toast.success(data.message || 'Linked as edition')
+    },
+    onError: (error) => {
+      toast.error(`Failed to link: ${error.message}`)
+    },
+  })
+
   // Add paper to collection/dossier
   const handleAddToCollection = async (selection) => {
     if (!addToCollectionPaper) return
@@ -328,6 +345,68 @@ export default function PaperList({ onSelectPaper }) {
       ...prev,
       [paperId]: !prev[paperId]
     }))
+  }
+
+  // Drag-drop handlers for linking editions
+  const handleDragStart = (e, paper) => {
+    // Only allow dragging resolved papers
+    if (paper.status !== 'resolved') {
+      e.preventDefault()
+      return
+    }
+    setDraggingPaperId(paper.id)
+    e.dataTransfer.effectAllowed = 'link'
+    e.dataTransfer.setData('text/plain', paper.id.toString())
+    // Add paper info for visual feedback
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      id: paper.id,
+      title: paper.title,
+      year: paper.year
+    }))
+  }
+
+  const handleDragEnd = () => {
+    setDraggingPaperId(null)
+    setDragOverPaperId(null)
+  }
+
+  const handleDragOver = (e, paper) => {
+    // Only allow drop on resolved papers that are different from the source
+    if (paper.status !== 'resolved' || paper.id === draggingPaperId) {
+      return
+    }
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'link'
+    setDragOverPaperId(paper.id)
+  }
+
+  const handleDragLeave = (e) => {
+    // Only clear if we're leaving the card entirely
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOverPaperId(null)
+    }
+  }
+
+  const handleDrop = (e, targetPaper) => {
+    e.preventDefault()
+    const sourcePaperId = parseInt(e.dataTransfer.getData('text/plain'))
+
+    if (!sourcePaperId || sourcePaperId === targetPaper.id) {
+      setDragOverPaperId(null)
+      return
+    }
+
+    // Find the source paper for the confirmation message
+    const sourcePaper = papers.find(p => p.id === sourcePaperId)
+
+    // Link source paper as an edition of target
+    linkAsEdition.mutate({
+      sourcePaperId,
+      targetPaperId: targetPaper.id
+    })
+
+    setDragOverPaperId(null)
+    setDraggingPaperId(null)
   }
 
   // Pagination handlers
@@ -492,10 +571,20 @@ export default function PaperList({ onSelectPaper }) {
           const isSelected = selectedPapers.has(paper.id)
           const hasForeignEd = paper.foreign_edition_needed
 
+          const isDragging = draggingPaperId === paper.id
+          const isDragOver = dragOverPaperId === paper.id
+          const canDrag = paper.status === 'resolved'
+
           return (
             <div
               key={paper.id}
-              className={`paper-card-minimal ${paper.status} ${isSelected ? 'selected' : ''} ${hasForeignEd ? 'foreign-needed' : ''} ${isProcessed(paper) ? 'processed' : ''}`}
+              className={`paper-card-minimal ${paper.status} ${isSelected ? 'selected' : ''} ${hasForeignEd ? 'foreign-needed' : ''} ${isProcessed(paper) ? 'processed' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+              draggable={canDrag}
+              onDragStart={canDrag ? (e) => handleDragStart(e, paper) : undefined}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => handleDragOver(e, paper)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, paper)}
             >
               {/* Selection checkbox - minimal */}
               <div
@@ -534,13 +623,14 @@ export default function PaperList({ onSelectPaper }) {
                   )}
                 </div>
 
-                {/* Stats row for resolved papers */}
-                {paper.status === 'resolved' && (
+                {/* Stats row for resolved papers - only show if there's data */}
+                {paper.status === 'resolved' && (paper.citation_count > 0 || (paper.harvest_expected > 0 && paper.harvest_actual > 0) || editionCounts[paper.id] > 0 || paper.is_stale) && (
                   <div className="paper-stats-minimal">
                     {paper.citation_count > 0 && (
                       <span className="stat-item">{paper.citation_count.toLocaleString()} cited</span>
                     )}
-                    {paper.harvest_expected > 0 && (
+                    {/* Only show harvest progress if we have actual harvested data */}
+                    {paper.harvest_expected > 0 && paper.harvest_actual > 0 && (
                       <span className="stat-item harvest-stat">
                         <span
                           className="harvest-bar-mini"

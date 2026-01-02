@@ -2737,6 +2737,92 @@ async def list_papers_needing_foreign_edition(
     )
 
 
+class LinkAsEditionRequest(BaseModel):
+    """Request to link one paper as an edition of another"""
+    source_paper_id: int  # Paper to convert to an edition
+    target_paper_id: int  # Paper to link it to (as an edition of)
+    delete_source: bool = True  # Whether to delete source paper after linking
+
+
+class LinkAsEditionResponse(BaseModel):
+    """Response from linking papers"""
+    edition_id: int
+    target_paper_id: int
+    source_deleted: bool
+    message: str
+
+
+@app.post("/api/papers/link-as-edition", response_model=LinkAsEditionResponse)
+async def link_paper_as_edition(
+    request: LinkAsEditionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Convert one paper into an edition of another.
+
+    Useful for linking foreign translations to their canonical editions.
+    Creates an Edition record from the source paper's data and links it to the target paper.
+    """
+    # Get source paper
+    source_result = await db.execute(
+        select(Paper).where(Paper.id == request.source_paper_id, Paper.deleted_at.is_(None))
+    )
+    source_paper = source_result.scalar_one_or_none()
+    if not source_paper:
+        raise HTTPException(status_code=404, detail=f"Source paper {request.source_paper_id} not found")
+
+    # Get target paper
+    target_result = await db.execute(
+        select(Paper).where(Paper.id == request.target_paper_id, Paper.deleted_at.is_(None))
+    )
+    target_paper = target_result.scalar_one_or_none()
+    if not target_paper:
+        raise HTTPException(status_code=404, detail=f"Target paper {request.target_paper_id} not found")
+
+    if source_paper.id == target_paper.id:
+        raise HTTPException(status_code=400, detail="Cannot link a paper to itself")
+
+    # Create Edition from source paper data
+    edition = Edition(
+        paper_id=target_paper.id,
+        scholar_id=source_paper.scholar_id,
+        cluster_id=None,
+        title=source_paper.title,
+        authors=source_paper.authors if isinstance(source_paper.authors, str) else (
+            ", ".join(source_paper.authors) if source_paper.authors else None
+        ),
+        year=source_paper.year,
+        venue=source_paper.venue,
+        abstract=source_paper.abstract,
+        link=source_paper.link,
+        citation_count=source_paper.citation_count or 0,
+        language=None,  # Could try to detect from title
+        confidence="high",  # User-confirmed
+        auto_selected=False,
+        selected=True,  # Mark as selected for harvesting
+        excluded=False,
+    )
+    db.add(edition)
+    await db.flush()
+
+    edition_id = edition.id
+    source_deleted = False
+
+    # Optionally delete source paper
+    if request.delete_source:
+        source_paper.deleted_at = datetime.utcnow()
+        source_deleted = True
+
+    await db.commit()
+
+    return LinkAsEditionResponse(
+        edition_id=edition_id,
+        target_paper_id=target_paper.id,
+        source_deleted=source_deleted,
+        message=f"Linked '{source_paper.title[:50]}...' as edition of '{target_paper.title[:50]}...'"
+    )
+
+
 class CandidateConfirmRequest(BaseModel):
     candidate_index: int
 

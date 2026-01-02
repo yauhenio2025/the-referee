@@ -130,6 +130,18 @@ class RefereeAPI {
     return this.request(`/api/papers/foreign-edition-needed?page=${page}&per_page=${perPage}`);
   }
 
+  // Link one paper as an edition of another (drag-drop linking)
+  async linkPaperAsEdition(sourcePaperId, targetPaperId, deleteSource = true) {
+    return this.request('/api/papers/link-as-edition', {
+      method: 'POST',
+      body: {
+        source_paper_id: sourcePaperId,
+        target_paper_id: targetPaperId,
+        delete_source: deleteSource,
+      },
+    });
+  }
+
   async getPaper(paperId) {
     return this.request(`/api/papers/${paperId}`);
   }
