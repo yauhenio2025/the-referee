@@ -247,9 +247,10 @@ export default function PaperList({ onSelectPaper }) {
   const linkAsEdition = useMutation({
     mutationFn: ({ sourcePaperId, targetPaperId }) =>
       api.linkPaperAsEdition(sourcePaperId, targetPaperId, true),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries(['papers'])
-      queryClient.invalidateQueries(['active-jobs'])
+    onSuccess: async (data) => {
+      // Force immediate refetch to show the paper disappear
+      await queryClient.refetchQueries({ queryKey: ['papers'] })
+      await queryClient.refetchQueries({ queryKey: ['active-jobs'] })
       toast.success(data.message || 'Linked as edition - paper moved to editions')
     },
     onError: (error) => {
@@ -501,11 +502,9 @@ export default function PaperList({ onSelectPaper }) {
     return paper.collection_id && paper.total_harvested_citations > 0
   }
 
-  // Filter out papers that have been linked as editions (they now appear under the canonical paper)
-  const nonLinkedPapers = papers?.filter(p => !p.parent_paper_id) || []
-  const visiblePapers = nonLinkedPapers.filter(p => showProcessed || !isProcessed(p))
-  const processedCount = nonLinkedPapers.filter(isProcessed).length || 0
-  const linkedCount = papers?.filter(p => p.parent_paper_id).length || 0
+  // Papers linked as editions are soft-deleted by backend (deleted_at set), so they're already filtered out
+  const visiblePapers = (papers || []).filter(p => showProcessed || !isProcessed(p))
+  const processedCount = (papers || []).filter(isProcessed).length || 0
   const selectedCount = selectedPapers.size
 
   const getCollectionInfo = (paper) => {
