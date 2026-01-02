@@ -1831,19 +1831,22 @@ function EditionRow({
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
   const hasCitations = edition.citation_count > 0
   const hasHarvested = edition.harvested_citations > 0
+  const isMerged = !!edition.merged_into_edition_id
 
   return (
-    <tr className={`${edition.selected ? 'selected' : ''} ${isHarvesting ? 'harvesting' : ''} ${hasHarvested ? 'has-harvested' : ''}`}>
+    <tr className={`${edition.selected ? 'selected' : ''} ${isHarvesting ? 'harvesting' : ''} ${hasHarvested ? 'has-harvested' : ''} ${isMerged ? 'merged-edition' : ''}`}>
       <td className="col-check">
         <input
           type="checkbox"
           checked={edition.selected}
           onChange={(e) => onSelect(edition.id, e.target.checked)}
+          disabled={isMerged}
         />
       </td>
       <td className="col-title">
         <div className="title-cell">
-          {edition.added_by_job_id && <span className="badge-new">NEW</span>}
+          {isMerged && <span className="badge-merged" title={`Merged into edition #${edition.merged_into_edition_id}`}>MERGED</span>}
+          {edition.added_by_job_id && !isMerged && <span className="badge-new">NEW</span>}
           {edition.link ? (
             <a href={edition.link} target="_blank" rel="noopener noreferrer" title={edition.title}>
               {edition.title.length > 80 ? edition.title.substring(0, 77) + '...' : edition.title}
@@ -1903,6 +1906,13 @@ function EditionRow({
         ) : null}
       </td>
       <td className="col-actions">
+        {/* For merged editions, show minimal actions */}
+        {isMerged ? (
+          <span className="merged-hint" title="This edition was merged into another. Its scholar_id is still used for harvesting.">
+            → #{edition.merged_into_edition_id}
+          </span>
+        ) : (
+        <>
         {/* Harvest button - only show if there are citations to harvest */}
         {hasCitations && !isExcludedGroup && (
           <button
@@ -2017,6 +2027,8 @@ function EditionRow({
           >
             ↩
           </button>
+        )}
+        </>
         )}
       </td>
     </tr>

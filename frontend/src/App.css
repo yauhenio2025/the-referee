@@ -1641,6 +1641,36 @@ button:disabled {
   opacity: 1;
 }
 
+/* Merged edition row styles */
+.merged-edition {
+  opacity: 0.55;
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.merged-edition:hover {
+  opacity: 0.7;
+}
+
+.badge-merged {
+  display: inline-block;
+  background: var(--text-muted);
+  color: var(--bg-card);
+  font-size: 0.6rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.merged-hint {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
 /* Multi-Dossier Modal Styles */
 .multi-dossier-modal {
   max-width: 550px;
