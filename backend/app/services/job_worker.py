@@ -230,10 +230,20 @@ async def create_or_update_harvest_target(
     if target:
         # Update expected count if it's higher (Scholar may report different counts)
         if expected_count > target.expected_count:
+            old_expected = target.expected_count
             target.expected_count = expected_count
             target.updated_at = datetime.utcnow()
+
+            # If target was marked complete but expected increased significantly,
+            # reset to harvesting so it gets re-scanned
+            if target.status == 'complete' and target.pages_attempted == 0 and expected_count > 0:
+                target.status = 'harvesting'
+                target.completed_at = None
+                log_now(f"[HarvestTarget] RESET edition {edition_id} year {year}: expected increased {old_expected} -> {expected_count}, was falsely complete, resetting to harvesting")
+            else:
+                log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: expected={expected_count}")
+
             await db.commit()
-            log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: expected={expected_count}")
     else:
         # Create new target
         target = HarvestTarget(
@@ -277,7 +287,19 @@ async def update_harvest_target_progress(
         target.updated_at = datetime.utcnow()
 
         if mark_complete:
-            target.status = "complete" if pages_failed == 0 else "incomplete"
+            # Only mark as "complete" if we actually attempted pages OR expected was 0
+            # This prevents falsely marking complete when harvesting silently failed
+            if pages_attempted > 0 and pages_failed == 0:
+                target.status = "complete"
+            elif pages_attempted > 0 and pages_failed > 0:
+                target.status = "incomplete"
+            elif target.expected_count == 0:
+                # No citations expected and none attempted = legitimately complete
+                target.status = "complete"
+            else:
+                # Expected > 0 but no pages attempted = something went wrong
+                target.status = "incomplete"
+                log_now(f"[HarvestTarget] WARNING: edition {edition_id} year {year} has expected={target.expected_count} but 0 pages attempted - marking incomplete")
             target.completed_at = datetime.utcnow()
 
         await db.commit()
