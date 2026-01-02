@@ -117,6 +117,9 @@ class Paper(Base):
     # Soft delete
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
 
+    # Foreign edition tracking - mark papers that need foreign editions to be looked up
+    foreign_edition_needed: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Relationships
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="papers")
     dossier: Mapped[Optional["Dossier"]] = relationship(back_populates="papers")

@@ -5975,3 +5975,257 @@ button:disabled {
 .papers-all-processed p {
   margin-bottom: 1rem;
 }
+
+/* ============================================
+   Pagination Controls
+   ============================================ */
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.page-info {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* ============================================
+   Batch Selection
+   ============================================ */
+
+.batch-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.batch-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.batch-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.selected-count {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.paper-checkbox {
+  margin-right: 12px;
+}
+
+.paper-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.paper-selected {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: var(--primary) !important;
+}
+
+/* ============================================
+   Harvest Progress
+   ============================================ */
+
+.harvest-info {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.harvest-bar {
+  flex: 1;
+  max-width: 150px;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.harvest-progress {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.harvest-text {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ============================================
+   Foreign Edition Toggle
+   ============================================ */
+
+.btn-foreign {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.btn-foreign:hover {
+  background: rgba(234, 179, 8, 0.25);
+}
+
+.btn-foreign.active {
+  background: #eab308;
+  color: #000;
+}
+
+/* ============================================
+   Foreign Editions Needed Page
+   ============================================ */
+
+.foreign-editions-needed {
+  padding: 20px;
+}
+
+.foreign-editions-needed .section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.foreign-editions-needed .section-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.foreign-editions-needed .count-badge {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.foreign-editions-needed .section-description {
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+}
+
+.foreign-editions-needed .empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.foreign-editions-needed .empty-icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 16px;
+}
+
+.foreign-edition-card {
+  border-left: 3px solid #eab308 !important;
+}
+
+.foreign-edition-card .paper-main {
+  flex: 1;
+  cursor: pointer;
+}
+
+.foreign-edition-card .paper-main:hover {
+  opacity: 0.8;
+}
+
+/* ============================================
+   Batch Modal
+   ============================================ */
+
+.batch-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.batch-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.batch-modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.25rem;
+}
+
+.batch-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.collection-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.collection-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* ============================================
+   Small button variant
+   ============================================ */
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
+.btn-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.btn-success:hover {
+  background: rgba(34, 197, 94, 0.25);
+}

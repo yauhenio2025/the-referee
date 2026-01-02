@@ -13,6 +13,7 @@ import Collections from './components/Collections'
 import CollectionDetail from './components/CollectionDetail'
 import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
+import ForeignEditionsNeeded from './components/ForeignEditionsNeeded'
 import { ToastProvider } from './components/Toast'
 
 const queryClient = new QueryClient()
@@ -40,6 +41,8 @@ function AppContent() {
     if (location.pathname.startsWith('/paper/') && location.pathname.includes('/citations')) return 'citations'
     if (location.pathname.startsWith('/paper/')) return 'editions'
     if (location.pathname === '/collections') return 'collections'
+    if (location.pathname.startsWith('/collections/')) return 'collections'
+    if (location.pathname === '/foreign-editions') return 'foreign-editions'
     if (location.pathname === '/jobs') return 'jobs'
     return 'papers'
   }
@@ -93,6 +96,12 @@ function AppContent() {
           📁 Collections {stats?.collections > 0 && <span className="badge">{stats.collections}</span>}
         </button>
         <button
+          className={`tab ${activeTab === 'foreign-editions' ? 'active' : ''}`}
+          onClick={() => navigate('/foreign-editions')}
+        >
+          📕 Foreign Editions
+        </button>
+        <button
           className={`tab ${activeTab === 'editions' ? 'active' : ''}`}
           onClick={() => selectedPaper && navigate(`/paper/${selectedPaper.id}`)}
           disabled={!selectedPaper && activeTab !== 'editions'}
@@ -124,6 +133,9 @@ function AppContent() {
           } />
           <Route path="/collections" element={
             <Collections onSelectCollection={(c) => navigate(`/collections/${c.id}`)} />
+          } />
+          <Route path="/foreign-editions" element={
+            <ForeignEditionsNeeded onSelectPaper={handleSelectPaper} />
           } />
           <Route path="/collections/:collectionId" element={
             <CollectionDetailRoute />

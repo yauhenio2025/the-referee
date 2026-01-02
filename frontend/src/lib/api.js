@@ -83,6 +83,53 @@ class RefereeAPI {
     return this.request(`/api/papers${query ? `?${query}` : ''}`);
   }
 
+  // Paginated papers list with harvest stats
+  async listPapersPaginated(page = 1, perPage = 25, filters = {}) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: perPage.toString(),
+      ...filters
+    });
+    return this.request(`/api/papers?${params.toString()}`);
+  }
+
+  // Batch assign papers to collection
+  async batchAssignToCollection(paperIds, collectionId, dossierId = null, options = {}) {
+    return this.request('/api/papers/batch-assign-collection', {
+      method: 'POST',
+      body: {
+        paper_ids: paperIds,
+        collection_id: collectionId,
+        dossier_id: dossierId,
+        create_new_dossier: options.createNewDossier ?? false,
+        new_dossier_name: options.newDossierName || null,
+      },
+    });
+  }
+
+  // Mark paper as needing foreign edition
+  async toggleForeignEditionNeeded(paperId, needed = true) {
+    return this.request(`/api/papers/${paperId}/foreign-edition-needed?needed=${needed}`, {
+      method: 'POST',
+    });
+  }
+
+  // Batch mark papers as needing foreign edition
+  async batchForeignEditionNeeded(paperIds, needed = true) {
+    return this.request('/api/papers/batch-foreign-edition', {
+      method: 'POST',
+      body: {
+        paper_ids: paperIds,
+        foreign_edition_needed: needed,
+      },
+    });
+  }
+
+  // List papers needing foreign editions
+  async listPapersNeedingForeignEdition(page = 1, perPage = 25) {
+    return this.request(`/api/papers/foreign-edition-needed?page=${page}&per_page=${perPage}`);
+  }
+
   async getPaper(paperId) {
     return this.request(`/api/papers/${paperId}`);
   }

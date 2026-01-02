@@ -21,7 +21,7 @@ from .config import get_settings
 from .database import init_db, get_db
 from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget
 from .schemas import (
-    PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch,
+    PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch, PapersPaginatedResponse,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
     EditionUpdateConfidenceRequest, EditionFetchMoreRequest, EditionFetchMoreResponse,
     EditionExcludeRequest, EditionAddAsSeedRequest, EditionAddAsSeedResponse,
@@ -43,6 +43,8 @@ from .schemas import (
     # External API schemas
     BatchCrossRequest, BatchCrossResult, CrossCitationItem,
     ExternalAnalyzeRequest, ExternalAnalyzeResponse,
+    # Batch Operations schemas
+    BatchCollectionAssignment, BatchForeignEditionRequest, BatchForeignEditionResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -1162,7 +1164,7 @@ async def quick_add_paper(
     )
 
 
-def paper_to_response(paper: Paper) -> dict:
+def paper_to_response(paper: Paper, harvest_stats: dict = None) -> dict:
     """Convert Paper model to response dict, handling JSON fields"""
     data = {k: v for k, v in paper.__dict__.items() if not k.startswith('_')}
     # Parse candidates JSON if present
@@ -1176,31 +1178,107 @@ def paper_to_response(paper: Paper) -> dict:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse candidates JSON for paper {paper.id}: {e}")
             data['candidates'] = None
+
+    # Add harvest progress stats if provided
+    if harvest_stats:
+        data['harvest_expected'] = harvest_stats.get('expected', 0)
+        data['harvest_actual'] = harvest_stats.get('actual', 0)
+        if data['harvest_expected'] > 0:
+            data['harvest_percent'] = round((data['harvest_actual'] / data['harvest_expected']) * 100, 1)
+        else:
+            data['harvest_percent'] = 0.0
+    else:
+        data['harvest_expected'] = 0
+        data['harvest_actual'] = data.get('total_harvested_citations', 0)
+        data['harvest_percent'] = 0.0
+
     return data
 
 
-@app.get("/api/papers", response_model=List[PaperResponse])
+@app.get("/api/papers", response_model=PapersPaginatedResponse)
 async def list_papers(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    per_page: int = 25,
     status: str = None,
     collection_id: Optional[int] = None,
     include_deleted: bool = False,
+    foreign_edition_needed: Optional[bool] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """List all papers, optionally filtered by status or collection"""
-    query = select(Paper).offset(skip).limit(limit).order_by(Paper.created_at.desc())
+    """List papers with pagination, optionally filtered by status or collection"""
+    # Build base query for count
+    count_query = select(func.count(Paper.id))
+    if status:
+        count_query = count_query.where(Paper.status == status)
+    if collection_id is not None:
+        count_query = count_query.where(Paper.collection_id == collection_id)
+    if not include_deleted:
+        count_query = count_query.where(Paper.deleted_at.is_(None))
+    if foreign_edition_needed is not None:
+        count_query = count_query.where(Paper.foreign_edition_needed == foreign_edition_needed)
+
+    # Get total count
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Calculate pagination
+    total_pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+    skip = (page - 1) * per_page
+
+    # Build query for data
+    query = select(Paper).offset(skip).limit(per_page).order_by(Paper.created_at.desc())
     if status:
         query = query.where(Paper.status == status)
     if collection_id is not None:
         query = query.where(Paper.collection_id == collection_id)
-    # Exclude soft-deleted papers by default
     if not include_deleted:
         query = query.where(Paper.deleted_at.is_(None))
+    if foreign_edition_needed is not None:
+        query = query.where(Paper.foreign_edition_needed == foreign_edition_needed)
+
     result = await db.execute(query)
     papers = result.scalars().all()
 
-    return [PaperResponse(**paper_to_response(p)) for p in papers]
+    # Get harvest stats for all papers in batch
+    paper_ids = [p.id for p in papers]
+    harvest_stats_map = {}
+    if paper_ids:
+        # Get sum of citation_count from selected editions (expected)
+        expected_result = await db.execute(
+            select(Edition.paper_id, func.sum(Edition.citation_count).label('expected'))
+            .where(Edition.paper_id.in_(paper_ids))
+            .where(Edition.selected == True)
+            .group_by(Edition.paper_id)
+        )
+        for row in expected_result:
+            harvest_stats_map[row.paper_id] = {'expected': row.expected or 0, 'actual': 0}
+
+        # Get sum of harvested citations per paper (actual)
+        actual_result = await db.execute(
+            select(Citation.paper_id, func.count(Citation.id).label('actual'))
+            .where(Citation.paper_id.in_(paper_ids))
+            .group_by(Citation.paper_id)
+        )
+        for row in actual_result:
+            if row.paper_id in harvest_stats_map:
+                harvest_stats_map[row.paper_id]['actual'] = row.actual or 0
+            else:
+                harvest_stats_map[row.paper_id] = {'expected': 0, 'actual': row.actual or 0}
+
+    paper_responses = [
+        PaperResponse(**paper_to_response(p, harvest_stats_map.get(p.id, {})))
+        for p in papers
+    ]
+
+    return PapersPaginatedResponse(
+        papers=paper_responses,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1
+    )
 
 
 @app.get("/api/papers/{paper_id}", response_model=PaperDetail)
@@ -2510,6 +2588,152 @@ async def batch_resolve_papers(request: BatchResolveRequest = None, db: AsyncSes
         jobs_created=len(paper_ids),
         paper_ids=paper_ids,
         message=f"Queued {len(paper_ids)} papers for resolution"
+    )
+
+
+# ============== Batch Operations Endpoints ==============
+
+@app.post("/api/papers/batch-assign-collection")
+async def batch_assign_to_collection(
+    request: BatchCollectionAssignment,
+    db: AsyncSession = Depends(get_db)
+):
+    """Assign multiple papers to a collection/dossier at once"""
+    from sqlalchemy import delete
+
+    paper_ids = request.paper_ids
+    if not paper_ids:
+        raise HTTPException(status_code=400, detail="No paper IDs provided")
+
+    # Verify papers exist
+    result = await db.execute(select(Paper).where(Paper.id.in_(paper_ids)))
+    papers = list(result.scalars().all())
+    if not papers:
+        raise HTTPException(status_code=404, detail="No papers found")
+
+    # Determine collection_id - create new dossier if requested
+    dossier_id = request.dossier_id
+    collection_id = request.collection_id
+
+    if request.create_new_dossier and request.new_dossier_name:
+        if not collection_id:
+            raise HTTPException(status_code=400, detail="collection_id required when creating new dossier")
+        # Create new dossier
+        new_dossier = Dossier(
+            collection_id=collection_id,
+            name=request.new_dossier_name,
+        )
+        db.add(new_dossier)
+        await db.flush()
+        dossier_id = new_dossier.id
+
+    # Update papers
+    updated_count = 0
+    for paper in papers:
+        if collection_id:
+            paper.collection_id = collection_id
+        if dossier_id:
+            paper.dossier_id = dossier_id
+        updated_count += 1
+
+    await db.commit()
+
+    return {
+        "updated": updated_count,
+        "paper_ids": [p.id for p in papers],
+        "collection_id": collection_id,
+        "dossier_id": dossier_id,
+        "message": f"Assigned {updated_count} papers to collection/dossier"
+    }
+
+
+@app.post("/api/papers/batch-foreign-edition", response_model=BatchForeignEditionResponse)
+async def batch_mark_foreign_edition_needed(
+    request: BatchForeignEditionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Mark multiple papers as needing foreign edition lookup"""
+    paper_ids = request.paper_ids
+    if not paper_ids:
+        raise HTTPException(status_code=400, detail="No paper IDs provided")
+
+    # Update papers
+    result = await db.execute(
+        update(Paper)
+        .where(Paper.id.in_(paper_ids))
+        .values(foreign_edition_needed=request.foreign_edition_needed)
+    )
+
+    await db.commit()
+
+    return BatchForeignEditionResponse(
+        updated=result.rowcount,
+        paper_ids=paper_ids
+    )
+
+
+@app.post("/api/papers/{paper_id}/foreign-edition-needed")
+async def toggle_foreign_edition_needed(
+    paper_id: int,
+    needed: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """Toggle the foreign_edition_needed flag for a single paper"""
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    paper.foreign_edition_needed = needed
+    await db.commit()
+
+    return {
+        "paper_id": paper_id,
+        "foreign_edition_needed": needed,
+        "title": paper.title
+    }
+
+
+@app.get("/api/papers/foreign-edition-needed", response_model=PapersPaginatedResponse)
+async def list_papers_needing_foreign_edition(
+    page: int = 1,
+    per_page: int = 25,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all papers marked as needing foreign edition lookup"""
+    # Get total count
+    count_query = select(func.count(Paper.id)).where(
+        Paper.foreign_edition_needed == True,
+        Paper.deleted_at.is_(None)
+    )
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Calculate pagination
+    total_pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+    skip = (page - 1) * per_page
+
+    # Get papers
+    query = (
+        select(Paper)
+        .where(Paper.foreign_edition_needed == True, Paper.deleted_at.is_(None))
+        .offset(skip)
+        .limit(per_page)
+        .order_by(Paper.created_at.desc())
+    )
+    result = await db.execute(query)
+    papers = result.scalars().all()
+
+    paper_responses = [PaperResponse(**paper_to_response(p)) for p in papers]
+
+    return PapersPaginatedResponse(
+        papers=paper_responses,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1
     )
 
 

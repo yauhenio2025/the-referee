@@ -16,7 +16,12 @@ export default function PaperList({ onSelectPaper }) {
   const [batchResolving, setBatchResolving] = useState(false)
   const [selectedPapers, setSelectedPapers] = useState(new Set())
   const [addToCollectionPaper, setAddToCollectionPaper] = useState(null)
-  const [showProcessed, setShowProcessed] = useState(false) // Hide processed papers by default
+  const [showProcessed, setShowProcessed] = useState(false)
+  const [batchAddToCollection, setBatchAddToCollection] = useState(false)
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const perPage = 25
 
   // Fetch collections for badge display
   const { data: collections = [] } = useQuery({
@@ -30,13 +35,13 @@ export default function PaperList({ onSelectPaper }) {
     queryFn: () => api.getDossiers(),
   })
 
-  const { data: papers, isLoading, error } = useQuery({
-    queryKey: ['papers'],
+  const { data: papersData, isLoading, error } = useQuery({
+    queryKey: ['papers', currentPage, perPage],
     queryFn: async () => {
-      const papersData = await api.listPapers()
+      const response = await api.listPapersPaginated(currentPage, perPage)
       // Fetch edition counts for resolved papers
       const counts = {}
-      for (const paper of papersData.filter(p => p.status === 'resolved')) {
+      for (const paper of response.papers.filter(p => p.status === 'resolved')) {
         try {
           const editions = await api.getPaperEditions(paper.id)
           counts[paper.id] = editions?.length || 0
@@ -45,15 +50,24 @@ export default function PaperList({ onSelectPaper }) {
         }
       }
       setEditionCounts(counts)
-      return papersData
+      return response
     },
   })
+
+  const papers = papersData?.papers || []
+  const pagination = papersData ? {
+    total: papersData.total,
+    page: papersData.page,
+    perPage: papersData.per_page,
+    totalPages: papersData.total_pages,
+    hasNext: papersData.has_next,
+    hasPrev: papersData.has_prev,
+  } : null
 
   const deletePaper = useMutation({
     mutationFn: (paperId) => api.deletePaper(paperId),
     onSuccess: (result) => {
       queryClient.invalidateQueries(['papers'])
-      // Show undo toast for soft deletes
       if (result.can_restore) {
         toast.undo(
           `Deleted: ${result.title?.substring(0, 40)}...`,
@@ -75,7 +89,6 @@ export default function PaperList({ onSelectPaper }) {
     mutationFn: (paperId) => api.resolvePaper(paperId),
     onSuccess: (data, paperId) => {
       if (data.needs_reconciliation && data.candidates) {
-        // Show reconciliation modal
         const paper = papers.find(p => p.id === paperId)
         setReconciliationPaper({
           ...paper,
@@ -117,7 +130,6 @@ export default function PaperList({ onSelectPaper }) {
     },
     onSuccess: (data, paperId) => {
       if (data.jobs_created > 0) {
-        // Start polling for refresh status
         setRefreshingPapers(prev => ({ ...prev, [paperId]: data.batch_id }))
       } else {
         setRefreshingPapers(prev => {
@@ -150,7 +162,6 @@ export default function PaperList({ onSelectPaper }) {
         delete next[paperId]
         return next
       })
-      // Update edition count since we just created one
       setEditionCounts(prev => ({ ...prev, [paperId]: (prev[paperId] || 0) + (data.edition_created ? 1 : 0) }))
       queryClient.invalidateQueries(['papers'])
       queryClient.invalidateQueries(['jobs'])
@@ -172,9 +183,9 @@ export default function PaperList({ onSelectPaper }) {
     },
     onSuccess: (data) => {
       setBatchResolving(false)
-      setSelectedPapers(new Set())  // Clear selection after batch resolve
+      setSelectedPapers(new Set())
       if (data.jobs_created > 0) {
-        toast.success(`🔍 Queued ${data.jobs_created} papers for resolution`)
+        toast.success(`Queued ${data.jobs_created} papers for resolution`)
       } else {
         toast.info('No pending papers to resolve')
       }
@@ -184,6 +195,30 @@ export default function PaperList({ onSelectPaper }) {
     onError: (error) => {
       setBatchResolving(false)
       toast.error(`Failed to queue resolution: ${error.message}`)
+    },
+  })
+
+  // Toggle foreign edition needed
+  const toggleForeignEdition = useMutation({
+    mutationFn: ({ paperId, needed }) => api.toggleForeignEditionNeeded(paperId, needed),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['papers'])
+    },
+    onError: (error) => {
+      toast.error(`Failed to update: ${error.message}`)
+    },
+  })
+
+  // Batch foreign edition
+  const batchForeignEdition = useMutation({
+    mutationFn: ({ paperIds, needed }) => api.batchForeignEditionNeeded(paperIds, needed),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries(['papers'])
+      toast.success(`Marked ${data.updated} papers as needing foreign edition`)
+      setSelectedPapers(new Set())
+    },
+    onError: (error) => {
+      toast.error(`Failed to update: ${error.message}`)
     },
   })
 
@@ -198,7 +233,6 @@ export default function PaperList({ onSelectPaper }) {
       if (selection.dossierId) {
         await api.assignPapersToDossier([paperId], selection.dossierId)
       } else if (selection.createNewDossier && selection.newDossierName) {
-        // Create new dossier first, then assign
         const newDossier = await api.createDossier({
           name: selection.newDossierName,
           collection_id: selection.collectionId,
@@ -210,6 +244,32 @@ export default function PaperList({ onSelectPaper }) {
       queryClient.invalidateQueries(['dossiers'])
       toast.success(`Added "${addToCollectionPaper.title?.substring(0, 30)}..." to collection`)
       setAddToCollectionPaper(null)
+    } catch (err) {
+      toast.error(`Failed to add: ${err.message}`)
+    }
+  }
+
+  // Batch add to collection
+  const handleBatchAddToCollection = async (selection) => {
+    const paperIds = Array.from(selectedPapers)
+    if (paperIds.length === 0) return
+
+    try {
+      await api.batchAssignToCollection(
+        paperIds,
+        selection.collectionId,
+        selection.dossierId,
+        {
+          createNewDossier: selection.createNewDossier,
+          newDossierName: selection.newDossierName,
+        }
+      )
+      queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['collections'])
+      queryClient.invalidateQueries(['dossiers'])
+      toast.success(`Added ${paperIds.length} papers to collection`)
+      setSelectedPapers(new Set())
+      setBatchAddToCollection(false)
     } catch (err) {
       toast.error(`Failed to add: ${err.message}`)
     }
@@ -228,6 +288,11 @@ export default function PaperList({ onSelectPaper }) {
     })
   }
 
+  const selectAllVisible = () => {
+    const visibleIds = papers.map(p => p.id)
+    setSelectedPapers(new Set(visibleIds))
+  }
+
   const selectAllPending = () => {
     const pendingIds = papers?.filter(p => p.status === 'pending' || p.status === 'error').map(p => p.id) || []
     setSelectedPapers(new Set(pendingIds))
@@ -242,7 +307,6 @@ export default function PaperList({ onSelectPaper }) {
     if (paperIds.length > 0) {
       batchResolve.mutate(paperIds)
     } else {
-      // Resolve all pending
       batchResolve.mutate([])
     }
   }
@@ -262,7 +326,7 @@ export default function PaperList({ onSelectPaper }) {
   }
 
   const handleAddAsSeed = (candidate, e) => {
-    e.stopPropagation() // Don't trigger the card click
+    e.stopPropagation()
     addAsSeed.mutate(candidate)
   }
 
@@ -273,9 +337,14 @@ export default function PaperList({ onSelectPaper }) {
     }))
   }
 
+  // Pagination handlers
+  const goToPage = (page) => {
+    setCurrentPage(page)
+    setSelectedPapers(new Set())
+  }
+
   // Check for papers needing reconciliation on load
   const papersNeedingReconciliation = papers?.filter(p => p.status === 'needs_reconciliation') || []
-  // Count pending papers for batch resolve
   const pendingPapers = papers?.filter(p => p.status === 'pending') || []
 
   if (isLoading) return <div className="loading">Loading papers...</div>
@@ -285,14 +354,13 @@ export default function PaperList({ onSelectPaper }) {
   const getStatusBadge = (status) => {
     const badges = {
       pending: { label: 'Pending', class: 'badge-pending' },
-      needs_reconciliation: { label: '⚠️ Choose Match', class: 'badge-warning' },
+      needs_reconciliation: { label: 'Choose Match', class: 'badge-warning' },
       resolved: { label: 'Resolved', class: 'badge-success' },
       error: { label: 'Error', class: 'badge-error' },
     }
     return badges[status] || badges.pending
   }
 
-  // Format authors nicely
   const formatAuthors = (authors) => {
     if (!authors) return null
     if (Array.isArray(authors)) {
@@ -301,27 +369,22 @@ export default function PaperList({ onSelectPaper }) {
       }
       return authors.join(', ')
     }
-    // String - might be comma-separated or raw
     return authors.replace(/([a-z])([A-Z])/g, '$1 $2').trim()
   }
 
-  // Helper to check if a paper is "processed" (in collection + has harvested citations)
   const isProcessed = (paper) => {
     return paper.collection_id && paper.total_harvested_citations > 0
   }
 
-  // Filter papers based on showProcessed toggle
   const visiblePapers = papers?.filter(p => showProcessed || !isProcessed(p)) || []
   const processedCount = papers?.filter(isProcessed).length || 0
 
-  // Filter for selectable papers (pending or error)
   const selectablePapers = visiblePapers?.filter(p => p.status === 'pending' || p.status === 'error') || []
   const selectedCount = selectedPapers.size
   const selectedResolvable = Array.from(selectedPapers).filter(id =>
     selectablePapers.some(p => p.id === id)
   ).length
 
-  // Helper to get collection/dossier info for a paper
   const getCollectionInfo = (paper) => {
     if (!paper.collection_id) return null
     const collection = collections.find(c => c.id === paper.collection_id)
@@ -329,10 +392,24 @@ export default function PaperList({ onSelectPaper }) {
     return { collection, dossier }
   }
 
+  // Render harvest progress bar
+  const renderHarvestProgress = (paper) => {
+    if (!paper.harvest_expected || paper.harvest_expected === 0) return null
+    const percent = paper.harvest_percent || 0
+    const color = percent >= 90 ? '#38A169' : percent >= 50 ? '#ECC94B' : '#E53E3E'
+
+    return (
+      <div className="harvest-progress" title={`${paper.harvest_actual?.toLocaleString() || 0} / ${paper.harvest_expected?.toLocaleString() || 0} citations harvested`}>
+        <div className="harvest-progress-bar" style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: color }} />
+        <span className="harvest-progress-text">{percent.toFixed(1)}%</span>
+      </div>
+    )
+  }
+
   return (
     <div className="paper-list">
       <div className="paper-list-header">
-        <h2>Papers ({visiblePapers.length}{processedCount > 0 && !showProcessed ? ` of ${papers.length}` : ''})</h2>
+        <h2>Papers ({pagination?.total || papers.length})</h2>
         <div className="paper-list-actions">
           {/* Toggle for processed papers */}
           {processedCount > 0 && (
@@ -345,46 +422,59 @@ export default function PaperList({ onSelectPaper }) {
               <span>Show processed ({processedCount})</span>
             </label>
           )}
-          {/* Selection controls - show when there are pending/error papers */}
-          {selectablePapers.length > 0 && (
+          {/* Selection controls */}
+          {selectedCount > 0 ? (
             <>
-              {selectedCount > 0 ? (
-                <>
-                  <span className="selection-count">{selectedCount} selected</span>
-                  <button
-                    onClick={clearSelection}
-                    className="btn-clear-selection"
-                    title="Clear selection"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={handleBatchResolve}
-                    disabled={batchResolving || selectedResolvable === 0}
-                    className="btn-batch-resolve"
-                    title={`Resolve ${selectedResolvable} selected papers on Google Scholar`}
-                  >
-                    {batchResolving ? '🔄 Queuing...' : `🔍 Resolve Selected (${selectedResolvable})`}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={selectAllPending}
-                    className="btn-select-all"
-                    title="Select all pending papers"
-                  >
-                    Select All Pending ({selectablePapers.length})
-                  </button>
-                  <button
-                    onClick={handleBatchResolve}
-                    disabled={batchResolving}
-                    className="btn-batch-resolve"
-                    title={`Resolve all ${pendingPapers.length} pending papers on Google Scholar in parallel`}
-                  >
-                    {batchResolving ? '🔄 Queuing...' : `🔍 Resolve All Pending (${pendingPapers.length})`}
-                  </button>
-                </>
+              <span className="selection-count">{selectedCount} selected</span>
+              <button
+                onClick={clearSelection}
+                className="btn-clear-selection"
+                title="Clear selection"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setBatchAddToCollection(true)}
+                className="btn-batch-collection"
+                title="Add selected papers to a collection"
+              >
+                Add to Collection
+              </button>
+              <button
+                onClick={() => batchForeignEdition.mutate({ paperIds: Array.from(selectedPapers), needed: true })}
+                className="btn-foreign-edition"
+                title="Mark selected papers as needing foreign editions"
+              >
+                Mark Foreign Ed. Needed
+              </button>
+              {selectedResolvable > 0 && (
+                <button
+                  onClick={handleBatchResolve}
+                  disabled={batchResolving}
+                  className="btn-batch-resolve"
+                  title={`Resolve ${selectedResolvable} selected papers`}
+                >
+                  {batchResolving ? 'Queuing...' : `Resolve Selected (${selectedResolvable})`}
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                onClick={selectAllVisible}
+                className="btn-select-all"
+                title="Select all visible papers"
+              >
+                Select All ({visiblePapers.length})
+              </button>
+              {selectablePapers.length > 0 && (
+                <button
+                  onClick={selectAllPending}
+                  className="btn-select-all"
+                  title="Select all pending papers"
+                >
+                  Select Pending ({selectablePapers.length})
+                </button>
               )}
             </>
           )}
@@ -394,8 +484,45 @@ export default function PaperList({ onSelectPaper }) {
       {/* Alert for papers needing reconciliation */}
       {papersNeedingReconciliation.length > 0 && (
         <div className="reconciliation-alert">
-          <span className="alert-icon">⚠️</span>
+          <span className="alert-icon">!</span>
           <span>{papersNeedingReconciliation.length} paper(s) need your attention - multiple Scholar matches found</span>
+        </div>
+      )}
+
+      {/* Pagination controls - Top */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="pagination-controls">
+          <button
+            onClick={() => goToPage(1)}
+            disabled={!pagination.hasPrev}
+            className="btn-pagination"
+          >
+            First
+          </button>
+          <button
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={!pagination.hasPrev}
+            className="btn-pagination"
+          >
+            Prev
+          </button>
+          <span className="pagination-info">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} papers)
+          </span>
+          <button
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={!pagination.hasNext}
+            className="btn-pagination"
+          >
+            Next
+          </button>
+          <button
+            onClick={() => goToPage(pagination.totalPages)}
+            disabled={!pagination.hasNext}
+            className="btn-pagination"
+          >
+            Last
+          </button>
         </div>
       )}
 
@@ -406,24 +533,20 @@ export default function PaperList({ onSelectPaper }) {
           const isExpanded = expandedAbstracts[paper.id]
           const needsReconciliation = paper.status === 'needs_reconciliation'
           const collectionInfo = getCollectionInfo(paper)
-
-          const isSelectable = paper.status === 'pending' || paper.status === 'error'
           const isSelected = selectedPapers.has(paper.id)
 
           return (
             <div key={paper.id} className={`paper-card ${paper.status === 'resolved' ? 'paper-card-resolved' : ''} ${needsReconciliation ? 'paper-card-warning' : ''} ${isSelected ? 'paper-card-selected' : ''} ${isProcessed(paper) ? 'paper-card-processed' : ''}`}>
-              {/* Checkbox for selection (only for pending/error papers) */}
-              {isSelectable && (
-                <div className="paper-select-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => togglePaperSelection(paper.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    title={isSelected ? "Deselect paper" : "Select paper for batch resolve"}
-                  />
-                </div>
-              )}
+              {/* Checkbox for selection */}
+              <div className="paper-select-checkbox">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => togglePaperSelection(paper.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  title={isSelected ? "Deselect paper" : "Select paper"}
+                />
+              </div>
               {/* Header with title and status */}
               <div className="paper-header">
                 {paper.link ? (
@@ -440,19 +563,25 @@ export default function PaperList({ onSelectPaper }) {
                 )}
                 <div className="paper-badges">
                   <span className={`badge ${badge.class}`}>
-                    {isResolving ? '🔄 Resolving...' : badge.label}
+                    {isResolving ? 'Resolving...' : badge.label}
                   </span>
+                  {/* Foreign edition needed badge */}
+                  {paper.foreign_edition_needed && (
+                    <span className="badge badge-foreign-edition" title="Needs foreign edition lookup">
+                      Foreign Ed.
+                    </span>
+                  )}
                   {/* Collection/Dossier badge */}
                   {collectionInfo && (
                     <span
                       className="badge badge-collection"
                       style={{ borderColor: collectionInfo.collection?.color || '#3182CE' }}
                       title={collectionInfo.dossier
-                        ? `${collectionInfo.collection?.name} › ${collectionInfo.dossier.name}`
+                        ? `${collectionInfo.collection?.name} > ${collectionInfo.dossier.name}`
                         : collectionInfo.collection?.name}
                     >
-                      📁 {collectionInfo.collection?.name?.substring(0, 15) || '...'}
-                      {collectionInfo.dossier && ` › ${collectionInfo.dossier.name?.substring(0, 10)}`}
+                      {collectionInfo.collection?.name?.substring(0, 15) || '...'}
+                      {collectionInfo.dossier && ` > ${collectionInfo.dossier.name?.substring(0, 10)}`}
                     </span>
                   )}
                 </div>
@@ -465,53 +594,40 @@ export default function PaperList({ onSelectPaper }) {
                 )}
                 {paper.year && (
                   <span className="paper-year">
-                    {formatAuthors(paper.authors) ? ' · ' : ''}{paper.year}
+                    {formatAuthors(paper.authors) ? ' - ' : ''}{paper.year}
                   </span>
                 )}
                 {paper.venue && (
                   <span className="paper-venue">
-                    {' · '}{paper.venue.length > 50 ? paper.venue.substring(0, 50) + '...' : paper.venue}
+                    {' - '}{paper.venue.length > 50 ? paper.venue.substring(0, 50) + '...' : paper.venue}
                   </span>
                 )}
               </div>
 
-              {/* Citation count and Scholar ID for resolved papers */}
+              {/* Citation count and harvest progress for resolved papers */}
               {paper.status === 'resolved' && (
                 <div className="paper-stats">
                   {paper.citation_count > 0 && (
                     <span className="paper-citations">
-                      📚 {paper.citation_count.toLocaleString()} citations
+                      {paper.citation_count.toLocaleString()} citations
                     </span>
                   )}
-                  {/* Harvest stats and staleness indicator */}
+                  {/* Harvest progress bar */}
+                  {renderHarvestProgress(paper)}
+                  {/* Harvest stats */}
                   {paper.total_harvested_citations > 0 && (
                     <span className="paper-harvested">
-                      📥 {paper.total_harvested_citations.toLocaleString()} harvested
+                      {paper.total_harvested_citations.toLocaleString()} harvested
                     </span>
                   )}
                   {paper.is_stale && (
                     <span className="staleness-badge stale" title={`Last harvested ${paper.days_since_harvest} days ago`}>
-                      ⏰ Stale ({paper.days_since_harvest}d)
+                      Stale ({paper.days_since_harvest}d)
                     </span>
                   )}
                   {paper.any_edition_harvested_at && !paper.is_stale && (
                     <span className="staleness-badge fresh" title={`Last harvested ${paper.days_since_harvest} days ago`}>
-                      ✓ Fresh
-                    </span>
-                  )}
-                  {paper.total_harvested_citations > 0 && !paper.any_edition_harvested_at && (
-                    <span className="staleness-badge never" title="Never harvested - run citation extraction first">
-                      ⚠ Never harvested
-                    </span>
-                  )}
-                  {paper.scholar_id && (
-                    <span className="paper-scholar-id">
-                      ID: {paper.scholar_id}
-                    </span>
-                  )}
-                  {paper.abstract && (
-                    <span className="paper-has-abstract">
-                      📄 Has abstract
+                      Fresh
                     </span>
                   )}
                 </div>
@@ -525,7 +641,7 @@ export default function PaperList({ onSelectPaper }) {
                   title={isExpanded ? "Click to collapse" : "Click to expand abstract"}
                 >
                   <span className="abstract-toggle">
-                    {isExpanded ? '▼' : '▶'}
+                    {isExpanded ? 'v' : '>'}
                   </span>
                   <span className="abstract-text">
                     {isExpanded
@@ -545,13 +661,12 @@ export default function PaperList({ onSelectPaper }) {
                     disabled={isResolving}
                     className="btn-resolve"
                   >
-                    {isResolving ? '🔄 Resolving...' : '🔍 Resolve on Scholar'}
+                    {isResolving ? 'Resolving...' : 'Resolve on Scholar'}
                   </button>
                 )}
                 {paper.status === 'needs_reconciliation' && (
                   <button
                     onClick={() => {
-                      // Handle candidates - could be array (already parsed) or string (legacy)
                       let candidates = []
                       if (paper.candidates) {
                         candidates = typeof paper.candidates === 'string'
@@ -562,7 +677,7 @@ export default function PaperList({ onSelectPaper }) {
                     }}
                     className="btn-reconcile"
                   >
-                    ⚠️ Choose Correct Match
+                    Choose Correct Match
                   </button>
                 )}
                 {paper.status === 'error' && (
@@ -571,7 +686,7 @@ export default function PaperList({ onSelectPaper }) {
                     disabled={isResolving}
                     className="btn-resolve"
                   >
-                    {isResolving ? '🔄 Retrying...' : '🔄 Retry Resolution'}
+                    {isResolving ? 'Retrying...' : 'Retry Resolution'}
                   </button>
                 )}
                 <button
@@ -581,21 +696,21 @@ export default function PaperList({ onSelectPaper }) {
                   title={paper.status !== 'resolved' ? 'Resolve paper first' : editionCounts[paper.id] > 0 ? 'View discovered editions' : 'Discover all editions'}
                 >
                   {editionCounts[paper.id] > 0
-                    ? `📖 View ${editionCounts[paper.id]} Editions`
-                    : '📖 Discover Editions'}
+                    ? `View ${editionCounts[paper.id]} Editions`
+                    : 'Discover Editions'}
                 </button>
-                {/* Quick Harvest - skip edition discovery and harvest directly */}
+                {/* Quick Harvest */}
                 {paper.status === 'resolved' && !editionCounts[paper.id] && paper.total_harvested_citations === 0 && (
                   <button
                     onClick={() => quickHarvest.mutate(paper.id)}
                     disabled={!!quickHarvestingPapers[paper.id]}
                     className="btn-quick-harvest"
-                    title="Skip edition discovery and harvest citations directly from this paper's Scholar entry"
+                    title="Skip edition discovery and harvest citations directly"
                   >
-                    {quickHarvestingPapers[paper.id] ? '⚡ Harvesting...' : '⚡ Quick Harvest'}
+                    {quickHarvestingPapers[paper.id] ? 'Harvesting...' : 'Quick Harvest'}
                   </button>
                 )}
-                {/* Refresh button - show for papers with harvested citations */}
+                {/* Refresh button */}
                 {paper.status === 'resolved' && paper.total_harvested_citations > 0 && (
                   <button
                     onClick={() => refreshPaper.mutate(paper.id)}
@@ -603,25 +718,33 @@ export default function PaperList({ onSelectPaper }) {
                     className={`btn-refresh ${paper.is_stale ? 'stale' : ''}`}
                     title={paper.is_stale
                       ? `Refresh citations (${paper.days_since_harvest} days since last harvest)`
-                      : 'Refresh citations to find new ones'}
+                      : 'Refresh citations'}
                   >
-                    {refreshingPapers[paper.id] ? '🔄 Refreshing...' : '🔄 Refresh'}
+                    {refreshingPapers[paper.id] ? 'Refreshing...' : 'Refresh'}
                   </button>
                 )}
-                {/* Add to Collection - always available */}
+                {/* Add to Collection */}
                 <button
                   onClick={() => setAddToCollectionPaper(paper)}
                   className="btn-collection"
                   title="Add this paper to a collection"
                 >
-                  📁 Add to Collection
+                  Add to Collection
+                </button>
+                {/* Foreign edition toggle */}
+                <button
+                  onClick={() => toggleForeignEdition.mutate({ paperId: paper.id, needed: !paper.foreign_edition_needed })}
+                  className={`btn-foreign-edition ${paper.foreign_edition_needed ? 'active' : ''}`}
+                  title={paper.foreign_edition_needed ? 'Unmark as needing foreign edition' : 'Mark as needing foreign edition'}
+                >
+                  {paper.foreign_edition_needed ? 'Unmark Foreign' : 'Foreign Ed.'}
                 </button>
                 <button
                   onClick={() => deletePaper.mutate(paper.id)}
                   className="btn-danger"
                   disabled={deletePaper.isPending}
                 >
-                  🗑️ Delete
+                  Delete
                 </button>
               </div>
             </div>
@@ -629,7 +752,44 @@ export default function PaperList({ onSelectPaper }) {
         })}
       </div>
 
-      {/* Add to Collection Modal */}
+      {/* Pagination controls - Bottom */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="pagination-controls">
+          <button
+            onClick={() => goToPage(1)}
+            disabled={!pagination.hasPrev}
+            className="btn-pagination"
+          >
+            First
+          </button>
+          <button
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={!pagination.hasPrev}
+            className="btn-pagination"
+          >
+            Prev
+          </button>
+          <span className="pagination-info">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} papers)
+          </span>
+          <button
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={!pagination.hasNext}
+            className="btn-pagination"
+          >
+            Next
+          </button>
+          <button
+            onClick={() => goToPage(pagination.totalPages)}
+            disabled={!pagination.hasNext}
+            className="btn-pagination"
+          >
+            Last
+          </button>
+        </div>
+      )}
+
+      {/* Add to Collection Modal - Single Paper */}
       <DossierSelectModal
         isOpen={!!addToCollectionPaper}
         onClose={() => setAddToCollectionPaper(null)}
@@ -638,11 +798,20 @@ export default function PaperList({ onSelectPaper }) {
         subtitle={addToCollectionPaper ? `Add "${addToCollectionPaper.title?.substring(0, 50)}..." to a collection` : ''}
       />
 
+      {/* Add to Collection Modal - Batch */}
+      <DossierSelectModal
+        isOpen={batchAddToCollection}
+        onClose={() => setBatchAddToCollection(false)}
+        onSelect={handleBatchAddToCollection}
+        title="Add Selected to Collection"
+        subtitle={`Add ${selectedCount} selected papers to a collection`}
+      />
+
       {/* Reconciliation Modal */}
       {reconciliationPaper && (
         <div className="modal-overlay">
           <div className="modal reconciliation-modal">
-            <h3>🔍 Select the Correct Paper</h3>
+            <h3>Select the Correct Paper</h3>
             <p className="reconciliation-hint">
               Multiple matches were found for "<strong>{reconciliationPaper.title}</strong>".
               Please select the correct one:
@@ -677,7 +846,7 @@ export default function PaperList({ onSelectPaper }) {
                     </div>
                     <div className="candidate-stats">
                       <span className="candidate-citations">
-                        📚 {(candidate.citationCount || candidate.citation_count || 0).toLocaleString()} citations
+                        {(candidate.citationCount || candidate.citation_count || 0).toLocaleString()} citations
                       </span>
                       {candidate.scholarId && (
                         <span className="candidate-scholar-id">ID: {candidate.scholarId}</span>
@@ -699,7 +868,7 @@ export default function PaperList({ onSelectPaper }) {
                       disabled={addAsSeed.isPending}
                       title="Add this paper as a new seed to harvest"
                     >
-                      {addAsSeed.isPending ? '➕ Adding...' : '➕ Add as Seed'}
+                      {addAsSeed.isPending ? 'Adding...' : 'Add as Seed'}
                     </button>
                   </div>
                 </div>

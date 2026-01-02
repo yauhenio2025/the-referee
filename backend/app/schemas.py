@@ -174,9 +174,26 @@ class PaperResponse(PaperBase):
     is_stale: bool = False  # Computed: null or >90 days since any edition harvest
     days_since_harvest: Optional[int] = None  # Computed
     editions_finalized: bool = False  # User has finalized edition selection
+    # Foreign edition tracking
+    foreign_edition_needed: bool = False  # Mark papers needing foreign edition lookup
+    # Harvest progress (for UI breakdown)
+    harvest_expected: int = 0  # Total expected citations across all editions
+    harvest_actual: int = 0  # Total harvested citations
+    harvest_percent: float = 0.0  # Completion percentage
 
     class Config:
         from_attributes = True
+
+
+class PapersPaginatedResponse(BaseModel):
+    """Paginated list of papers with metadata"""
+    papers: List["PaperResponse"]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
 
 
 class PaperDetail(PaperResponse):
@@ -635,7 +652,31 @@ class WebhookPayload(BaseModel):
     timestamp: datetime
 
 
+# ============== Batch Operations Schemas ==============
+
+class BatchCollectionAssignment(BaseModel):
+    """Assign multiple papers to a collection/dossier at once"""
+    paper_ids: List[int]
+    collection_id: Optional[int] = None
+    dossier_id: Optional[int] = None
+    create_new_dossier: bool = False
+    new_dossier_name: Optional[str] = None
+
+
+class BatchForeignEditionRequest(BaseModel):
+    """Mark multiple papers as needing foreign editions"""
+    paper_ids: List[int]
+    foreign_edition_needed: bool = True
+
+
+class BatchForeignEditionResponse(BaseModel):
+    """Response from batch foreign edition marking"""
+    updated: int
+    paper_ids: List[int]
+
+
 # Update forward references
 PaperDetail.model_rebuild()
+PapersPaginatedResponse.model_rebuild()
 CollectionDetail.model_rebuild()
 DossierDetail.model_rebuild()
