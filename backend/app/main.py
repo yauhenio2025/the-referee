@@ -1350,6 +1350,119 @@ async def restore_paper(paper_id: int, db: AsyncSession = Depends(get_db)):
     return {"restored": True, "paper_id": paper_id, "title": paper.title}
 
 
+# ============== Metadata Update Endpoints ==============
+
+class PaperMetadataUpdate(BaseModel):
+    """Update paper bibliographic metadata"""
+    title: Optional[str] = None
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    link: Optional[str] = None
+    abstract: Optional[str] = None
+
+
+class EditionMetadataUpdate(BaseModel):
+    """Update edition bibliographic metadata"""
+    title: Optional[str] = None
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    link: Optional[str] = None
+    abstract: Optional[str] = None
+    language: Optional[str] = None
+
+
+@app.patch("/api/papers/{paper_id}/metadata")
+async def update_paper_metadata(
+    paper_id: int,
+    update: PaperMetadataUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update bibliographic metadata for a paper"""
+    result = await db.execute(
+        select(Paper).where(Paper.id == paper_id, Paper.deleted_at.is_(None))
+    )
+    paper = result.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Update only provided fields
+    if update.title is not None:
+        paper.title = update.title
+    if update.authors is not None:
+        paper.authors = update.authors
+    if update.year is not None:
+        paper.year = update.year
+    if update.venue is not None:
+        paper.venue = update.venue
+    if update.link is not None:
+        paper.link = update.link
+    if update.abstract is not None:
+        paper.abstract = update.abstract
+
+    await db.commit()
+    await db.refresh(paper)
+
+    return {
+        "id": paper.id,
+        "title": paper.title,
+        "authors": paper.authors,
+        "year": paper.year,
+        "venue": paper.venue,
+        "link": paper.link,
+        "abstract": paper.abstract,
+        "updated": True
+    }
+
+
+@app.patch("/api/editions/{edition_id}/metadata")
+async def update_edition_metadata(
+    edition_id: int,
+    update: EditionMetadataUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update bibliographic metadata for an edition"""
+    result = await db.execute(
+        select(Edition).where(Edition.id == edition_id)
+    )
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Update only provided fields
+    if update.title is not None:
+        edition.title = update.title
+    if update.authors is not None:
+        edition.authors = update.authors
+    if update.year is not None:
+        edition.year = update.year
+    if update.venue is not None:
+        edition.venue = update.venue
+    if update.link is not None:
+        edition.link = update.link
+    if update.abstract is not None:
+        edition.abstract = update.abstract
+    if update.language is not None:
+        edition.language = update.language
+
+    await db.commit()
+    await db.refresh(edition)
+
+    return {
+        "id": edition.id,
+        "paper_id": edition.paper_id,
+        "title": edition.title,
+        "authors": edition.authors,
+        "year": edition.year,
+        "venue": edition.venue,
+        "link": edition.link,
+        "abstract": edition.abstract,
+        "language": edition.language,
+        "updated": True
+    }
+
+
 # ============== Edition Discovery Endpoints ==============
 
 @app.post("/api/editions/discover", response_model=EditionDiscoveryResponse)

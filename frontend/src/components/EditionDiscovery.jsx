@@ -24,6 +24,10 @@ export default function EditionDiscovery({ paper, onBack }) {
   const [manualEditionInput, setManualEditionInput] = useState('')
   const [manualEditionLanguage, setManualEditionLanguage] = useState('')
   const [manualEditionResult, setManualEditionResult] = useState(null)
+  // Edit metadata state
+  const [editingEdition, setEditingEdition] = useState(null)
+  const [editingPaper, setEditingPaper] = useState(false)
+  const [editForm, setEditForm] = useState({ title: '', authors: '', year: '', venue: '', link: '', abstract: '', language: '' })
   const [isLoadingRecs, setIsLoadingRecs] = useState(false)
   const [recommendations, setRecommendations] = useState(null)
   const [discoveryProgress, setDiscoveryProgress] = useState(null)
@@ -481,6 +485,75 @@ export default function EditionDiscovery({ paper, onBack }) {
     },
   })
 
+  // Update paper metadata
+  const updatePaperMetadata = useMutation({
+    mutationFn: (metadata) => api.updatePaperMetadata(paper.id, metadata),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['paper', paper.id])
+      toast.success('Paper metadata updated')
+      setEditingPaper(false)
+    },
+    onError: (error) => toast.error(`Failed to update paper: ${error.message}`),
+  })
+
+  // Update edition metadata
+  const updateEditionMetadata = useMutation({
+    mutationFn: ({ editionId, metadata }) => api.updateEditionMetadata(editionId, metadata),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['editions', paper.id])
+      toast.success('Edition metadata updated')
+      setEditingEdition(null)
+    },
+    onError: (error) => toast.error(`Failed to update edition: ${error.message}`),
+  })
+
+  // Helper to open edit modal
+  const openEditEdition = (edition) => {
+    setEditForm({
+      title: edition.title || '',
+      authors: edition.authors || '',
+      year: edition.year || '',
+      venue: edition.venue || '',
+      link: edition.link || '',
+      abstract: edition.abstract || '',
+      language: edition.language || '',
+    })
+    setEditingEdition(edition)
+  }
+
+  const openEditPaper = () => {
+    setEditForm({
+      title: paper.title || '',
+      authors: paper.authors || '',
+      year: paper.year || '',
+      venue: paper.venue || '',
+      link: paper.link || '',
+      abstract: paper.abstract || '',
+      language: '',
+    })
+    setEditingPaper(true)
+  }
+
+  const handleSaveMetadata = () => {
+    const metadata = {
+      title: editForm.title || null,
+      authors: editForm.authors || null,
+      year: editForm.year ? parseInt(editForm.year) : null,
+      venue: editForm.venue || null,
+      link: editForm.link || null,
+      abstract: editForm.abstract || null,
+    }
+
+    if (editingPaper) {
+      updatePaperMetadata.mutate(metadata)
+    } else if (editingEdition) {
+      updateEditionMetadata.mutate({
+        editionId: editingEdition.id,
+        metadata: { ...metadata, language: editForm.language || null },
+      })
+    }
+  }
+
   // Poll for refresh batch status
   useEffect(() => {
     if (!refreshBatchId) return
@@ -768,6 +841,9 @@ export default function EditionDiscovery({ paper, onBack }) {
           <h2>{paper.title}</h2>
           <span className="meta">{paper.authors} {paper.year && `(${paper.year})`}</span>
         </div>
+        <button onClick={openEditPaper} className="btn-icon btn-edit-paper" title="Edit paper metadata">
+          ✏️
+        </button>
       </header>
 
       {/* Action Bar */}
@@ -1026,6 +1102,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onSelectAndHarvest={selectAndHarvest}
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
+              onEditEdition={openEditEdition}
             />
           )}
 
@@ -1051,6 +1128,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onSelectAndHarvest={selectAndHarvest}
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
+              onEditEdition={openEditEdition}
             />
           )}
 
@@ -1076,6 +1154,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               onSelectAndHarvest={selectAndHarvest}
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
+              onEditEdition={openEditEdition}
             />
           )}
 
@@ -1100,6 +1179,7 @@ export default function EditionDiscovery({ paper, onBack }) {
               isExcludedGroup={true}
               onAnalyzeGaps={analyzeGaps}
               analyzingEditionId={analyzingEditionId}
+              onEditEdition={openEditEdition}
             />
           )}
         </div>
@@ -1398,6 +1478,102 @@ export default function EditionDiscovery({ paper, onBack }) {
           </div>
         </div>
       )}
+
+      {/* Edit Metadata Modal */}
+      {(editingEdition || editingPaper) && (
+        <div className="modal-overlay" onClick={() => { setEditingEdition(null); setEditingPaper(false) }}>
+          <div className="modal compact edit-metadata-modal" onClick={e => e.stopPropagation()}>
+            <h3>✏️ Edit {editingPaper ? 'Paper' : 'Edition'} Metadata</h3>
+
+            <div className="edit-form">
+              <div className="form-field">
+                <label>Title</label>
+                <input
+                  type="text"
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  placeholder="Title"
+                />
+              </div>
+
+              <div className="form-field">
+                <label>Authors</label>
+                <input
+                  type="text"
+                  value={editForm.authors}
+                  onChange={(e) => setEditForm({ ...editForm, authors: e.target.value })}
+                  placeholder="Authors (comma-separated)"
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-field">
+                  <label>Year</label>
+                  <input
+                    type="number"
+                    value={editForm.year}
+                    onChange={(e) => setEditForm({ ...editForm, year: e.target.value })}
+                    placeholder="Year"
+                  />
+                </div>
+
+                {editingEdition && (
+                  <div className="form-field">
+                    <label>Language</label>
+                    <input
+                      type="text"
+                      value={editForm.language}
+                      onChange={(e) => setEditForm({ ...editForm, language: e.target.value })}
+                      placeholder="Language"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="form-field">
+                <label>Venue / Publisher</label>
+                <input
+                  type="text"
+                  value={editForm.venue}
+                  onChange={(e) => setEditForm({ ...editForm, venue: e.target.value })}
+                  placeholder="Journal, Publisher, etc."
+                />
+              </div>
+
+              <div className="form-field">
+                <label>Link</label>
+                <input
+                  type="text"
+                  value={editForm.link}
+                  onChange={(e) => setEditForm({ ...editForm, link: e.target.value })}
+                  placeholder="URL to paper"
+                />
+              </div>
+
+              <div className="form-field">
+                <label>Abstract</label>
+                <textarea
+                  value={editForm.abstract}
+                  onChange={(e) => setEditForm({ ...editForm, abstract: e.target.value })}
+                  placeholder="Abstract (optional)"
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button onClick={() => { setEditingEdition(null); setEditingPaper(false) }}>Cancel</button>
+              <button
+                onClick={handleSaveMetadata}
+                className="btn-primary"
+                disabled={updatePaperMetadata.isPending || updateEditionMetadata.isPending}
+              >
+                {(updatePaperMetadata.isPending || updateEditionMetadata.isPending) ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1427,7 +1603,8 @@ function EditionGroup({
   onSelectAndHarvest,
   isExcludedGroup = false,
   onAnalyzeGaps,
-  analyzingEditionId
+  analyzingEditionId,
+  onEditEdition
 }) {
   const selectedCount = editions.filter(e => e.selected).length
   const totalCitations = editions.reduce((sum, e) => sum + (e.citation_count || 0), 0)
@@ -1559,6 +1736,7 @@ function EditionGroup({
                   isExcludedGroup={isExcludedGroup}
                   onAnalyzeGaps={onAnalyzeGaps}
                   isAnalyzingGaps={analyzingEditionId === ed.id}
+                  onEditEdition={onEditEdition}
                 />
               ))}
             </tbody>
@@ -1587,7 +1765,8 @@ function EditionRow({
   onInclude,
   isExcludedGroup = false,
   onAnalyzeGaps,
-  isAnalyzingGaps = false
+  isAnalyzingGaps = false,
+  onEditEdition
 }) {
   const maxCites = 5000 // for bar scaling
   const barWidth = Math.min(100, (edition.citation_count / maxCites) * 100)
@@ -1686,6 +1865,17 @@ function EditionRow({
             title={isAnalyzingGaps ? 'Analyzing gaps...' : `Find gaps for ${edition.language || 'this'} edition`}
           >
             {isAnalyzingGaps ? '⏳' : '🔍'}
+          </button>
+        )}
+
+        {/* Edit metadata button */}
+        {onEditEdition && (
+          <button
+            className="btn-icon btn-edit"
+            onClick={() => onEditEdition(edition)}
+            title="Edit metadata"
+          >
+            ✏️
           </button>
         )}
 

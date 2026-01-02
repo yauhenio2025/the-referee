@@ -630,6 +630,32 @@ class RefereeAPI {
     const params = editionId ? `?edition_id=${editionId}` : '';
     return this.request(`/api/papers/${paperId}/analyze-gaps${params}`);
   }
+
+  // ============== Metadata Update ==============
+
+  /**
+   * Update paper bibliographic metadata
+   * @param {number} paperId - Paper ID
+   * @param {object} metadata - Fields to update (title, authors, year, venue, link, abstract)
+   */
+  async updatePaperMetadata(paperId, metadata) {
+    return this.request(`/api/papers/${paperId}/metadata`, {
+      method: 'PATCH',
+      body: metadata,
+    });
+  }
+
+  /**
+   * Update edition bibliographic metadata
+   * @param {number} editionId - Edition ID
+   * @param {object} metadata - Fields to update (title, authors, year, venue, link, abstract, language)
+   */
+  async updateEditionMetadata(editionId, metadata) {
+    return this.request(`/api/editions/${editionId}/metadata`, {
+      method: 'PATCH',
+      body: metadata,
+    });
+  }
 }
 
 export const api = new RefereeAPI();
