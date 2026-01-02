@@ -354,8 +354,9 @@ export default function PaperList({ onSelectPaper }) {
       e.preventDefault()
       return
     }
+    console.log('Drag started:', paper.id, paper.title)
     setDraggingPaperId(paper.id)
-    e.dataTransfer.effectAllowed = 'link'
+    e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', paper.id.toString())
     // Add paper info for visual feedback
     e.dataTransfer.setData('application/json', JSON.stringify({
@@ -366,18 +367,20 @@ export default function PaperList({ onSelectPaper }) {
   }
 
   const handleDragEnd = () => {
+    console.log('Drag ended')
     setDraggingPaperId(null)
     setDragOverPaperId(null)
   }
 
   const handleDragOver = (e, paper) => {
-    // Only allow drop on resolved papers that are different from the source
-    if (paper.status !== 'resolved' || paper.id === draggingPaperId) {
-      return
-    }
+    // Must call preventDefault to allow drop
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'link'
-    setDragOverPaperId(paper.id)
+    e.dataTransfer.dropEffect = 'move'
+
+    // Only highlight as drop target if it's a valid target
+    if (paper.status === 'resolved' && paper.id !== draggingPaperId) {
+      setDragOverPaperId(paper.id)
+    }
   }
 
   const handleDragLeave = (e) => {
@@ -389,15 +392,20 @@ export default function PaperList({ onSelectPaper }) {
 
   const handleDrop = (e, targetPaper) => {
     e.preventDefault()
-    const sourcePaperId = parseInt(e.dataTransfer.getData('text/plain'))
+    e.stopPropagation()
 
-    if (!sourcePaperId || sourcePaperId === targetPaper.id) {
+    const sourcePaperId = parseInt(e.dataTransfer.getData('text/plain'))
+    console.log('Drop:', sourcePaperId, 'onto', targetPaper.id, targetPaper.title)
+
+    if (!sourcePaperId || sourcePaperId === targetPaper.id || targetPaper.status !== 'resolved') {
+      console.log('Drop rejected - invalid target')
       setDragOverPaperId(null)
       return
     }
 
     // Find the source paper for the confirmation message
     const sourcePaper = papers.find(p => p.id === sourcePaperId)
+    console.log('Linking:', sourcePaper?.title, 'as edition of', targetPaper.title)
 
     // Link source paper as an edition of target
     linkAsEdition.mutate({
