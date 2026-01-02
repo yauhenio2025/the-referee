@@ -3085,9 +3085,12 @@ async def link_paper_as_edition(
         )
         citations_moved = move_result.rowcount
 
-        # Update the new edition's harvested_citation_count
+        # Update the new edition's harvested_citation_count and citation_count
         if citations_moved > 0:
             edition.harvested_citation_count = citations_moved
+            # If citation_count is 0, use migrated citations as baseline estimate
+            if edition.citation_count == 0:
+                edition.citation_count = citations_moved + citations_deleted_duplicates
 
         # Now safe to soft-delete the source paper
         source_paper.deleted_at = datetime.utcnow()
