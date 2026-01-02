@@ -16,7 +16,7 @@ export default function PaperList({ onSelectPaper }) {
   const [batchResolving, setBatchResolving] = useState(false)
   const [selectedPapers, setSelectedPapers] = useState(new Set())
   const [addToCollectionPaper, setAddToCollectionPaper] = useState(null)
-  const [showProcessed, setShowProcessed] = useState(false)
+  const [showProcessed, setShowProcessed] = useState(true)
   const [batchAddToCollection, setBatchAddToCollection] = useState(false)
 
   // Drag-drop state for linking editions
