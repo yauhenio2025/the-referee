@@ -197,9 +197,8 @@ body {
 /* Main */
 .main {
   flex: 1;
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 1.5rem 3rem;
+  max-width: none;
   width: 100%;
 }
 
@@ -7066,4 +7065,156 @@ a.paper-title-minimal:hover {
 .paper-list {
   width: 100%;
   max-width: none;
+}
+
+/* View controls - page size and view mode */
+.view-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.page-size-selector {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.page-size-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.page-size-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.page-size-btn.active {
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.view-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.view-btn {
+  padding: 4px 8px;
+  font-size: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.view-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.view-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+/* List view styles */
+.papers.list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.papers.list-view .paper-card-minimal {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: 4px;
+}
+
+.papers.list-view .paper-select-area {
+  flex-shrink: 0;
+}
+
+.papers.list-view .paper-content {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.papers.list-view .paper-title-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.papers.list-view .paper-title-minimal {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.papers.list-view .paper-meta-minimal {
+  display: none;
+}
+
+.papers.list-view .paper-stats-minimal {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.papers.list-view .paper-badges-minimal {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.papers.list-view .paper-abstract-minimal {
+  display: none;
+}
+
+.papers.list-view .paper-actions-minimal {
+  flex-shrink: 0;
+  flex-direction: row;
+  gap: 4px;
+}
+
+/* Card view on large screens - responsive grid */
+.papers.card-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (min-width: 1400px) {
+  .papers.card-view {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (min-width: 2000px) {
+  .papers.card-view {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }

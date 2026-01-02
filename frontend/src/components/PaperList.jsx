@@ -25,7 +25,10 @@ export default function PaperList({ onSelectPaper }) {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
-  const perPage = 25
+  const [perPage, setPerPage] = useState(25)
+
+  // View mode: 'cards' or 'list'
+  const [viewMode, setViewMode] = useState('cards')
 
   // Fetch collections for badge display
   const { data: collections = [] } = useQuery({
@@ -512,6 +515,12 @@ export default function PaperList({ onSelectPaper }) {
     return { collection, dossier }
   }
 
+  // Handle page size change - reset to page 1
+  const handlePerPageChange = (newPerPage) => {
+    setPerPage(newPerPage)
+    setCurrentPage(1)
+  }
+
   return (
     <div className="paper-list">
       {/* Minimal header with count and controls */}
@@ -528,6 +537,37 @@ export default function PaperList({ onSelectPaper }) {
               <span>+{processedCount} processed</span>
             </label>
           )}
+        </div>
+
+        {/* View controls - page size and view mode */}
+        <div className="view-controls">
+          <div className="page-size-selector">
+            {[25, 50, 100].map(size => (
+              <button
+                key={size}
+                onClick={() => handlePerPageChange(size)}
+                className={`page-size-btn ${perPage === size ? 'active' : ''}`}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+          <div className="view-mode-toggle">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`view-btn ${viewMode === 'cards' ? 'active' : ''}`}
+              title="Card view"
+            >
+              ▦
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`view-btn ${viewMode === 'list' ? 'active' : ''}`}
+              title="List view"
+            >
+              ≡
+            </button>
+          </div>
         </div>
 
         {/* Batch actions - only show when selected */}
@@ -596,7 +636,7 @@ export default function PaperList({ onSelectPaper }) {
         </div>
       )}
 
-      <div className="papers">
+      <div className={`papers ${viewMode === 'list' ? 'list-view' : 'card-view'}`}>
         {visiblePapers.map((paper) => {
           const badge = getStatusBadge(paper.status)
           const isResolving = resolvingId === paper.id
@@ -698,7 +738,7 @@ export default function PaperList({ onSelectPaper }) {
                       📁 {collectionInfo.dossier.name?.substring(0, 20)}
                     </span>
                   )}
-                  {collectionInfo?.collection && !collectionInfo?.dossier && (
+                  {collectionInfo?.collection && (
                     <span className="badge-mini collection" title={collectionInfo.collection?.name}>
                       {collectionInfo.collection?.name?.substring(0, 12)}
                     </span>
