@@ -240,8 +240,13 @@ export default function PaperList({ onSelectPaper }) {
   })
 
   // Add paper to collection/dossier
-  const handleAddToCollection = async (selection) => {
+  // DossierSelectModal returns an array of selections
+  const handleAddToCollection = async (selections) => {
     if (!addToCollectionPaper) return
+    // Take the first selection (primary dossier)
+    const selection = Array.isArray(selections) ? selections[0] : selections
+    if (!selection) return
+
     try {
       const paperId = addToCollectionPaper.id
       if (selection.collectionId) {
@@ -267,9 +272,13 @@ export default function PaperList({ onSelectPaper }) {
   }
 
   // Batch add to collection
-  const handleBatchAddToCollection = async (selection) => {
+  // DossierSelectModal returns an array of selections
+  const handleBatchAddToCollection = async (selections) => {
     const paperIds = Array.from(selectedPapers)
     if (paperIds.length === 0) return
+    // Take the first selection (primary dossier)
+    const selection = Array.isArray(selections) ? selections[0] : selections
+    if (!selection) return
 
     try {
       await api.batchAssignToCollection(
