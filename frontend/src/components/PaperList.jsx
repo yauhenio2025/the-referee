@@ -58,6 +58,20 @@ export default function PaperList({ onSelectPaper }) {
     },
   })
 
+  // Fetch active jobs to show processing indicator on cards
+  const { data: activeJobsData } = useQuery({
+    queryKey: ['active-jobs'],
+    queryFn: () => api.listJobs({ status: 'running,pending' }),
+    refetchInterval: 5000, // Poll every 5 seconds
+  })
+
+  // Build a set of paper IDs that have active jobs
+  const papersWithActiveJobs = new Set(
+    (activeJobsData?.jobs || [])
+      .filter(job => job.paper_id)
+      .map(job => job.paper_id)
+  )
+
   const papers = papersData?.papers || []
   const pagination = papersData ? {
     total: papersData.total,
@@ -232,7 +246,8 @@ export default function PaperList({ onSelectPaper }) {
       api.linkPaperAsEdition(sourcePaperId, targetPaperId, true),
     onSuccess: (data) => {
       queryClient.invalidateQueries(['papers'])
-      toast.success(data.message || 'Linked as edition')
+      queryClient.invalidateQueries(['active-jobs'])
+      toast.success(data.message || 'Linked as edition - paper moved to editions')
     },
     onError: (error) => {
       toast.error(`Failed to link: ${error.message}`)
@@ -454,9 +469,9 @@ export default function PaperList({ onSelectPaper }) {
 
   const papersNeedingReconciliation = papers?.filter(p => p.status === 'needs_reconciliation') || []
 
-  if (isLoading) return <div className="loading">Loading papers...</div>
-  if (error) return <div className="error">Error loading papers: {error.message}</div>
-  if (!papers?.length) return <div className="empty">No papers yet. Add one above!</div>
+  if (isLoading) return <div className="paper-list"><div className="loading">Loading papers...</div></div>
+  if (error) return <div className="paper-list"><div className="error">Error loading papers: {error.message}</div></div>
+  if (!papers?.length) return <div className="paper-list"><div className="empty">No papers yet. Add one above!</div></div>
 
   const getStatusBadge = (status) => {
     const badges = {
@@ -483,8 +498,11 @@ export default function PaperList({ onSelectPaper }) {
     return paper.collection_id && paper.total_harvested_citations > 0
   }
 
-  const visiblePapers = papers?.filter(p => showProcessed || !isProcessed(p)) || []
-  const processedCount = papers?.filter(isProcessed).length || 0
+  // Filter out papers that have been linked as editions (they now appear under the canonical paper)
+  const nonLinkedPapers = papers?.filter(p => !p.parent_paper_id) || []
+  const visiblePapers = nonLinkedPapers.filter(p => showProcessed || !isProcessed(p))
+  const processedCount = nonLinkedPapers.filter(isProcessed).length || 0
+  const linkedCount = papers?.filter(p => p.parent_paper_id).length || 0
   const selectedCount = selectedPapers.size
 
   const getCollectionInfo = (paper) => {
@@ -673,12 +691,20 @@ export default function PaperList({ onSelectPaper }) {
                   </div>
                 )}
 
-                {/* Badges row */}
+                {/* Badges row - dossier first (more important), then collection */}
                 <div className="paper-badges-minimal">
-                  {collectionInfo && (
+                  {collectionInfo?.dossier && (
+                    <span className="badge-mini dossier" title={`Dossier: ${collectionInfo.dossier.name}`}>
+                      📁 {collectionInfo.dossier.name?.substring(0, 20)}
+                    </span>
+                  )}
+                  {collectionInfo?.collection && !collectionInfo?.dossier && (
                     <span className="badge-mini collection" title={collectionInfo.collection?.name}>
                       {collectionInfo.collection?.name?.substring(0, 12)}
                     </span>
+                  )}
+                  {papersWithActiveJobs.has(paper.id) && (
+                    <span className="badge-mini processing">⏳ processing</span>
                   )}
                   {hasForeignEd && (
                     <span className="badge-mini foreign">foreign ed. needed</span>

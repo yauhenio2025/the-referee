@@ -7039,3 +7039,31 @@ a.paper-title-minimal:hover {
   pointer-events: none;
   z-index: 10;
 }
+
+/* Dossier badge - more prominent than collection */
+.badge-mini.dossier {
+  background: rgba(168, 85, 247, 0.25);
+  color: #c084fc;
+  font-weight: 600;
+  padding: 3px 10px;
+  font-size: 0.7rem;
+}
+
+/* Processing indicator badge */
+.badge-mini.processing {
+  background: rgba(59, 130, 246, 0.25);
+  color: #60a5fa;
+  font-weight: 500;
+  animation: pulse-processing 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-processing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Paper list container - ensure full width */
+.paper-list {
+  width: 100%;
+  max-width: none;
+}

@@ -40,7 +40,7 @@ from sqlalchemy.orm import sessionmaker
 PAPER_ID = 71
 EDITION_ID = 1073
 SCHOLAR_ID = "15603705792201309427"
-TARGET_YEAR = 2011
+TARGET_YEAR = 2025
 MAX_RESULTS = 950  # Stay under 1000
 
 # Author initials ordered by approximate frequency in academic publishing
