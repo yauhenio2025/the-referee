@@ -1419,10 +1419,24 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     # Determine start page for this year
                     start_page_for_this_year = 0
                     if resume_year == year and resume_page_for_year > 0:
+                        # Resume from saved state (preferred - exact page number)
                         start_page_for_this_year = resume_page_for_year
-                        log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from page {start_page_for_this_year})...")
+                        log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from saved state page {start_page_for_this_year})...")
                     else:
-                        log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
+                        # Check harvest_target for this year - if we have actual_count, resume from there
+                        # This handles the case where job was interrupted without saving resume state
+                        target_result = await db.execute(
+                            select(HarvestTarget)
+                            .where(HarvestTarget.edition_id == edition.id)
+                            .where(HarvestTarget.year == year)
+                        )
+                        existing_target = target_result.scalar_one_or_none()
+                        if existing_target and existing_target.actual_count > 0:
+                            # Calculate resume page from actual_count (10 citations per page)
+                            start_page_for_this_year = existing_target.actual_count // 10
+                            log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from calculated page {start_page_for_this_year} based on {existing_target.actual_count} existing citations)...")
+                        else:
+                            log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
 
                     # STEP 1: Quick count check - fetch just first page to see total
                     count_result = await scholar_service.get_cited_by(
