@@ -758,6 +758,23 @@ class RefereeAPI {
       method: 'POST',
     });
   }
+
+  /**
+   * Execute an AI-recommended action on an edition
+   * @param {number} editionId - Edition ID
+   * @param {string} actionType - Action type (RESET, RESUME, PARTITION_REHARVEST, MARK_COMPLETE)
+   * @param {Object} specificParams - Parameters for the action
+   * @returns {Promise<Object>} Execution result
+   */
+  async executeAIAction(editionId, actionType, specificParams = {}) {
+    return this.request(`/api/editions/${editionId}/execute-ai-action`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action_type: actionType,
+        specific_params: specificParams
+      }),
+    });
+  }
 }
 
 export const api = new RefereeAPI();

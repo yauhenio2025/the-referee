@@ -45,8 +45,33 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
 }
 
 // AI Diagnosis Modal Component
-const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error }) => {
+const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error, editionId, onActionExecuted }) => {
+  const [isExecuting, setIsExecuting] = useState(false)
+  const [actionResult, setActionResult] = useState(null)
+  const [actionError, setActionError] = useState(null)
+
   if (!isOpen) return null
+
+  const handleExecuteAction = async () => {
+    if (!diagnosisData?.analysis?.recommended_action || !editionId) return
+
+    const { action_type, specific_params } = diagnosisData.analysis.recommended_action
+    setIsExecuting(true)
+    setActionResult(null)
+    setActionError(null)
+
+    try {
+      const result = await api.executeAIAction(editionId, action_type, specific_params || {})
+      setActionResult(result)
+      // Notify parent to refresh data
+      onActionExecuted?.()
+    } catch (e) {
+      console.error('Action execution failed:', e)
+      setActionError(e.message || 'Action failed')
+    } finally {
+      setIsExecuting(false)
+    }
+  }
 
   const getRootCauseColor = (rootCause) => {
     switch (rootCause) {
@@ -138,14 +163,40 @@ const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error }) 
                   {diagnosisData.analysis.recommended_action && (
                     <div className="diagnosis-section recommended-action">
                       <h3>💡 Recommended Action</h3>
-                      <div className="action-type-badge">
-                        {diagnosisData.analysis.recommended_action.action_type}
+                      <div className="action-header">
+                        <div className="action-type-badge">
+                          {diagnosisData.analysis.recommended_action.action_type}
+                        </div>
+                        <button
+                          className="btn-execute-action"
+                          onClick={handleExecuteAction}
+                          disabled={isExecuting || actionResult?.success}
+                        >
+                          {isExecuting ? '⏳ Executing...' :
+                           actionResult?.success ? '✅ Done' :
+                           `▶️ Execute ${diagnosisData.analysis.recommended_action.action_type}`}
+                        </button>
                       </div>
                       <p className="action-description">{diagnosisData.analysis.recommended_action.action_description}</p>
                       {diagnosisData.analysis.recommended_action.specific_params && (
                         <div className="action-params">
                           <strong>Parameters:</strong>
                           <pre>{JSON.stringify(diagnosisData.analysis.recommended_action.specific_params, null, 2)}</pre>
+                        </div>
+                      )}
+
+                      {/* Action Result */}
+                      {actionResult && (
+                        <div className="action-result success">
+                          <strong>✅ Action executed successfully!</strong>
+                          <p>{actionResult.message}</p>
+                          {actionResult.job_id && <p>Job #{actionResult.job_id} has been queued.</p>}
+                        </div>
+                      )}
+                      {actionError && (
+                        <div className="action-result error">
+                          <strong>❌ Action failed:</strong>
+                          <p>{actionError}</p>
                         </div>
                       )}
                     </div>
@@ -197,7 +248,7 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   const [restartingIds, setRestartingIds] = useState(new Set())
   const [markingIds, setMarkingIds] = useState(new Set())
   const [diagnosingIds, setDiagnosingIds] = useState(new Set())
-  const [diagnosisModal, setDiagnosisModal] = useState({ isOpen: false, data: null, isLoading: false, error: null })
+  const [diagnosisModal, setDiagnosisModal] = useState({ isOpen: false, data: null, isLoading: false, error: null, editionId: null })
 
   if (!alerts || alerts.length === 0) return null
 
@@ -331,14 +382,14 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
 
   const handleDiagnose = async (editionId) => {
     setDiagnosingIds(prev => new Set([...prev, editionId]))
-    setDiagnosisModal({ isOpen: true, data: null, isLoading: true, error: null })
+    setDiagnosisModal({ isOpen: true, data: null, isLoading: true, error: null, editionId })
 
     try {
       const result = await api.aiDiagnoseEdition(editionId)
-      setDiagnosisModal({ isOpen: true, data: result, isLoading: false, error: null })
+      setDiagnosisModal({ isOpen: true, data: result, isLoading: false, error: null, editionId })
     } catch (e) {
       console.error('AI diagnosis failed:', e)
-      setDiagnosisModal({ isOpen: true, data: null, isLoading: false, error: e.message })
+      setDiagnosisModal({ isOpen: true, data: null, isLoading: false, error: e.message, editionId })
     } finally {
       setDiagnosingIds(prev => {
         const newSet = new Set(prev)
@@ -349,7 +400,12 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   }
 
   const closeDiagnosisModal = () => {
-    setDiagnosisModal({ isOpen: false, data: null, isLoading: false, error: null })
+    setDiagnosisModal({ isOpen: false, data: null, isLoading: false, error: null, editionId: null })
+  }
+
+  const handleActionExecuted = () => {
+    // Refresh dashboard data after executing an action
+    onRefresh?.()
   }
 
   return (
@@ -360,6 +416,8 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
         diagnosisData={diagnosisModal.data}
         isLoading={diagnosisModal.isLoading}
         error={diagnosisModal.error}
+        editionId={diagnosisModal.editionId}
+        onActionExecuted={handleActionExecuted}
       />
     <div className="dashboard-alerts">
       <div className="alerts-header">

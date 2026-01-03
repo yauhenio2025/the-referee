@@ -4075,6 +4075,181 @@ async def restart_all_stalled_papers(
     return await restart_stalled_papers(request, db)
 
 
+# ============== AI Diagnosis Actions ==============
+
+class ExecuteAIActionRequest(BaseModel):
+    action_type: str  # RESET, RESUME, PARTITION_REHARVEST, MARK_COMPLETE
+    specific_params: dict = {}  # start_year, start_page, keep_completed_years, mode, continue_backwards_to
+
+class ExecuteAIActionResponse(BaseModel):
+    success: bool
+    action_type: str
+    edition_id: int
+    message: str
+    job_id: int = None
+    resume_state: dict = None
+
+@app.post("/api/editions/{edition_id}/execute-ai-action", response_model=ExecuteAIActionResponse)
+async def execute_ai_action(
+    edition_id: int,
+    request: ExecuteAIActionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Execute an action recommended by AI diagnosis.
+
+    Supported action types:
+    - RESET: Reset resume state to specific year/page and queue new job
+    - RESUME: Just queue a new harvest job (simple restart)
+    - PARTITION_REHARVEST: Reset overflow years and queue partition harvest
+    - MARK_COMPLETE: Mark edition as complete (gap is GS fault)
+    """
+    from .services.job_worker import create_extract_citations_job
+
+    logger.info(f"Executing AI action {request.action_type} on edition {edition_id}")
+    logger.info(f"Params: {request.specific_params}")
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get paper for title
+    paper_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
+    paper = paper_result.scalar_one_or_none()
+
+    action_type = request.action_type.upper()
+    params = request.specific_params
+
+    if action_type == "RESET":
+        # Build new resume state
+        start_year = params.get("start_year")
+        start_page = params.get("start_page", 0)
+        keep_completed_years = params.get("keep_completed_years", [])
+        mode = params.get("mode", "year_by_year")
+        continue_backwards_to = params.get("continue_backwards_to")
+
+        new_resume_state = {
+            "mode": mode,
+            "current_year": start_year,
+            "current_page": start_page,
+            "completed_years": sorted(keep_completed_years, reverse=True) if keep_completed_years else [],
+            "ai_reset": {
+                "reset_at": datetime.utcnow().isoformat(),
+                "start_year": start_year,
+                "continue_backwards_to": continue_backwards_to
+            }
+        }
+
+        # Update edition
+        edition.harvest_resume_state = json.dumps(new_resume_state)
+        edition.harvest_stall_count = 0
+        edition.harvest_complete = False
+        edition.harvest_complete_reason = None
+        await db.commit()
+
+        # Queue new harvest job
+        job_id = await create_extract_citations_job(
+            db,
+            edition.paper_id,
+            force_full_refresh=False
+        )
+
+        return ExecuteAIActionResponse(
+            success=True,
+            action_type=action_type,
+            edition_id=edition_id,
+            message=f"Reset resume state to year {start_year}, page {start_page}. Queued job #{job_id}.",
+            job_id=job_id,
+            resume_state=new_resume_state
+        )
+
+    elif action_type == "RESUME":
+        # Simple restart - just reset stall count and queue job
+        edition.harvest_stall_count = 0
+        edition.harvest_complete = False
+        edition.harvest_complete_reason = None
+        await db.commit()
+
+        job_id = await create_extract_citations_job(
+            db,
+            edition.paper_id,
+            force_full_refresh=False
+        )
+
+        return ExecuteAIActionResponse(
+            success=True,
+            action_type=action_type,
+            edition_id=edition_id,
+            message=f"Resumed harvest. Queued job #{job_id}.",
+            job_id=job_id
+        )
+
+    elif action_type == "PARTITION_REHARVEST":
+        # Reset overflow years from completed_years
+        overflow_years = params.get("overflow_years", [])
+
+        resume_state = {}
+        if edition.harvest_resume_state:
+            try:
+                resume_state = json.loads(edition.harvest_resume_state)
+            except json.JSONDecodeError:
+                resume_state = {}
+
+        completed_years = set(resume_state.get("completed_years", []))
+        completed_years -= set(overflow_years)
+
+        resume_state["completed_years"] = sorted(list(completed_years), reverse=True)
+        resume_state["mode"] = "year_by_year"
+        resume_state["overflow_reharvest"] = {
+            "years_reset": overflow_years,
+            "reset_at": datetime.utcnow().isoformat()
+        }
+
+        edition.harvest_resume_state = json.dumps(resume_state)
+        edition.harvest_stall_count = 0
+        edition.harvest_complete = False
+        edition.harvest_complete_reason = None
+        await db.commit()
+
+        job_id = await create_extract_citations_job(
+            db,
+            edition.paper_id,
+            force_full_refresh=False
+        )
+
+        return ExecuteAIActionResponse(
+            success=True,
+            action_type=action_type,
+            edition_id=edition_id,
+            message=f"Reset {len(overflow_years)} overflow years for partition reharvest. Queued job #{job_id}.",
+            job_id=job_id,
+            resume_state=resume_state
+        )
+
+    elif action_type == "MARK_COMPLETE":
+        # Mark as complete - gap is GS's fault
+        reason = params.get("reason", "ai_diagnosis_gs_fault")
+        edition.harvest_complete = True
+        edition.harvest_complete_reason = reason
+        edition.harvest_stall_count = 0
+        await db.commit()
+
+        return ExecuteAIActionResponse(
+            success=True,
+            action_type=action_type,
+            edition_id=edition_id,
+            message=f"Marked edition as complete (reason: {reason})."
+        )
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown action type: {action_type}. Supported: RESET, RESUME, PARTITION_REHARVEST, MARK_COMPLETE"
+        )
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
