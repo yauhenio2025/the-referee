@@ -4386,6 +4386,110 @@ async def sync_harvest_targets(edition_id: int, db: AsyncSession = Depends(get_d
     )
 
 
+# ============== Refresh Expected Counts from GS ==============
+
+class RefreshExpectedCountsRequest(BaseModel):
+    start_year: int
+    end_year: int
+    only_zero: bool = True  # Only refresh years with expected_count=0
+
+class RefreshExpectedCountsResponse(BaseModel):
+    success: bool
+    edition_id: int
+    years_refreshed: int
+    results: list[dict]
+    message: str
+
+@app.post("/api/editions/{edition_id}/refresh-expected-counts", response_model=RefreshExpectedCountsResponse)
+async def refresh_expected_counts(edition_id: int, request: RefreshExpectedCountsRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Query Google Scholar to refresh expected_count for harvest_targets.
+
+    This fixes the issue where years have expected_count=0 because they were
+    never properly scanned. It queries GS for each year and updates the
+    expected_count in harvest_targets.
+    """
+    from app.models import HarvestTarget
+    from app.services.scholar_search import ScholarSearchService
+    import asyncio
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    scholar_id = edition.cluster_id or edition.scholar_id
+    if not scholar_id:
+        raise HTTPException(status_code=400, detail="Edition has no scholar_id/cluster_id")
+
+    # Get harvest_targets for the year range
+    query = select(HarvestTarget).where(
+        HarvestTarget.edition_id == edition_id,
+        HarvestTarget.year >= request.start_year,
+        HarvestTarget.year <= request.end_year
+    )
+    if request.only_zero:
+        query = query.where(HarvestTarget.expected_count == 0)
+
+    result = await db.execute(query.order_by(HarvestTarget.year))
+    targets = result.scalars().all()
+
+    if not targets:
+        return RefreshExpectedCountsResponse(
+            success=True,
+            edition_id=edition_id,
+            years_refreshed=0,
+            results=[],
+            message="No years to refresh (all have expected_count > 0)"
+        )
+
+    # Query GS for each year
+    scholar_service = ScholarSearchService()
+    results = []
+    years_refreshed = 0
+
+    for target in targets:
+        try:
+            expected = await scholar_service.get_year_citation_count(scholar_id, target.year)
+            if expected is not None:
+                old_expected = target.expected_count
+                target.expected_count = expected
+                # Update status if now has citations to harvest
+                if expected > target.actual_count and target.status == 'complete':
+                    target.status = 'incomplete'
+                years_refreshed += 1
+                results.append({
+                    "year": target.year,
+                    "old_expected": old_expected,
+                    "new_expected": expected,
+                    "actual": target.actual_count,
+                    "status": target.status
+                })
+            else:
+                results.append({
+                    "year": target.year,
+                    "error": "Failed to get count from GS"
+                })
+            # Rate limit - wait between requests
+            await asyncio.sleep(2)
+        except Exception as e:
+            results.append({
+                "year": target.year,
+                "error": str(e)
+            })
+
+    await db.commit()
+
+    return RefreshExpectedCountsResponse(
+        success=True,
+        edition_id=edition_id,
+        years_refreshed=years_refreshed,
+        results=results,
+        message=f"Refreshed {years_refreshed}/{len(targets)} years from GS"
+    )
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
