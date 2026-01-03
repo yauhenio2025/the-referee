@@ -4150,7 +4150,7 @@ async def execute_ai_action(
         await db.commit()
 
         # Queue new harvest job
-        job_id = await create_extract_citations_job(
+        job = await create_extract_citations_job(
             db,
             edition.paper_id
         )
@@ -4159,8 +4159,8 @@ async def execute_ai_action(
             success=True,
             action_type=action_type,
             edition_id=edition_id,
-            message=f"Reset resume state to year {start_year}, page {start_page}. Queued job #{job_id}.",
-            job_id=job_id,
+            message=f"Reset resume state to year {start_year}, page {start_page}. Queued job #{job.id}.",
+            job_id=job.id,
             resume_state=new_resume_state
         )
 
@@ -4171,7 +4171,7 @@ async def execute_ai_action(
         edition.harvest_complete_reason = None
         await db.commit()
 
-        job_id = await create_extract_citations_job(
+        job = await create_extract_citations_job(
             db,
             edition.paper_id
         )
@@ -4180,8 +4180,8 @@ async def execute_ai_action(
             success=True,
             action_type=action_type,
             edition_id=edition_id,
-            message=f"Resumed harvest. Queued job #{job_id}.",
-            job_id=job_id
+            message=f"Resumed harvest. Queued job #{job.id}.",
+            job_id=job.id
         )
 
     elif action_type == "PARTITION_REHARVEST":
@@ -4211,7 +4211,7 @@ async def execute_ai_action(
         edition.harvest_complete_reason = None
         await db.commit()
 
-        job_id = await create_extract_citations_job(
+        job = await create_extract_citations_job(
             db,
             edition.paper_id
         )
@@ -4220,8 +4220,8 @@ async def execute_ai_action(
             success=True,
             action_type=action_type,
             edition_id=edition_id,
-            message=f"Reset {len(overflow_years)} overflow years for partition reharvest. Queued job #{job_id}.",
-            job_id=job_id,
+            message=f"Reset {len(overflow_years)} overflow years for partition reharvest. Queued job #{job.id}.",
+            job_id=job.id,
             resume_state=resume_state
         )
 
