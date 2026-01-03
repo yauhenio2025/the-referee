@@ -3390,8 +3390,8 @@ MAX_CONCURRENT_JOBS = 20  # Must match job_worker.py
 @app.get("/api/dashboard/harvest-stats", response_model=HarvestDashboardResponse)
 async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
     """Get comprehensive harvesting dashboard data"""
-    from datetime import timezone
-    now = datetime.now(timezone.utc)
+    # Use naive UTC datetimes to match database TIMESTAMP WITHOUT TIME ZONE columns
+    now = datetime.utcnow()
     one_hour_ago = now - timedelta(hours=1)
     six_hours_ago = now - timedelta(hours=6)
     twenty_four_hours_ago = now - timedelta(hours=24)
@@ -3547,13 +3547,10 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
         if citations_saved_job + duplicates_job > 0:
             duplicate_rate = duplicates_job / (citations_saved_job + duplicates_job)
 
-        # Calculate running time
+        # Calculate running time (both now and started_at are naive UTC)
         running_minutes = 0
         if job.started_at:
-            started = job.started_at
-            if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
-            running_minutes = int((now - started).total_seconds() / 60)
+            running_minutes = int((now - job.started_at).total_seconds() / 60)
 
         active_harvests.append(ActiveHarvestInfo(
             paper_id=paper.id,
@@ -3721,8 +3718,8 @@ async def get_job_history(
     db: AsyncSession = Depends(get_db)
 ):
     """Get paginated job history with optional filters"""
-    from datetime import timezone
-    now = datetime.now(timezone.utc)
+    # Use naive UTC datetimes to match database TIMESTAMP WITHOUT TIME ZONE columns
+    now = datetime.utcnow()
     since = now - timedelta(hours=hours)
 
     # Base query
