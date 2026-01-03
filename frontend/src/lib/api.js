@@ -695,6 +695,26 @@ class RefereeAPI {
     const queryString = params.toString();
     return this.request(`/api/dashboard/job-history${queryString ? '?' + queryString : ''}`);
   }
+
+  /**
+   * Restart stalled papers (reset stall count and create new harvest jobs)
+   * @param {number[]} editionIds - Array of edition IDs to restart
+   */
+  async restartStalledPapers(editionIds) {
+    return this.request('/api/dashboard/restart-stalled', {
+      method: 'POST',
+      body: JSON.stringify({ edition_ids: editionIds }),
+    });
+  }
+
+  /**
+   * Restart ALL stalled papers
+   */
+  async restartAllStalledPapers() {
+    return this.request('/api/dashboard/restart-all-stalled', {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new RefereeAPI();

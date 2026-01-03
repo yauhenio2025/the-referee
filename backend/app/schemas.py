@@ -752,9 +752,15 @@ class DashboardAlert(BaseModel):
     type: str  # high_duplicate_rate, stalled_paper, repeated_failures, etc.
     paper_id: Optional[int] = None
     paper_title: Optional[str] = None
+    edition_id: Optional[int] = None
     job_id: Optional[int] = None
     value: Optional[float] = None
     message: str
+    # Harvest stats for stalled papers
+    harvested_count: Optional[int] = None
+    expected_count: Optional[int] = None
+    gap_remaining: Optional[int] = None
+    stall_count: Optional[int] = None
 
 
 class HarvestDashboardResponse(BaseModel):

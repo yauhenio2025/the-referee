@@ -3643,24 +3643,34 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
                 message=f"{int(harvest.duplicate_rate * 100)}% duplicates - possible resume bug",
             ))
 
-    # Alert: Stalled papers (stall_count > 2)
+    # Alert: Stalled papers (stall_count > 2) - no limit, show all stalled
     stalled_editions_result = await db.execute(
         select(Edition).where(
             Edition.harvest_stall_count > 2,
             Edition.selected == True
-        ).limit(10)
+        ).order_by(Edition.harvest_stall_count.desc())
     )
     stalled_editions = stalled_editions_result.scalars().all()
     for edition in stalled_editions:
         paper_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
         paper = paper_result.scalar_one_or_none()
         if paper:
+            # Get harvest stats
+            harvested = paper.total_harvested_citations or 0
+            expected = edition.citation_count or 0
+            gap = max(0, expected - harvested)
+
             alerts.append(DashboardAlert(
                 type="stalled_paper",
                 paper_id=paper.id,
                 paper_title=paper.title[:60] if paper.title else f"Paper #{paper.id}",
+                edition_id=edition.id,
                 value=float(edition.harvest_stall_count),
                 message=f"{edition.harvest_stall_count} consecutive zero-progress jobs",
+                harvested_count=harvested,
+                expected_count=expected,
+                gap_remaining=gap,
+                stall_count=edition.harvest_stall_count,
             ))
 
     # Alert: Long-running jobs (> 45 min)
@@ -3784,6 +3794,107 @@ async def get_job_history(
         total=total,
         has_more=offset + len(items) < total,
     )
+
+
+class RestartStalledRequest(BaseModel):
+    """Request to restart stalled papers"""
+    edition_ids: List[int]
+
+
+class RestartStalledResponse(BaseModel):
+    """Response from restarting stalled papers"""
+    restarted: int
+    jobs_created: List[int]
+    errors: List[str]
+
+
+@app.post("/api/dashboard/restart-stalled", response_model=RestartStalledResponse)
+async def restart_stalled_papers(
+    request: RestartStalledRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reset stall count and create new harvest jobs for stalled editions"""
+    from .services.job_worker import create_extract_citations_job
+
+    restarted = 0
+    jobs_created = []
+    errors = []
+
+    for edition_id in request.edition_ids:
+        try:
+            # Get edition
+            edition_result = await db.execute(
+                select(Edition).where(Edition.id == edition_id)
+            )
+            edition = edition_result.scalar_one_or_none()
+
+            if not edition:
+                errors.append(f"Edition {edition_id} not found")
+                continue
+
+            # Reset stall count
+            old_stall = edition.harvest_stall_count
+            edition.harvest_stall_count = 0
+            await db.flush()
+
+            # Check for existing running job
+            running_job_result = await db.execute(
+                select(Job).where(
+                    Job.paper_id == edition.paper_id,
+                    Job.job_type == "extract_citations",
+                    Job.status.in_(["pending", "running"])
+                )
+            )
+            if running_job_result.scalar_one_or_none():
+                errors.append(f"Paper {edition.paper_id} already has a running job")
+                restarted += 1  # Still count as restarted since we reset stall count
+                continue
+
+            # Create new harvest job
+            job_id = await create_extract_citations_job(
+                db,
+                edition.paper_id,
+                force_full_refresh=False  # Resume from where we left off
+            )
+            if job_id:
+                jobs_created.append(job_id)
+                restarted += 1
+                logger.info(f"Restarted edition {edition_id} (paper {edition.paper_id}), "
+                           f"stall count {old_stall} -> 0, created job {job_id}")
+            else:
+                errors.append(f"Failed to create job for paper {edition.paper_id}")
+                restarted += 1  # Still count since we reset stall count
+
+        except Exception as e:
+            errors.append(f"Error processing edition {edition_id}: {str(e)}")
+            logger.error(f"Error restarting edition {edition_id}: {e}")
+
+    await db.commit()
+
+    return RestartStalledResponse(
+        restarted=restarted,
+        jobs_created=jobs_created,
+        errors=errors
+    )
+
+
+@app.post("/api/dashboard/restart-all-stalled", response_model=RestartStalledResponse)
+async def restart_all_stalled_papers(
+    db: AsyncSession = Depends(get_db)
+):
+    """Reset stall count and create harvest jobs for ALL stalled editions"""
+    # Get all stalled editions
+    stalled_result = await db.execute(
+        select(Edition.id).where(
+            Edition.harvest_stall_count > 2,
+            Edition.selected == True
+        )
+    )
+    edition_ids = [row[0] for row in stalled_result.all()]
+
+    # Reuse the batch restart endpoint
+    request = RestartStalledRequest(edition_ids=edition_ids)
+    return await restart_stalled_papers(request, db)
 
 
 # ============== Bibliography Parsing ==============

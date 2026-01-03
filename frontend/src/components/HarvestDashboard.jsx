@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 
@@ -44,9 +44,17 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
   )
 }
 
-// Alerts Section Component
-const AlertsSection = ({ alerts, onPaperClick }) => {
+// Alerts Section Component with restart functionality
+const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
+  const [selectedEditions, setSelectedEditions] = useState(new Set())
+  const [isRestarting, setIsRestarting] = useState(false)
+  const [restartingIds, setRestartingIds] = useState(new Set())
+
   if (!alerts || alerts.length === 0) return null
+
+  // Filter to only stalled papers (the ones we can restart)
+  const stalledAlerts = alerts.filter(a => a.type === 'stalled_paper' && a.edition_id)
+  const otherAlerts = alerts.filter(a => a.type !== 'stalled_paper' || !a.edition_id)
 
   const getAlertIcon = (type) => {
     switch (type) {
@@ -68,23 +76,181 @@ const AlertsSection = ({ alerts, onPaperClick }) => {
     }
   }
 
+  const toggleSelection = (editionId) => {
+    const newSet = new Set(selectedEditions)
+    if (newSet.has(editionId)) {
+      newSet.delete(editionId)
+    } else {
+      newSet.add(editionId)
+    }
+    setSelectedEditions(newSet)
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedEditions.size === stalledAlerts.length) {
+      setSelectedEditions(new Set())
+    } else {
+      setSelectedEditions(new Set(stalledAlerts.map(a => a.edition_id)))
+    }
+  }
+
+  const handleRestartSingle = async (editionId) => {
+    setRestartingIds(prev => new Set([...prev, editionId]))
+    try {
+      await api.restartStalledPapers([editionId])
+      onRefresh?.()
+    } catch (e) {
+      console.error('Restart failed:', e)
+    } finally {
+      setRestartingIds(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(editionId)
+        return newSet
+      })
+    }
+  }
+
+  const handleRestartSelected = async () => {
+    if (selectedEditions.size === 0) return
+    setIsRestarting(true)
+    try {
+      await api.restartStalledPapers([...selectedEditions])
+      setSelectedEditions(new Set())
+      onRefresh?.()
+    } catch (e) {
+      console.error('Batch restart failed:', e)
+    } finally {
+      setIsRestarting(false)
+    }
+  }
+
+  const handleRestartAll = async () => {
+    setIsRestarting(true)
+    try {
+      await api.restartAllStalledPapers()
+      setSelectedEditions(new Set())
+      onRefresh?.()
+    } catch (e) {
+      console.error('Restart all failed:', e)
+    } finally {
+      setIsRestarting(false)
+    }
+  }
+
   return (
     <div className="dashboard-alerts">
-      <h3 className="dashboard-section-title">Alerts</h3>
-      <div className="alerts-list">
-        {alerts.map((alert, idx) => (
-          <div key={idx} className={`alert-item ${getAlertClass(alert.type)}`}>
-            <span className="alert-icon">{getAlertIcon(alert.type)}</span>
-            <span
-              className="alert-paper clickable-paper"
-              onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
+      <div className="alerts-header">
+        <h3 className="dashboard-section-title">
+          Alerts ({stalledAlerts.length} stalled{otherAlerts.length > 0 ? `, ${otherAlerts.length} other` : ''})
+        </h3>
+        {stalledAlerts.length > 0 && (
+          <div className="alerts-actions">
+            <button
+              className="btn-restart-selected"
+              onClick={handleRestartSelected}
+              disabled={selectedEditions.size === 0 || isRestarting}
             >
-              {alert.paper_title ? `${alert.paper_title.substring(0, 40)}...` : `Paper #${alert.paper_id}`}
-            </span>
-            <span className="alert-message">{alert.message}</span>
+              {isRestarting ? '...' : `Restart Selected (${selectedEditions.size})`}
+            </button>
+            <button
+              className="btn-restart-all"
+              onClick={handleRestartAll}
+              disabled={isRestarting}
+            >
+              {isRestarting ? '...' : 'Restart All'}
+            </button>
           </div>
-        ))}
+        )}
       </div>
+
+      {/* Stalled papers table */}
+      {stalledAlerts.length > 0 && (
+        <table className="alerts-table">
+          <thead>
+            <tr>
+              <th className="col-checkbox">
+                <input
+                  type="checkbox"
+                  checked={selectedEditions.size === stalledAlerts.length && stalledAlerts.length > 0}
+                  onChange={toggleSelectAll}
+                />
+              </th>
+              <th className="col-paper">Paper</th>
+              <th className="col-harvested">Harvested</th>
+              <th className="col-expected">Expected</th>
+              <th className="col-gap">Gap</th>
+              <th className="col-stalls">Stalls</th>
+              <th className="col-action">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stalledAlerts.map((alert) => {
+              const gapPercent = alert.expected_count > 0
+                ? Math.round((alert.gap_remaining / alert.expected_count) * 100)
+                : 0
+              const isSelected = selectedEditions.has(alert.edition_id)
+              const isRestartingThis = restartingIds.has(alert.edition_id)
+
+              return (
+                <tr key={alert.edition_id} className={isSelected ? 'selected' : ''}>
+                  <td className="col-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelection(alert.edition_id)}
+                    />
+                  </td>
+                  <td className="col-paper">
+                    <span
+                      className="clickable-paper"
+                      onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
+                    >
+                      {alert.paper_title ? `${alert.paper_title.substring(0, 35)}...` : `Paper #${alert.paper_id}`}
+                    </span>
+                  </td>
+                  <td className="col-harvested">{(alert.harvested_count || 0).toLocaleString()}</td>
+                  <td className="col-expected">{(alert.expected_count || 0).toLocaleString()}</td>
+                  <td className="col-gap">
+                    <span className={gapPercent > 20 ? 'gap-high' : 'gap-low'}>
+                      {(alert.gap_remaining || 0).toLocaleString()} ({gapPercent}%)
+                    </span>
+                  </td>
+                  <td className="col-stalls">
+                    <span className="stall-badge">{alert.stall_count || 0}</span>
+                  </td>
+                  <td className="col-action">
+                    <button
+                      className="btn-restart-single"
+                      onClick={() => handleRestartSingle(alert.edition_id)}
+                      disabled={isRestartingThis || isRestarting}
+                    >
+                      {isRestartingThis ? '...' : 'Restart'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* Other alerts (non-stalled) */}
+      {otherAlerts.length > 0 && (
+        <div className="alerts-list">
+          {otherAlerts.map((alert, idx) => (
+            <div key={idx} className={`alert-item ${getAlertClass(alert.type)}`}>
+              <span className="alert-icon">{getAlertIcon(alert.type)}</span>
+              <span
+                className="alert-paper clickable-paper"
+                onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
+              >
+                {alert.paper_title ? `${alert.paper_title.substring(0, 40)}...` : `Paper #${alert.paper_id}`}
+              </span>
+              <span className="alert-message">{alert.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -333,11 +499,17 @@ const JobHistorySection = ({ isExpanded, onToggle, onPaperClick }) => {
 // Main Dashboard Component
 export default function HarvestDashboard() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [showCompleted, setShowCompleted] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
 
   const handlePaperClick = (paperId) => {
     navigate(`/paper/${paperId}`)
+  }
+
+  const handleRefresh = () => {
+    // Invalidate dashboard query to trigger immediate refresh
+    queryClient.invalidateQueries({ queryKey: ['harvest-dashboard'] })
   }
 
   const { data, isLoading, error } = useQuery({
@@ -430,7 +602,7 @@ export default function HarvestDashboard() {
       </div>
 
       {/* Alerts */}
-      <AlertsSection alerts={alerts} onPaperClick={handlePaperClick} />
+      <AlertsSection alerts={alerts} onPaperClick={handlePaperClick} onRefresh={handleRefresh} />
 
       {/* Active Harvests */}
       <ActiveHarvestsTable harvests={active_harvests} onPaperClick={handlePaperClick} />
