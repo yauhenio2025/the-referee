@@ -4247,6 +4247,59 @@ async def execute_ai_action(
         )
 
 
+# ============== Add Missing Year Targets ==============
+
+class AddYearTargetsRequest(BaseModel):
+    start_year: int
+    end_year: int
+
+class AddYearTargetsResponse(BaseModel):
+    success: bool
+    edition_id: int
+    years_added: list[int]
+    message: str
+
+@app.post("/api/editions/{edition_id}/add-year-targets", response_model=AddYearTargetsResponse)
+async def add_year_targets(edition_id: int, request: AddYearTargetsRequest, db: AsyncSession = Depends(get_db)):
+    """Add harvest_targets for missing years in a range"""
+    from app.models import HarvestTarget
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get existing years
+    existing = await db.execute(
+        select(HarvestTarget.year).where(HarvestTarget.edition_id == edition_id)
+    )
+    existing_years = set(r[0] for r in existing.fetchall())
+
+    # Add missing years
+    years_added = []
+    for year in range(request.start_year, request.end_year + 1):
+        if year not in existing_years:
+            target = HarvestTarget(
+                edition_id=edition_id,
+                year=year,
+                expected_count=0,
+                actual_count=0,
+                status='pending'
+            )
+            db.add(target)
+            years_added.append(year)
+
+    await db.commit()
+
+    return AddYearTargetsResponse(
+        success=True,
+        edition_id=edition_id,
+        years_added=years_added,
+        message=f"Added {len(years_added)} year targets ({request.start_year}-{request.end_year})"
+    )
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
