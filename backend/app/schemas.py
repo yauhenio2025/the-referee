@@ -761,6 +761,14 @@ class DashboardAlert(BaseModel):
     expected_count: Optional[int] = None
     gap_remaining: Optional[int] = None
     stall_count: Optional[int] = None
+    # Year completion diagnosis - distinguishes GS fault from our fault
+    years_complete: Optional[int] = None  # Years where we've scraped all pages
+    years_incomplete: Optional[int] = None  # Years that need more scraping
+    years_harvesting: Optional[int] = None  # Years still in progress
+    years_total: Optional[int] = None  # Total years with HarvestTargets
+    has_overflow_years: Optional[bool] = None  # Any year with >1000 citations?
+    # Diagnosis: "gs_fault" (all complete, gap is GS data issue) or "needs_scraping" (incomplete years exist)
+    diagnosis: Optional[str] = None
 
 
 class HarvestDashboardResponse(BaseModel):

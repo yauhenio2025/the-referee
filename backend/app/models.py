@@ -182,6 +182,12 @@ class Edition(Base):
     # Used to prevent infinite auto-resume loops when harvest can't progress further
     harvest_stall_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Harvest completion tracking - when we've verified we can't get more citations
+    # This stops auto-resume even if there's a gap (the gap is GS's fault, not ours)
+    harvest_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Reason: "exhausted" (all years complete), "manual" (user marked), "gs_inaccuracy" (verified gap is GS fault)
+    harvest_complete_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default=None)
+
     # Edition merging - when editions are duplicates (same work, different URLs/scholar_ids)
     # The merged edition's citations are pooled into the canonical edition
     # But we keep both scholar_ids for harvesting from both Google Scholar entries

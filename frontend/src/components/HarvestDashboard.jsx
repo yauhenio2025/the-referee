@@ -48,13 +48,19 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
 const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   const [selectedEditions, setSelectedEditions] = useState(new Set())
   const [isRestarting, setIsRestarting] = useState(false)
+  const [isMarking, setIsMarking] = useState(false)
   const [restartingIds, setRestartingIds] = useState(new Set())
+  const [markingIds, setMarkingIds] = useState(new Set())
 
   if (!alerts || alerts.length === 0) return null
 
   // Filter to only stalled papers (the ones we can restart)
   const stalledAlerts = alerts.filter(a => a.type === 'stalled_paper' && a.edition_id)
   const otherAlerts = alerts.filter(a => a.type !== 'stalled_paper' || !a.edition_id)
+
+  // Count GS fault vs needs scraping
+  const gsFaultCount = stalledAlerts.filter(a => a.diagnosis === 'gs_fault').length
+  const needsScrapingCount = stalledAlerts.filter(a => a.diagnosis === 'needs_scraping').length
 
   const getAlertIcon = (type) => {
     switch (type) {
@@ -73,6 +79,15 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
       case 'long_running_job': return 'alert-warning'
       case 'repeated_failures': return 'alert-danger'
       default: return 'alert-warning'
+    }
+  }
+
+  const getDiagnosisLabel = (diagnosis) => {
+    switch (diagnosis) {
+      case 'gs_fault': return { text: 'GS Fault', class: 'diagnosis-gs-fault', tip: 'All years scraped - gap is GS data inaccuracy' }
+      case 'needs_scraping': return { text: 'Incomplete', class: 'diagnosis-needs-scraping', tip: 'Some years not fully scraped yet' }
+      case 'no_data': return { text: 'No Data', class: 'diagnosis-no-data', tip: 'No harvest targets yet - run harvest first' }
+      default: return { text: 'Unknown', class: 'diagnosis-unknown', tip: 'Unknown status' }
     }
   }
 
@@ -137,20 +152,60 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
     }
   }
 
+  const handleMarkCompleteSingle = async (editionId) => {
+    setMarkingIds(prev => new Set([...prev, editionId]))
+    try {
+      await api.markEditionComplete(editionId)
+      onRefresh?.()
+    } catch (e) {
+      console.error('Mark complete failed:', e)
+    } finally {
+      setMarkingIds(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(editionId)
+        return newSet
+      })
+    }
+  }
+
+  const handleMarkCompleteSelected = async () => {
+    if (selectedEditions.size === 0) return
+    setIsMarking(true)
+    try {
+      await api.markEditionsCompleteBatch([...selectedEditions])
+      setSelectedEditions(new Set())
+      onRefresh?.()
+    } catch (e) {
+      console.error('Batch mark complete failed:', e)
+    } finally {
+      setIsMarking(false)
+    }
+  }
+
   return (
     <div className="dashboard-alerts">
       <div className="alerts-header">
         <h3 className="dashboard-section-title">
           Alerts ({stalledAlerts.length} stalled{otherAlerts.length > 0 ? `, ${otherAlerts.length} other` : ''})
+          {gsFaultCount > 0 && <span className="diagnosis-summary diagnosis-gs-fault"> • {gsFaultCount} GS Fault</span>}
+          {needsScrapingCount > 0 && <span className="diagnosis-summary diagnosis-needs-scraping"> • {needsScrapingCount} Incomplete</span>}
         </h3>
         {stalledAlerts.length > 0 && (
           <div className="alerts-actions">
+            <button
+              className="btn-mark-complete-selected"
+              onClick={handleMarkCompleteSelected}
+              disabled={selectedEditions.size === 0 || isMarking}
+              title="Mark selected as complete (stop auto-resume)"
+            >
+              {isMarking ? '...' : `Mark Complete (${selectedEditions.size})`}
+            </button>
             <button
               className="btn-restart-selected"
               onClick={handleRestartSelected}
               disabled={selectedEditions.size === 0 || isRestarting}
             >
-              {isRestarting ? '...' : `Restart Selected (${selectedEditions.size})`}
+              {isRestarting ? '...' : `Restart (${selectedEditions.size})`}
             </button>
             <button
               className="btn-restart-all"
@@ -176,10 +231,11 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
                 />
               </th>
               <th className="col-paper">Paper</th>
+              <th className="col-diagnosis">Diagnosis</th>
+              <th className="col-years">Years</th>
               <th className="col-harvested">Harvested</th>
               <th className="col-expected">Expected</th>
               <th className="col-gap">Gap</th>
-              <th className="col-stalls">Stalls</th>
               <th className="col-action">Action</th>
             </tr>
           </thead>
@@ -190,9 +246,11 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
                 : 0
               const isSelected = selectedEditions.has(alert.edition_id)
               const isRestartingThis = restartingIds.has(alert.edition_id)
+              const isMarkingThis = markingIds.has(alert.edition_id)
+              const diag = getDiagnosisLabel(alert.diagnosis)
 
               return (
-                <tr key={alert.edition_id} className={isSelected ? 'selected' : ''}>
+                <tr key={alert.edition_id} className={`${isSelected ? 'selected' : ''} ${alert.diagnosis === 'gs_fault' ? 'row-gs-fault' : ''}`}>
                   <td className="col-checkbox">
                     <input
                       type="checkbox"
@@ -205,8 +263,23 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
                       className="clickable-paper"
                       onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
                     >
-                      {alert.paper_title ? `${alert.paper_title.substring(0, 35)}...` : `Paper #${alert.paper_id}`}
+                      {alert.paper_title ? `${alert.paper_title.substring(0, 30)}...` : `Paper #${alert.paper_id}`}
                     </span>
+                  </td>
+                  <td className="col-diagnosis">
+                    <span className={`diagnosis-badge ${diag.class}`} title={diag.tip}>
+                      {diag.text}
+                      {alert.has_overflow_years && <span className="overflow-indicator" title="Has overflow years (>1000)">⚡</span>}
+                    </span>
+                  </td>
+                  <td className="col-years">
+                    {alert.years_total > 0 ? (
+                      <span className={alert.years_complete === alert.years_total ? 'years-complete' : 'years-partial'}>
+                        {alert.years_complete}/{alert.years_total}
+                      </span>
+                    ) : (
+                      <span className="years-none">—</span>
+                    )}
                   </td>
                   <td className="col-harvested">{(alert.harvested_count || 0).toLocaleString()}</td>
                   <td className="col-expected">{(alert.expected_count || 0).toLocaleString()}</td>
@@ -215,17 +288,25 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
                       {(alert.gap_remaining || 0).toLocaleString()} ({gapPercent}%)
                     </span>
                   </td>
-                  <td className="col-stalls">
-                    <span className="stall-badge">{alert.stall_count || 0}</span>
-                  </td>
                   <td className="col-action">
-                    <button
-                      className="btn-restart-single"
-                      onClick={() => handleRestartSingle(alert.edition_id)}
-                      disabled={isRestartingThis || isRestarting}
-                    >
-                      {isRestartingThis ? '...' : 'Restart'}
-                    </button>
+                    {alert.diagnosis === 'gs_fault' ? (
+                      <button
+                        className="btn-mark-complete"
+                        onClick={() => handleMarkCompleteSingle(alert.edition_id)}
+                        disabled={isMarkingThis || isMarking}
+                        title="Mark as complete (gap is GS's fault)"
+                      >
+                        {isMarkingThis ? '...' : '✓ Done'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-restart-single"
+                        onClick={() => handleRestartSingle(alert.edition_id)}
+                        disabled={isRestartingThis || isRestarting}
+                      >
+                        {isRestartingThis ? '...' : 'Restart'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )

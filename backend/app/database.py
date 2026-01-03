@@ -109,6 +109,10 @@ async def run_migrations():
         # This helps reconcile our count vs GS count (GS tolerates duplicates, we don't)
         # SUM(encounter_count) = GS-equivalent count, COUNT(*) = our deduplicated count
         "ALTER TABLE citations ADD COLUMN IF NOT EXISTS encounter_count INTEGER DEFAULT 1",
+        # Harvest completion tracking - when we've verified we can't get more citations
+        # This stops auto-resume even if there's a gap (the gap is GS's fault, not ours)
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_complete BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_complete_reason VARCHAR(50) NULL",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

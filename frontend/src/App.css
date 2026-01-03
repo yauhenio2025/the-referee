@@ -2282,6 +2282,127 @@ button:disabled {
   font-weight: 600;
 }
 
+/* Diagnosis column styles */
+.alerts-table .col-diagnosis {
+  width: 85px;
+}
+
+.alerts-table .col-years {
+  width: 55px;
+  text-align: center;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+.diagnosis-badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.diagnosis-badge.diagnosis-gs-fault {
+  background: #22c55e;
+  color: white;
+}
+
+.diagnosis-badge.diagnosis-needs-scraping {
+  background: #f59e0b;
+  color: white;
+}
+
+.diagnosis-badge.diagnosis-no-data {
+  background: #6b7280;
+  color: white;
+}
+
+.diagnosis-badge.diagnosis-unknown {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.overflow-indicator {
+  margin-left: 3px;
+  font-size: 0.65rem;
+}
+
+.years-complete {
+  color: #22c55e;
+  font-weight: 500;
+}
+
+.years-partial {
+  color: #f59e0b;
+}
+
+.years-none {
+  color: #6b7280;
+}
+
+/* GS Fault row highlighting */
+.alerts-table tbody tr.row-gs-fault {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.alerts-table tbody tr.row-gs-fault:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+/* Diagnosis summary in header */
+.diagnosis-summary {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.diagnosis-summary.diagnosis-gs-fault {
+  color: #22c55e;
+}
+
+.diagnosis-summary.diagnosis-needs-scraping {
+  color: #f59e0b;
+}
+
+/* Mark Complete buttons */
+.btn-mark-complete,
+.btn-mark-complete-selected {
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+
+.btn-mark-complete {
+  background: #22c55e;
+  color: white;
+}
+
+.btn-mark-complete:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-mark-complete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-mark-complete-selected {
+  background: #22c55e;
+  color: white;
+}
+
+.btn-mark-complete-selected:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-mark-complete-selected:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Dashboard Sections */
 .dashboard-section {
   margin-bottom: 1rem;

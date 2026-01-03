@@ -715,6 +715,37 @@ class RefereeAPI {
       method: 'POST',
     });
   }
+
+  /**
+   * Mark an edition as complete (stop auto-resume, gap is GS's fault)
+   * @param {number} editionId - Edition ID to mark complete
+   */
+  async markEditionComplete(editionId) {
+    return this.request(`/api/editions/${editionId}/mark-complete`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Mark an edition as incomplete (re-enable auto-resume)
+   * @param {number} editionId - Edition ID to mark incomplete
+   */
+  async markEditionIncomplete(editionId) {
+    return this.request(`/api/editions/${editionId}/mark-incomplete`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Mark multiple editions as complete at once
+   * @param {number[]} editionIds - Array of edition IDs to mark complete
+   */
+  async markEditionsCompleteBatch(editionIds) {
+    return this.request('/api/dashboard/mark-complete-batch', {
+      method: 'POST',
+      body: JSON.stringify({ edition_ids: editionIds }),
+    });
+  }
 }
 
 export const api = new RefereeAPI();

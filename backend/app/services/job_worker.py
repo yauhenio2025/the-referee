@@ -593,6 +593,7 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     - No pending/running extract_citations job for that paper
     - Paper is not paused (harvest_paused = False)
     - Harvest is not stalled (harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT)
+    - Harvest is not marked complete (harvest_complete = False - gap is GS's fault)
     - Has real work to do (either no harvest_targets, or at least one incomplete target)
     """
     from sqlalchemy import and_, or_, not_, exists
@@ -650,6 +651,11 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
             or_(
                 Edition.harvest_stall_count.is_(None),
                 Edition.harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT
+            ),
+            # Harvest is not already marked complete (gap is GS's fault, not ours)
+            or_(
+                Edition.harvest_complete.is_(None),
+                Edition.harvest_complete == False
             ),
             # Must have real work to do: either no targets yet, or incomplete targets
             # This filters out "false gap" editions where all harvest_targets are complete

@@ -1921,6 +1921,95 @@ async def unpause_harvest(paper_id: int, db: AsyncSession = Depends(get_db)):
     return {"paused": False, "paper_id": paper_id, "title": paper.title}
 
 
+@app.post("/api/editions/{edition_id}/mark-complete")
+async def mark_edition_complete(edition_id: int, db: AsyncSession = Depends(get_db)):
+    """Mark an edition's harvest as complete.
+
+    Use this when:
+    - All years have been scraped (status=complete on all HarvestTargets)
+    - The remaining gap is due to GS data inaccuracy, not incomplete scraping
+    - You want to stop auto-resume for this edition
+
+    This sets harvest_complete=True and harvest_complete_reason='manual'.
+    Also resets harvest_stall_count to 0.
+    """
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    edition.harvest_complete = True
+    edition.harvest_complete_reason = "manual"
+    edition.harvest_stall_count = 0
+    await db.commit()
+
+    # Get paper title for response
+    paper_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
+    paper = paper_result.scalar_one_or_none()
+
+    return {
+        "edition_id": edition_id,
+        "paper_id": edition.paper_id,
+        "paper_title": paper.title if paper else None,
+        "harvest_complete": True,
+        "harvest_complete_reason": "manual",
+    }
+
+
+@app.post("/api/editions/{edition_id}/mark-incomplete")
+async def mark_edition_incomplete(edition_id: int, db: AsyncSession = Depends(get_db)):
+    """Mark an edition's harvest as incomplete (undo mark-complete).
+
+    Use this to re-enable auto-resume for an edition that was previously
+    marked as complete.
+    """
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    edition.harvest_complete = False
+    edition.harvest_complete_reason = None
+    await db.commit()
+
+    return {
+        "edition_id": edition_id,
+        "harvest_complete": False,
+    }
+
+
+class MarkCompleteRequest(BaseModel):
+    edition_ids: List[int]
+
+
+@app.post("/api/dashboard/mark-complete-batch")
+async def mark_editions_complete_batch(request: MarkCompleteRequest, db: AsyncSession = Depends(get_db)):
+    """Mark multiple editions as complete at once.
+
+    Useful for batch-completing stalled papers that have been diagnosed
+    as 'gs_fault' (all years complete but gap remains due to GS data inaccuracy).
+    """
+    if not request.edition_ids:
+        return {"marked_complete": 0, "editions": []}
+
+    marked = []
+    for edition_id in request.edition_ids:
+        result = await db.execute(select(Edition).where(Edition.id == edition_id))
+        edition = result.scalar_one_or_none()
+        if edition:
+            edition.harvest_complete = True
+            edition.harvest_complete_reason = "manual"
+            edition.harvest_stall_count = 0
+            marked.append(edition_id)
+
+    await db.commit()
+
+    return {
+        "marked_complete": len(marked),
+        "editions": marked,
+    }
+
+
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)
 async def fetch_more_editions(
     request: EditionFetchMoreRequest,
@@ -3645,10 +3734,12 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
 
     # Alert: Stalled papers (stall_count > 2) - no limit, show all stalled
     # Only show papers with genuine gaps (> 5% remaining)
+    # Skip editions already marked as harvest_complete
     stalled_editions_result = await db.execute(
         select(Edition).where(
             Edition.harvest_stall_count > 2,
-            Edition.selected == True
+            Edition.selected == True,
+            Edition.harvest_complete == False  # Skip already-complete editions
         ).order_by(Edition.harvest_stall_count.desc())
     )
     stalled_editions = stalled_editions_result.scalars().all()
@@ -3664,9 +3755,46 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
             # Skip papers that are essentially complete (< 5% gap)
             gap_percent = (gap / expected * 100) if expected > 0 else 0
             if gap_percent < 5:
-                # Paper is complete, reset stall count silently
+                # Paper is complete, reset stall count and mark as complete
                 edition.harvest_stall_count = 0
+                edition.harvest_complete = True
+                edition.harvest_complete_reason = "exhausted"
                 continue
+
+            # Get year completion breakdown from HarvestTargets
+            targets_result = await db.execute(
+                select(HarvestTarget).where(HarvestTarget.edition_id == edition.id)
+            )
+            targets = targets_result.scalars().all()
+
+            years_complete = 0
+            years_incomplete = 0
+            years_harvesting = 0
+            has_overflow = False
+
+            for target in targets:
+                if target.year is not None:  # Skip the "all years" aggregate entry
+                    if target.status == "complete":
+                        years_complete += 1
+                    elif target.status == "incomplete":
+                        years_incomplete += 1
+                    else:  # harvesting
+                        years_harvesting += 1
+                    if target.expected_count > 1000:
+                        has_overflow = True
+
+            years_total = years_complete + years_incomplete + years_harvesting
+
+            # Determine diagnosis
+            if years_total == 0:
+                # No HarvestTargets - need to run harvest first
+                diagnosis = "no_data"
+            elif years_incomplete > 0 or years_harvesting > 0:
+                # Some years haven't been fully scraped - our fault
+                diagnosis = "needs_scraping"
+            else:
+                # All years complete but still have gap - GS's fault
+                diagnosis = "gs_fault"
 
             alerts.append(DashboardAlert(
                 type="stalled_paper",
@@ -3679,6 +3807,12 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
                 expected_count=expected,
                 gap_remaining=gap,
                 stall_count=edition.harvest_stall_count,
+                years_complete=years_complete,
+                years_incomplete=years_incomplete,
+                years_harvesting=years_harvesting,
+                years_total=years_total,
+                has_overflow_years=has_overflow,
+                diagnosis=diagnosis,
             ))
 
     # Alert: Long-running jobs (> 45 min)
