@@ -3644,6 +3644,7 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
             ))
 
     # Alert: Stalled papers (stall_count > 2) - no limit, show all stalled
+    # Only show papers with genuine gaps (> 5% remaining)
     stalled_editions_result = await db.execute(
         select(Edition).where(
             Edition.harvest_stall_count > 2,
@@ -3659,6 +3660,13 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
             harvested = paper.total_harvested_citations or 0
             expected = edition.citation_count or 0
             gap = max(0, expected - harvested)
+
+            # Skip papers that are essentially complete (< 5% gap)
+            gap_percent = (gap / expected * 100) if expected > 0 else 0
+            if gap_percent < 5:
+                # Paper is complete, reset stall count silently
+                edition.harvest_stall_count = 0
+                continue
 
             alerts.append(DashboardAlert(
                 type="stalled_paper",
