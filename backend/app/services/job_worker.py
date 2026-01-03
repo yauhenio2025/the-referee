@@ -593,6 +593,7 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     - No pending/running extract_citations job for that paper
     - Paper is not paused (harvest_paused = False)
     - Harvest is not stalled (harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT)
+    - Has real work to do (either no harvest_targets, or at least one incomplete target)
     """
     from sqlalchemy import and_, or_, not_, exists
     from sqlalchemy.orm import joinedload
@@ -610,6 +611,20 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     paused_papers = (
         select(Paper.id)
         .where(Paper.harvest_paused == True)
+    )
+
+    # Subquery: check if edition has no harvest_targets at all
+    has_no_targets = ~exists(
+        select(HarvestTarget.id).where(HarvestTarget.edition_id == Edition.id)
+    )
+
+    # Subquery: check if edition has at least one incomplete harvest_target
+    has_incomplete_target = exists(
+        select(HarvestTarget.id).where(
+            HarvestTarget.edition_id == Edition.id,
+            HarvestTarget.status != 'complete',
+            HarvestTarget.expected_count > 0
+        )
     )
 
     # Find incomplete editions
@@ -635,7 +650,11 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
             or_(
                 Edition.harvest_stall_count.is_(None),
                 Edition.harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT
-            )
+            ),
+            # Must have real work to do: either no targets yet, or incomplete targets
+            # This filters out "false gap" editions where all harvest_targets are complete
+            # (gap is due to duplicate citations in Google Scholar that we correctly deduplicate)
+            or_(has_no_targets, has_incomplete_target)
         )
         .order_by(
             # Prioritize: larger gaps first
@@ -667,10 +686,10 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
         log_now("[AutoResume] No incomplete harvests found - all caught up!")
         return 0
 
-    # Filter out editions where all harvest_targets are already complete
-    # These have a "gap" only because Google Scholar counts duplicates and we don't
+    # Safety filter: double-check that editions have real work to do
+    # (The query now filters this, but we keep this as a sanity check)
     actually_incomplete = []
-    log_now(f"[AutoResume] Filtering {len(incomplete)} editions: {[e.id for e in incomplete[:10]]}...")
+    log_now(f"[AutoResume] Verifying {len(incomplete)} editions have real work...")
     for edition in incomplete:
         # Check if this edition has any incomplete harvest_targets with expected > 0
         result = await db.execute(
