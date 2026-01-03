@@ -573,7 +573,6 @@ https://scholar.google.com/scholar?cites=4592822924704713920..."
                   className="dossier-select"
                 >
                   <option value="">— No dossier —</option>
-                  <option value="__create_new__">+ Create new dossier...</option>
                   {dossiersByCollection.map(group => (
                     <optgroup key={group.collection.id} label={group.collection.name}>
                       {group.dossiers.map(dossier => (
@@ -583,6 +582,8 @@ https://scholar.google.com/scholar?cites=4592822924704713920..."
                       ))}
                     </optgroup>
                   ))}
+                  <option disabled>────────────</option>
+                  <option value="__create_new__">➕ Create new dossier...</option>
                 </select>
               ) : (
                 <div className="create-dossier-inline">
