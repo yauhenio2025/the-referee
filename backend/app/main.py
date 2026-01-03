@@ -12,7 +12,7 @@ from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, text
+from sqlalchemy import select, func, update, text, or_
 from typing import List, Optional
 from pydantic import BaseModel
 import json
@@ -3739,7 +3739,11 @@ async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
         select(Edition).where(
             Edition.harvest_stall_count > 2,
             Edition.selected == True,
-            Edition.harvest_complete == False  # Skip already-complete editions
+            # Handle case where harvest_complete column may not exist yet (migration pending)
+            or_(
+                Edition.harvest_complete.is_(None),
+                Edition.harvest_complete == False
+            )
         ).order_by(Edition.harvest_stall_count.desc())
     )
     stalled_editions = stalled_editions_result.scalars().all()
