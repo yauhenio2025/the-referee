@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 
 // Helper to format time ago
@@ -44,7 +45,7 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
 }
 
 // Alerts Section Component
-const AlertsSection = ({ alerts }) => {
+const AlertsSection = ({ alerts, onPaperClick }) => {
   if (!alerts || alerts.length === 0) return null
 
   const getAlertIcon = (type) => {
@@ -74,7 +75,10 @@ const AlertsSection = ({ alerts }) => {
         {alerts.map((alert, idx) => (
           <div key={idx} className={`alert-item ${getAlertClass(alert.type)}`}>
             <span className="alert-icon">{getAlertIcon(alert.type)}</span>
-            <span className="alert-paper">
+            <span
+              className="alert-paper clickable-paper"
+              onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
+            >
               {alert.paper_title ? `${alert.paper_title.substring(0, 40)}...` : `Paper #${alert.paper_id}`}
             </span>
             <span className="alert-message">{alert.message}</span>
@@ -86,7 +90,7 @@ const AlertsSection = ({ alerts }) => {
 }
 
 // Active Harvests Table Component
-const ActiveHarvestsTable = ({ harvests }) => {
+const ActiveHarvestsTable = ({ harvests, onPaperClick }) => {
   if (!harvests || harvests.length === 0) {
     return (
       <div className="dashboard-section">
@@ -121,7 +125,11 @@ const ActiveHarvestsTable = ({ harvests }) => {
             return (
               <tr key={h.job_id}>
                 <td className="cell-paper">
-                  <span className="paper-title" title={h.paper_title}>
+                  <span
+                    className="paper-title clickable-paper"
+                    title={h.paper_title}
+                    onClick={() => onPaperClick(h.paper_id)}
+                  >
                     {h.paper_title.substring(0, 35)}...
                   </span>
                   <span className="paper-id">#{h.paper_id}</span>
@@ -179,7 +187,7 @@ const ActiveHarvestsTable = ({ harvests }) => {
 }
 
 // Recently Completed Section
-const RecentlyCompletedSection = ({ papers, isExpanded, onToggle }) => {
+const RecentlyCompletedSection = ({ papers, isExpanded, onToggle, onPaperClick }) => {
   if (!papers || papers.length === 0) {
     return null
   }
@@ -203,7 +211,12 @@ const RecentlyCompletedSection = ({ papers, isExpanded, onToggle }) => {
             {papers.map((p) => (
               <tr key={p.paper_id}>
                 <td className="cell-paper">
-                  <span className="paper-title">{p.paper_title.substring(0, 45)}...</span>
+                  <span
+                    className="paper-title clickable-paper"
+                    onClick={() => onPaperClick(p.paper_id)}
+                  >
+                    {p.paper_title.substring(0, 45)}...
+                  </span>
                 </td>
                 <td>{p.total_harvested.toLocaleString()} / {p.expected_total.toLocaleString()}</td>
                 <td className="cell-percent">{(p.gap_percent * 100).toFixed(1)}%</td>
@@ -218,7 +231,7 @@ const RecentlyCompletedSection = ({ papers, isExpanded, onToggle }) => {
 }
 
 // Job History Section
-const JobHistorySection = ({ isExpanded, onToggle }) => {
+const JobHistorySection = ({ isExpanded, onToggle, onPaperClick }) => {
   const [hours, setHours] = useState(6)
   const [statusFilter, setStatusFilter] = useState('')
 
@@ -281,7 +294,13 @@ const JobHistorySection = ({ isExpanded, onToggle }) => {
                     <td className="cell-status-icon">{getStatusIcon(job.status)}</td>
                     <td className="cell-paper">
                       {job.paper_title ? (
-                        <span title={job.paper_title}>{job.paper_title.substring(0, 30)}...</span>
+                        <span
+                          className="clickable-paper"
+                          title={job.paper_title}
+                          onClick={() => job.paper_id && onPaperClick(job.paper_id)}
+                        >
+                          {job.paper_title.substring(0, 30)}...
+                        </span>
                       ) : (
                         <span className="no-paper">-</span>
                       )}
@@ -313,8 +332,13 @@ const JobHistorySection = ({ isExpanded, onToggle }) => {
 
 // Main Dashboard Component
 export default function HarvestDashboard() {
+  const navigate = useNavigate()
   const [showCompleted, setShowCompleted] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+
+  const handlePaperClick = (paperId) => {
+    navigate(`/paper/${paperId}`)
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['harvest-dashboard'],
@@ -406,22 +430,24 @@ export default function HarvestDashboard() {
       </div>
 
       {/* Alerts */}
-      <AlertsSection alerts={alerts} />
+      <AlertsSection alerts={alerts} onPaperClick={handlePaperClick} />
 
       {/* Active Harvests */}
-      <ActiveHarvestsTable harvests={active_harvests} />
+      <ActiveHarvestsTable harvests={active_harvests} onPaperClick={handlePaperClick} />
 
       {/* Recently Completed (collapsible) */}
       <RecentlyCompletedSection
         papers={recently_completed}
         isExpanded={showCompleted}
         onToggle={() => setShowCompleted(!showCompleted)}
+        onPaperClick={handlePaperClick}
       />
 
       {/* Job History (collapsible) */}
       <JobHistorySection
         isExpanded={showHistory}
         onToggle={() => setShowHistory(!showHistory)}
+        onPaperClick={handlePaperClick}
       />
     </div>
   )

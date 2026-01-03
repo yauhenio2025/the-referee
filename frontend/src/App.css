@@ -2213,6 +2213,19 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* Clickable paper titles in dashboard */
+.clickable-paper {
+  cursor: pointer;
+  transition: color 0.15s, text-decoration-color 0.15s;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.clickable-paper:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
 .cell-progress {
   width: 120px;
 }
