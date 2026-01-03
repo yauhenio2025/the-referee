@@ -4314,6 +4314,78 @@ async def add_year_targets(edition_id: int, request: AddYearTargetsRequest, db: 
     )
 
 
+# ============== Sync Harvest Targets with Actual Citations ==============
+
+class SyncHarvestTargetsResponse(BaseModel):
+    success: bool
+    edition_id: int
+    years_synced: int
+    years_marked_complete: int
+    message: str
+
+@app.post("/api/editions/{edition_id}/sync-harvest-targets", response_model=SyncHarvestTargetsResponse)
+async def sync_harvest_targets(edition_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Sync harvest_targets with actual citation counts from the database.
+
+    This fixes the issue where initial non-year-by-year harvests left actual_count at 0
+    even though citations exist. Years with enough actual citations are marked 'complete'.
+    """
+    from app.models import HarvestTarget, Citation
+    from sqlalchemy import func
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get actual citation counts per year from the database
+    citation_counts = await db.execute(
+        select(Citation.year, func.count(Citation.id).label('count'))
+        .where(Citation.edition_id == edition_id)
+        .where(Citation.year.isnot(None))
+        .group_by(Citation.year)
+    )
+    year_counts = {row.year: row.count for row in citation_counts.fetchall()}
+
+    # Get all harvest_targets for this edition
+    targets_result = await db.execute(
+        select(HarvestTarget).where(HarvestTarget.edition_id == edition_id)
+    )
+    targets = targets_result.scalars().all()
+
+    years_synced = 0
+    years_marked_complete = 0
+
+    for target in targets:
+        actual_in_db = year_counts.get(target.year, 0)
+
+        # Update actual_count if database has more
+        if actual_in_db > target.actual_count:
+            target.actual_count = actual_in_db
+            years_synced += 1
+
+        # Mark as complete if we have >= 80% of expected, or if actual >= expected
+        # Also mark complete if expected is 0 (no citations expected)
+        if target.status in ('incomplete', 'harvesting', 'pending'):
+            expected = target.expected_count or 0
+            if expected == 0 or actual_in_db >= expected or (expected > 0 and actual_in_db >= expected * 0.8):
+                target.status = 'complete'
+                target.completed_at = datetime.utcnow()
+                years_marked_complete += 1
+
+    await db.commit()
+
+    return SyncHarvestTargetsResponse(
+        success=True,
+        edition_id=edition_id,
+        years_synced=years_synced,
+        years_marked_complete=years_marked_complete,
+        message=f"Synced {years_synced} years, marked {years_marked_complete} complete"
+    )
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
