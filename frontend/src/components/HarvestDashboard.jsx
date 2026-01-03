@@ -6,7 +6,12 @@ import api from '../lib/api'
 // Helper to format time ago
 const formatTimeAgo = (dateString) => {
   if (!dateString) return '-'
-  const date = new Date(dateString)
+  // Ensure UTC interpretation - append Z if no timezone specified
+  let normalizedDate = dateString
+  if (!dateString.endsWith('Z') && !dateString.includes('+') && !dateString.includes('-', 10)) {
+    normalizedDate = dateString + 'Z'
+  }
+  const date = new Date(normalizedDate)
   const now = new Date()
   const diffMs = now - date
   const diffMins = Math.floor(diffMs / 60000)
