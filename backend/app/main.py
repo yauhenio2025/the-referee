@@ -2010,6 +2010,38 @@ async def mark_editions_complete_batch(request: MarkCompleteRequest, db: AsyncSe
     }
 
 
+@app.post("/api/editions/{edition_id}/ai-diagnose")
+async def ai_diagnose_edition(
+    edition_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Use AI (Claude Opus 4.5) to analyze why a harvest is stalled.
+
+    Collects all relevant data (harvest targets, job history, failed fetches, etc.)
+    and sends to Claude with extended thinking for comprehensive analysis.
+
+    Returns:
+    - Root cause diagnosis (RESUME_BUG, RATE_LIMITING, OVERFLOW_YEAR, etc.)
+    - Whether gap is recoverable
+    - Specific recommended action with exact parameters
+    """
+    logger.info(f"AI Diagnosis endpoint called for edition {edition_id}")
+    try:
+        from .services.ai_diagnosis import get_diagnosis_service
+
+        logger.info("Importing diagnosis service...")
+        service = get_diagnosis_service()
+        logger.info("Service obtained, calling diagnose_edition...")
+        result = await service.diagnose_edition(db, edition_id)
+        logger.info(f"Diagnosis complete, success={result.get('success')}")
+
+        return result
+    except Exception as e:
+        logger.error(f"AI Diagnosis endpoint error: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "edition_id": edition_id}
+
+
 @app.post("/api/editions/fetch-more", response_model=EditionFetchMoreResponse)
 async def fetch_more_editions(
     request: EditionFetchMoreRequest,

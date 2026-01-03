@@ -802,6 +802,52 @@ class JobHistoryResponse(BaseModel):
     has_more: bool
 
 
+# ============== AI Diagnosis Schemas ==============
+
+class AIDiagnosisRecommendedAction(BaseModel):
+    """Specific recommended action from AI diagnosis"""
+    action_type: str  # RESUME, PARTITION, RESET, MARK_COMPLETE, WAIT, MANUAL_REVIEW
+    action_description: str
+    specific_params: Optional[dict] = None  # {start_year, start_page, skip_years, partition_years}
+
+
+class AIDiagnosisAnalysis(BaseModel):
+    """Parsed AI analysis results"""
+    root_cause: Optional[str] = None  # RESUME_BUG, RATE_LIMITING, OVERFLOW_YEAR, etc.
+    root_cause_explanation: Optional[str] = None
+    gap_recoverable: Optional[bool] = None
+    gap_recoverable_explanation: Optional[str] = None
+    recommended_action: Optional[AIDiagnosisRecommendedAction] = None
+    confidence: Optional[str] = None  # HIGH, MEDIUM, LOW
+    additional_notes: Optional[str] = None
+    thinking_summary: Optional[str] = None  # Summary of Claude's thinking process
+    parse_error: Optional[bool] = None
+    raw_response: Optional[str] = None
+
+
+class AIDiagnosisContextSummary(BaseModel):
+    """Summary of context used for diagnosis"""
+    expected: int
+    harvested: int
+    gap: int
+    gap_percent: float
+    years_total: int
+    years_complete: int
+    recent_jobs: int
+
+
+class AIDiagnosisResponse(BaseModel):
+    """Response from AI diagnosis endpoint"""
+    success: bool
+    edition_id: int
+    paper_title: Optional[str] = None
+    edition_title: Optional[str] = None
+    context_summary: Optional[AIDiagnosisContextSummary] = None
+    analysis: Optional[AIDiagnosisAnalysis] = None
+    raw_thinking: Optional[str] = None  # Truncated thinking for debugging
+    error: Optional[str] = None
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 PapersPaginatedResponse.model_rebuild()

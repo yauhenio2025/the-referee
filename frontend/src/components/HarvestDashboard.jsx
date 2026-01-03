@@ -44,6 +44,151 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
   )
 }
 
+// AI Diagnosis Modal Component
+const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error }) => {
+  if (!isOpen) return null
+
+  const getRootCauseColor = (rootCause) => {
+    switch (rootCause) {
+      case 'RESUME_BUG': return '#f59e0b' // amber
+      case 'RATE_LIMITING': return '#ef4444' // red
+      case 'OVERFLOW_YEAR': return '#8b5cf6' // purple
+      case 'GS_INCONSISTENCY': return '#22c55e' // green
+      case 'INCOMPLETE_YEARS': return '#3b82f6' // blue
+      case 'NETWORK_ISSUES': return '#f97316' // orange
+      default: return '#6b7280' // gray
+    }
+  }
+
+  const getConfidenceColor = (confidence) => {
+    switch (confidence) {
+      case 'HIGH': return '#22c55e'
+      case 'MEDIUM': return '#f59e0b'
+      case 'LOW': return '#ef4444'
+      default: return '#6b7280'
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="ai-diagnosis-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>🤖 AI Harvest Diagnosis</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="modal-body">
+          {isLoading && (
+            <div className="diagnosis-loading">
+              <div className="loading-spinner"></div>
+              <p>Analyzing with Claude Opus 4.5...</p>
+              <p className="loading-subtext">This may take 30-60 seconds (extended thinking mode)</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="diagnosis-error">
+              <p>❌ Analysis failed: {error}</p>
+            </div>
+          )}
+
+          {diagnosisData && !isLoading && (
+            <>
+              {/* Context Summary */}
+              <div className="diagnosis-section context-summary">
+                <h3>📊 Context</h3>
+                <div className="context-grid">
+                  <div><strong>Paper:</strong> {diagnosisData.paper_title}</div>
+                  <div><strong>Edition:</strong> {diagnosisData.edition_title}</div>
+                  {diagnosisData.context_summary && (
+                    <>
+                      <div><strong>Expected:</strong> {diagnosisData.context_summary.expected?.toLocaleString()}</div>
+                      <div><strong>Harvested:</strong> {diagnosisData.context_summary.harvested?.toLocaleString()}</div>
+                      <div><strong>Gap:</strong> {diagnosisData.context_summary.gap?.toLocaleString()} ({diagnosisData.context_summary.gap_percent}%)</div>
+                      <div><strong>Years:</strong> {diagnosisData.context_summary.years_complete}/{diagnosisData.context_summary.years_total} complete</div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Analysis Results */}
+              {diagnosisData.analysis && (
+                <>
+                  {/* Root Cause */}
+                  <div className="diagnosis-section root-cause">
+                    <h3>🔍 Root Cause</h3>
+                    <div className="root-cause-badge" style={{ borderColor: getRootCauseColor(diagnosisData.analysis.root_cause) }}>
+                      <span className="root-cause-label" style={{ backgroundColor: getRootCauseColor(diagnosisData.analysis.root_cause) }}>
+                        {diagnosisData.analysis.root_cause || 'UNKNOWN'}
+                      </span>
+                      <span className="confidence-badge" style={{ color: getConfidenceColor(diagnosisData.analysis.confidence) }}>
+                        {diagnosisData.analysis.confidence} confidence
+                      </span>
+                    </div>
+                    <p className="explanation">{diagnosisData.analysis.root_cause_explanation}</p>
+                  </div>
+
+                  {/* Gap Recoverable */}
+                  <div className="diagnosis-section recoverable">
+                    <h3>{diagnosisData.analysis.gap_recoverable ? '✅ Gap is Recoverable' : '❌ Gap Not Recoverable'}</h3>
+                    <p>{diagnosisData.analysis.gap_recoverable_explanation}</p>
+                  </div>
+
+                  {/* Recommended Action */}
+                  {diagnosisData.analysis.recommended_action && (
+                    <div className="diagnosis-section recommended-action">
+                      <h3>💡 Recommended Action</h3>
+                      <div className="action-type-badge">
+                        {diagnosisData.analysis.recommended_action.action_type}
+                      </div>
+                      <p className="action-description">{diagnosisData.analysis.recommended_action.action_description}</p>
+                      {diagnosisData.analysis.recommended_action.specific_params && (
+                        <div className="action-params">
+                          <strong>Parameters:</strong>
+                          <pre>{JSON.stringify(diagnosisData.analysis.recommended_action.specific_params, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Additional Notes */}
+                  {diagnosisData.analysis.additional_notes && (
+                    <div className="diagnosis-section notes">
+                      <h3>📝 Additional Notes</h3>
+                      <p>{diagnosisData.analysis.additional_notes}</p>
+                    </div>
+                  )}
+
+                  {/* Parse Error - show raw response */}
+                  {diagnosisData.analysis.parse_error && (
+                    <div className="diagnosis-section parse-error">
+                      <h3>⚠️ Response Parse Error</h3>
+                      <p>Could not parse AI response as JSON. Raw response:</p>
+                      <pre className="raw-response">{diagnosisData.analysis.raw_response}</pre>
+                    </div>
+                  )}
+
+                  {/* Thinking Summary (collapsible) */}
+                  {diagnosisData.analysis.thinking_summary && (
+                    <details className="diagnosis-section thinking">
+                      <summary>🧠 AI Thinking Process (click to expand)</summary>
+                      <pre className="thinking-text">{diagnosisData.analysis.thinking_summary}</pre>
+                    </details>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-close-modal" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Alerts Section Component with restart functionality
 const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   const [selectedEditions, setSelectedEditions] = useState(new Set())
@@ -51,6 +196,8 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   const [isMarking, setIsMarking] = useState(false)
   const [restartingIds, setRestartingIds] = useState(new Set())
   const [markingIds, setMarkingIds] = useState(new Set())
+  const [diagnosingIds, setDiagnosingIds] = useState(new Set())
+  const [diagnosisModal, setDiagnosisModal] = useState({ isOpen: false, data: null, isLoading: false, error: null })
 
   if (!alerts || alerts.length === 0) return null
 
@@ -182,7 +329,38 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
     }
   }
 
+  const handleDiagnose = async (editionId) => {
+    setDiagnosingIds(prev => new Set([...prev, editionId]))
+    setDiagnosisModal({ isOpen: true, data: null, isLoading: true, error: null })
+
+    try {
+      const result = await api.aiDiagnoseEdition(editionId)
+      setDiagnosisModal({ isOpen: true, data: result, isLoading: false, error: null })
+    } catch (e) {
+      console.error('AI diagnosis failed:', e)
+      setDiagnosisModal({ isOpen: true, data: null, isLoading: false, error: e.message })
+    } finally {
+      setDiagnosingIds(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(editionId)
+        return newSet
+      })
+    }
+  }
+
+  const closeDiagnosisModal = () => {
+    setDiagnosisModal({ isOpen: false, data: null, isLoading: false, error: null })
+  }
+
   return (
+    <>
+      <AIDiagnosisModal
+        isOpen={diagnosisModal.isOpen}
+        onClose={closeDiagnosisModal}
+        diagnosisData={diagnosisModal.data}
+        isLoading={diagnosisModal.isLoading}
+        error={diagnosisModal.error}
+      />
     <div className="dashboard-alerts">
       <div className="alerts-header">
         <h3 className="dashboard-section-title">
@@ -289,24 +467,34 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
                     </span>
                   </td>
                   <td className="col-action">
-                    {alert.diagnosis === 'gs_fault' ? (
+                    <div className="action-buttons">
                       <button
-                        className="btn-mark-complete"
-                        onClick={() => handleMarkCompleteSingle(alert.edition_id)}
-                        disabled={isMarkingThis || isMarking}
-                        title="Mark as complete (gap is GS's fault)"
+                        className="btn-diagnose"
+                        onClick={() => handleDiagnose(alert.edition_id)}
+                        disabled={diagnosingIds.has(alert.edition_id)}
+                        title="Run AI diagnosis to understand why harvest stalled"
                       >
-                        {isMarkingThis ? '...' : '✓ Done'}
+                        {diagnosingIds.has(alert.edition_id) ? '🔄' : '🤖'}
                       </button>
-                    ) : (
-                      <button
-                        className="btn-restart-single"
-                        onClick={() => handleRestartSingle(alert.edition_id)}
-                        disabled={isRestartingThis || isRestarting}
-                      >
-                        {isRestartingThis ? '...' : 'Restart'}
-                      </button>
-                    )}
+                      {alert.diagnosis === 'gs_fault' ? (
+                        <button
+                          className="btn-mark-complete"
+                          onClick={() => handleMarkCompleteSingle(alert.edition_id)}
+                          disabled={isMarkingThis || isMarking}
+                          title="Mark as complete (gap is GS's fault)"
+                        >
+                          {isMarkingThis ? '...' : '✓ Done'}
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-restart-single"
+                          onClick={() => handleRestartSingle(alert.edition_id)}
+                          disabled={isRestartingThis || isRestarting}
+                        >
+                          {isRestartingThis ? '...' : 'Restart'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )
@@ -333,6 +521,7 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
         </div>
       )}
     </div>
+    </>
   )
 }
 

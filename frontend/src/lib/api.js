@@ -746,6 +746,18 @@ class RefereeAPI {
       body: JSON.stringify({ edition_ids: editionIds }),
     });
   }
+
+  /**
+   * Run AI diagnosis on a stalled edition
+   * Uses Claude Opus 4.5 with extended thinking to analyze the full context
+   * @param {number} editionId - Edition ID to diagnose
+   * @returns {Promise<Object>} AI diagnosis results
+   */
+  async aiDiagnoseEdition(editionId) {
+    return this.request(`/api/editions/${editionId}/ai-diagnose`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new RefereeAPI();
