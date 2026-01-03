@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
@@ -49,6 +49,13 @@ const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error, ed
   const [isExecuting, setIsExecuting] = useState(false)
   const [actionResult, setActionResult] = useState(null)
   const [actionError, setActionError] = useState(null)
+
+  // Reset action state when new diagnosis data arrives
+  useEffect(() => {
+    setActionResult(null)
+    setActionError(null)
+    setIsExecuting(false)
+  }, [diagnosisData])
 
   if (!isOpen) return null
 
