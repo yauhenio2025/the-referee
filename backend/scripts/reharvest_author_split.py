@@ -218,26 +218,35 @@ async def find_exclusion_set(scholar) -> tuple:
     return excluded, count
 
 
-async def save_papers_to_db(papers: List[Dict]) -> int:
-    """Save harvested papers to database."""
+async def save_papers_to_db(papers: List[Dict]) -> Dict[str, int]:
+    """Save harvested papers to database.
+
+    Returns dict with:
+        - inserted: count of new papers inserted
+        - duplicates: count of duplicate encounters (encounter_count incremented)
+    """
     from app.database import engine
 
-    saved = 0
+    inserted = 0
+    duplicates = 0
     now = datetime.now()
     async with engine.begin() as conn:
         for paper in papers:
             try:
-                await conn.execute(text("""
+                # Use RETURNING to detect if this was an insert or update
+                result = await conn.execute(text("""
                     INSERT INTO citations (
                         paper_id, edition_id, scholar_id, title, authors,
                         venue, year, link, abstract, citation_count,
-                        intersection_count, created_at
+                        intersection_count, created_at, encounter_count
                     ) VALUES (
                         :paper_id, :edition_id, :scholar_id, :title, :authors,
                         :venue, :year, :link, :abstract, :citation_count,
-                        :intersection_count, :created_at
+                        :intersection_count, :created_at, 1
                     )
-                    ON CONFLICT (paper_id, scholar_id) DO NOTHING
+                    ON CONFLICT (paper_id, scholar_id) DO UPDATE
+                    SET encounter_count = citations.encounter_count + 1
+                    RETURNING (xmax = 0) AS was_inserted
                 """), {
                     "paper_id": PAPER_ID,
                     "edition_id": EDITION_ID,
@@ -252,10 +261,14 @@ async def save_papers_to_db(papers: List[Dict]) -> int:
                     "intersection_count": 0,
                     "created_at": now,
                 })
-                saved += 1
+                row = result.fetchone()
+                if row and row[0]:  # was_inserted = True means new row
+                    inserted += 1
+                else:
+                    duplicates += 1
             except Exception as e:
                 log(f"[DB] Failed to save paper: {e}", "ERROR")
-    return saved
+    return {"inserted": inserted, "duplicates": duplicates}
 
 
 async def run(dry_run: bool = True):
@@ -396,8 +409,8 @@ async def run(dry_run: bool = True):
     if not dry_run and all_papers:
         log("")
         log("[DB] Saving papers to database...")
-        saved = await save_papers_to_db(all_papers)
-        log(f"[DB] Saved {saved} papers")
+        result = await save_papers_to_db(all_papers)
+        log(f"[DB] Inserted {result['inserted']} new papers, {result['duplicates']} duplicate encounters tracked")
 
     log("")
     log(f"Log file: {LOG_FILE_PATH}")

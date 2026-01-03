@@ -105,6 +105,10 @@ async def run_migrations():
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_secret VARCHAR(256) NULL",
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_sent_at TIMESTAMP NULL",
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS callback_error TEXT NULL",
+        # Duplicate tracking: count how many times we encounter the same paper in GS
+        # This helps reconcile our count vs GS count (GS tolerates duplicates, we don't)
+        # SUM(encounter_count) = GS-equivalent count, COUNT(*) = our deduplicated count
+        "ALTER TABLE citations ADD COLUMN IF NOT EXISTS encounter_count INTEGER DEFAULT 1",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

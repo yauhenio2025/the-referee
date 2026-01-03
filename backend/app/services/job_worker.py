@@ -662,12 +662,15 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
     _last_auto_resume_check = now
 
     incomplete = await find_incomplete_harvests(db)
+    log_now(f"[AutoResume] find_incomplete_harvests returned {len(incomplete) if incomplete else 0} editions")
     if not incomplete:
+        log_now("[AutoResume] No incomplete harvests found - all caught up!")
         return 0
 
     # Filter out editions where all harvest_targets are already complete
     # These have a "gap" only because Google Scholar counts duplicates and we don't
     actually_incomplete = []
+    log_now(f"[AutoResume] Filtering {len(incomplete)} editions: {[e.id for e in incomplete[:10]]}...")
     for edition in incomplete:
         # Check if this edition has any incomplete harvest_targets with expected > 0
         result = await db.execute(
