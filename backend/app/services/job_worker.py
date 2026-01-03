@@ -665,15 +665,52 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
     if not incomplete:
         return 0
 
+    # Filter out editions where all harvest_targets are already complete
+    # These have a "gap" only because Google Scholar counts duplicates and we don't
+    actually_incomplete = []
+    for edition in incomplete:
+        # Check if this edition has any incomplete harvest_targets with expected > 0
+        result = await db.execute(
+            select(HarvestTarget)
+            .where(HarvestTarget.edition_id == edition.id)
+            .where(HarvestTarget.status != 'complete')
+            .where(HarvestTarget.expected_count > 0)
+            .limit(1)  # Just need to know if ANY exist
+        )
+        has_incomplete = result.scalar_one_or_none() is not None
+
+        # Also check: if edition has NO harvest_targets at all, it needs to be harvested
+        if not has_incomplete:
+            count_result = await db.execute(
+                select(func.count(HarvestTarget.id))
+                .where(HarvestTarget.edition_id == edition.id)
+            )
+            has_any_targets = count_result.scalar() > 0
+
+            if has_any_targets:
+                # Has targets but all complete - skip this edition
+                log_now(f"[AutoResume] Skipping edition {edition.id}: all harvest_targets complete (gap is inflated metrics)")
+                continue
+            # else: No targets yet - needs harvesting
+
+        actually_incomplete.append(edition)
+
+    if not actually_incomplete:
+        log_now(f"[AutoResume] Found {len(incomplete)} editions with gaps, but all harvest_targets are complete - no real work to do")
+        return 0
+
+    if len(actually_incomplete) < len(incomplete):
+        log_now(f"[AutoResume] Filtered {len(incomplete)} candidates down to {len(actually_incomplete)} with incomplete harvest_targets")
+
     # GROUP editions by paper_id to avoid duplicate jobs for same paper
     # This is critical - multiple editions of same paper share citations!
     editions_by_paper: Dict[int, List[Edition]] = {}
-    for edition in incomplete:
+    for edition in actually_incomplete:
         if edition.paper_id not in editions_by_paper:
             editions_by_paper[edition.paper_id] = []
         editions_by_paper[edition.paper_id].append(edition)
 
-    log_now(f"[AutoResume] Found {len(incomplete)} incomplete editions across {len(editions_by_paper)} papers")
+    log_now(f"[AutoResume] Found {len(actually_incomplete)} incomplete editions across {len(editions_by_paper)} papers")
 
     jobs_queued = 0
     for paper_id, paper_editions in editions_by_paper.items():
@@ -1715,16 +1752,43 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
     await update_paper_harvest_stats(db, paper_id)
 
     # Track harvest stall for auto-resume detection
-    # If no new citations were found, this might be a stalled harvest (can't progress further)
+    # IMPORTANT: Only mark as stalled if we TRIED to harvest but couldn't make progress
+    # Do NOT stall if harvest is actually complete (all targets done)
     for edition in valid_editions:
-        if total_new_citations == 0:
-            # No progress - increment stall count
-            current_stall = edition.harvest_stall_count or 0
-            edition.harvest_stall_count = current_stall + 1
-            if edition.harvest_stall_count >= AUTO_RESUME_MAX_STALL_COUNT:
-                log_now(f"[STALL] Edition {edition.id} has stalled after {edition.harvest_stall_count} consecutive zero-progress jobs")
-        else:
-            # Made progress - reset stall count
+        if total_new_citations == 0 and total_updated_citations == 0:
+            # No citations found at all - check if harvest is actually complete
+            # Query harvest_targets to see if there are incomplete years
+            incomplete_targets = await db.execute(
+                select(HarvestTarget)
+                .where(HarvestTarget.edition_id == edition.id)
+                .where(HarvestTarget.status != 'complete')
+                .where(HarvestTarget.expected_count > 0)
+            )
+            incomplete_list = list(incomplete_targets.scalars().all())
+
+            if incomplete_list:
+                # There ARE incomplete targets but we found nothing - this is a stall
+                current_stall = edition.harvest_stall_count or 0
+                edition.harvest_stall_count = current_stall + 1
+                incomplete_years = [t.year for t in incomplete_list if t.year]
+                if edition.harvest_stall_count >= AUTO_RESUME_MAX_STALL_COUNT:
+                    log_now(f"[STALL] Edition {edition.id} has stalled after {edition.harvest_stall_count} consecutive zero-progress jobs")
+                    log_now(f"[STALL] Incomplete years: {incomplete_years[:10]}")
+                else:
+                    log_now(f"[STALL] Edition {edition.id} made no progress (stall count: {edition.harvest_stall_count})")
+            else:
+                # All targets are complete - NOT a stall, just nothing new to find
+                # Reset stall count since harvest is actually done
+                if edition.harvest_stall_count and edition.harvest_stall_count > 0:
+                    log_now(f"[HARVEST] Edition {edition.id}: All targets complete, resetting stall count (was {edition.harvest_stall_count})")
+                edition.harvest_stall_count = 0
+        elif total_new_citations > 0:
+            # Made progress with new citations - reset stall count
+            edition.harvest_stall_count = 0
+        # Note: if total_new_citations == 0 but total_updated_citations > 0,
+        # we successfully processed pages but found only duplicates - NOT a stall
+        elif total_updated_citations > 0 and edition.harvest_stall_count and edition.harvest_stall_count > 0:
+            log_now(f"[HARVEST] Edition {edition.id}: Found {total_updated_citations} duplicates, resetting stall count (was {edition.harvest_stall_count})")
             edition.harvest_stall_count = 0
     await db.commit()
 
