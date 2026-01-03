@@ -2014,6 +2014,8 @@ button:disabled {
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 2rem;
+  width: 100%;
+  max-width: none;
 }
 
 .harvest-dashboard.loading-state,
@@ -3052,6 +3054,11 @@ button:disabled {
 }
 
 /* Advanced Job Queue */
+.job-queue-advanced {
+  width: 100%;
+  max-width: none;
+}
+
 .job-queue-advanced h2 {
   margin: 0 0 1.5rem 0;
   font-size: 1.5rem;
@@ -3074,6 +3081,30 @@ button:disabled {
   padding: 1.25rem;
   margin-bottom: 1rem;
   transition: border-color 0.2s;
+  width: 100%;
+}
+
+/* Job cards grid on large screens */
+.active-jobs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 1400px) {
+  .active-jobs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .active-jobs .job-card {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 2000px) {
+  .active-jobs {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .job-card.status-running {
