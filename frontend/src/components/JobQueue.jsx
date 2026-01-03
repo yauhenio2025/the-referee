@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import HarvestDashboard from './HarvestDashboard'
 
 /**
  * Advanced Job Queue Monitor
@@ -171,6 +172,8 @@ export default function JobQueue() {
 
   return (
     <div className="job-queue-advanced">
+      <HarvestDashboard />
+
       <h2>Job Queue</h2>
 
       {activeJobs.length === 0 && recentJobs.length === 0 ? (

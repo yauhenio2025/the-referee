@@ -46,6 +46,9 @@ from .schemas import (
     ExternalAnalyzeRequest, ExternalAnalyzeResponse,
     # Batch Operations schemas
     BatchCollectionAssignment, BatchForeignEditionRequest, BatchForeignEditionResponse,
+    # Dashboard schemas
+    HarvestDashboardResponse, JobHistoryResponse, JobHistoryItem,
+    SystemHealthStats, ActiveHarvestInfo, RecentlyCompletedPaper, DashboardAlert, JobHistorySummary,
 )
 
 # Configure logging with immediate flush for Render
@@ -3375,6 +3378,415 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
             "running": running_jobs.scalar() or 0,
         },
     }
+
+
+# ============== Harvest Dashboard ==============
+
+from datetime import timedelta
+
+MAX_CONCURRENT_JOBS = 20  # Must match job_worker.py
+
+
+@app.get("/api/dashboard/harvest-stats", response_model=HarvestDashboardResponse)
+async def get_harvest_dashboard(db: AsyncSession = Depends(get_db)):
+    """Get comprehensive harvesting dashboard data"""
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+    six_hours_ago = now - timedelta(hours=6)
+    twenty_four_hours_ago = now - timedelta(hours=24)
+
+    # === System Health ===
+
+    # Active jobs count
+    active_jobs_result = await db.execute(
+        select(func.count(Job.id)).where(Job.status.in_(["pending", "running"]))
+    )
+    active_jobs = active_jobs_result.scalar() or 0
+
+    # Citations in last hour
+    citations_last_hour_result = await db.execute(
+        select(func.count(Citation.id)).where(Citation.created_at >= one_hour_ago)
+    )
+    citations_last_hour = citations_last_hour_result.scalar() or 0
+
+    # Papers with active jobs
+    papers_with_jobs_result = await db.execute(
+        select(func.count(func.distinct(Job.paper_id))).where(
+            Job.status.in_(["pending", "running"]),
+            Job.paper_id.isnot(None)
+        )
+    )
+    papers_with_active_jobs = papers_with_jobs_result.scalar() or 0
+
+    # Job history counts for different time periods
+    async def get_job_counts(since: datetime) -> dict:
+        completed = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.status == "completed",
+                Job.completed_at >= since
+            )
+        )
+        failed = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.status == "failed",
+                Job.completed_at >= since
+            )
+        )
+        cancelled = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.status == "cancelled",
+                Job.completed_at >= since
+            )
+        )
+        return {
+            "completed": completed.scalar() or 0,
+            "failed": failed.scalar() or 0,
+            "cancelled": cancelled.scalar() or 0,
+        }
+
+    jobs_24h = await get_job_counts(twenty_four_hours_ago)
+    jobs_6h = await get_job_counts(six_hours_ago)
+    jobs_1h = await get_job_counts(one_hour_ago)
+
+    # Calculate average duplicate rate from recent completed jobs
+    # Look at jobs completed in last hour with results containing duplicates info
+    recent_jobs_result = await db.execute(
+        select(Job).where(
+            Job.status == "completed",
+            Job.completed_at >= one_hour_ago,
+            Job.job_type == "extract_citations",
+            Job.result.isnot(None)
+        ).limit(20)
+    )
+    recent_jobs = recent_jobs_result.scalars().all()
+
+    total_saved = 0
+    total_duplicates = 0
+    for job in recent_jobs:
+        try:
+            result = json.loads(job.result) if isinstance(job.result, str) else job.result
+            if result:
+                total_saved += result.get("citations_saved", 0)
+                total_duplicates += result.get("duplicates_found", 0)
+        except:
+            pass
+
+    avg_duplicate_rate = 0.0
+    if total_saved + total_duplicates > 0:
+        avg_duplicate_rate = total_duplicates / (total_saved + total_duplicates)
+
+    system_health = SystemHealthStats(
+        active_jobs=active_jobs,
+        max_concurrent_jobs=MAX_CONCURRENT_JOBS,
+        citations_last_hour=citations_last_hour,
+        papers_with_active_jobs=papers_with_active_jobs,
+        jobs_24h=JobHistorySummary(**jobs_24h),
+        avg_duplicate_rate_1h=round(avg_duplicate_rate, 3),
+    )
+
+    # === Active Harvests (running jobs with details) ===
+    active_harvests = []
+    running_jobs_result = await db.execute(
+        select(Job).where(
+            Job.status == "running",
+            Job.job_type == "extract_citations"
+        ).order_by(Job.started_at.desc())
+    )
+    running_jobs_list = running_jobs_result.scalars().all()
+
+    for job in running_jobs_list:
+        # Get paper info
+        paper_result = await db.execute(select(Paper).where(Paper.id == job.paper_id))
+        paper = paper_result.scalar_one_or_none()
+        if not paper:
+            continue
+
+        # Parse job params for progress details
+        try:
+            params = json.loads(job.params) if isinstance(job.params, str) else (job.params or {})
+        except:
+            params = {}
+
+        progress_details = params.get("progress_details", {})
+
+        # Get edition info for this paper
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper.id,
+                Edition.selected == True
+            )
+        )
+        editions = editions_result.scalars().all()
+        edition_count = len(editions)
+
+        # Sum up expected and harvested across editions
+        expected_total = sum(e.citation_count or 0 for e in editions)
+        harvested_total = sum(e.harvested_citation_count or 0 for e in editions)
+        stall_count = max((e.harvest_stall_count or 0) for e in editions) if editions else 0
+
+        # Calculate citations saved this hour for this paper
+        citations_hour_result = await db.execute(
+            select(func.count(Citation.id)).where(
+                Citation.paper_id == paper.id,
+                Citation.created_at >= one_hour_ago
+            )
+        )
+        citations_saved_hour = citations_hour_result.scalar() or 0
+
+        # Parse result for saved/duplicates this job
+        try:
+            result = json.loads(job.result) if isinstance(job.result, str) else (job.result or {})
+        except:
+            result = {}
+
+        citations_saved_job = result.get("citations_saved", progress_details.get("citations_saved", 0))
+        duplicates_job = result.get("duplicates_found", 0)
+
+        duplicate_rate = 0.0
+        if citations_saved_job + duplicates_job > 0:
+            duplicate_rate = duplicates_job / (citations_saved_job + duplicates_job)
+
+        # Calculate running time
+        running_minutes = 0
+        if job.started_at:
+            started = job.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            running_minutes = int((now - started).total_seconds() / 60)
+
+        active_harvests.append(ActiveHarvestInfo(
+            paper_id=paper.id,
+            paper_title=paper.title[:80] if paper.title else f"Paper #{paper.id}",
+            job_id=job.id,
+            job_progress=job.progress or 0,
+            current_year=progress_details.get("current_year"),
+            current_page=progress_details.get("current_page"),
+            citations_saved_job=citations_saved_job,
+            citations_saved_hour=citations_saved_hour,
+            duplicates_job=duplicates_job,
+            duplicate_rate=round(duplicate_rate, 3),
+            gap_remaining=max(0, expected_total - harvested_total),
+            expected_total=expected_total,
+            harvested_total=harvested_total,
+            running_minutes=running_minutes,
+            stall_count=stall_count,
+            edition_count=edition_count,
+        ))
+
+    # === Recently Completed Papers (last 24h where gap < 5%) ===
+    recently_completed = []
+
+    # Find papers where the most recent extract_citations job completed in last 24h
+    # and the paper is "mostly done" (gap < 5%)
+    recent_completed_jobs = await db.execute(
+        select(Job).where(
+            Job.status == "completed",
+            Job.job_type == "extract_citations",
+            Job.completed_at >= twenty_four_hours_ago,
+            Job.paper_id.isnot(None)
+        ).order_by(Job.completed_at.desc()).limit(100)
+    )
+    completed_jobs = recent_completed_jobs.scalars().all()
+
+    seen_papers = set()
+    for job in completed_jobs:
+        if job.paper_id in seen_papers:
+            continue
+        seen_papers.add(job.paper_id)
+
+        # Get paper info
+        paper_result = await db.execute(select(Paper).where(Paper.id == job.paper_id))
+        paper = paper_result.scalar_one_or_none()
+        if not paper:
+            continue
+
+        # Get edition totals
+        editions_result = await db.execute(
+            select(Edition).where(
+                Edition.paper_id == paper.id,
+                Edition.selected == True
+            )
+        )
+        editions = editions_result.scalars().all()
+        expected_total = sum(e.citation_count or 0 for e in editions)
+        harvested_total = sum(e.harvested_citation_count or 0 for e in editions)
+
+        if expected_total == 0:
+            continue
+
+        gap_percent = harvested_total / expected_total if expected_total > 0 else 0
+
+        # Only include if >= 95% complete
+        if gap_percent >= 0.95:
+            recently_completed.append(RecentlyCompletedPaper(
+                paper_id=paper.id,
+                paper_title=paper.title[:80] if paper.title else f"Paper #{paper.id}",
+                total_harvested=harvested_total,
+                expected_total=expected_total,
+                gap_percent=round(gap_percent, 3),
+                completed_at=job.completed_at,
+            ))
+
+        if len(recently_completed) >= 20:
+            break
+
+    # === Alerts ===
+    alerts = []
+
+    # Alert: High duplicate rate papers (from active harvests)
+    for harvest in active_harvests:
+        if harvest.duplicate_rate > 0.6:
+            alerts.append(DashboardAlert(
+                type="high_duplicate_rate",
+                paper_id=harvest.paper_id,
+                paper_title=harvest.paper_title,
+                job_id=harvest.job_id,
+                value=harvest.duplicate_rate,
+                message=f"{int(harvest.duplicate_rate * 100)}% duplicates - possible resume bug",
+            ))
+
+    # Alert: Stalled papers (stall_count > 2)
+    stalled_editions_result = await db.execute(
+        select(Edition).where(
+            Edition.harvest_stall_count > 2,
+            Edition.selected == True
+        ).limit(10)
+    )
+    stalled_editions = stalled_editions_result.scalars().all()
+    for edition in stalled_editions:
+        paper_result = await db.execute(select(Paper).where(Paper.id == edition.paper_id))
+        paper = paper_result.scalar_one_or_none()
+        if paper:
+            alerts.append(DashboardAlert(
+                type="stalled_paper",
+                paper_id=paper.id,
+                paper_title=paper.title[:60] if paper.title else f"Paper #{paper.id}",
+                value=float(edition.harvest_stall_count),
+                message=f"{edition.harvest_stall_count} consecutive zero-progress jobs",
+            ))
+
+    # Alert: Long-running jobs (> 45 min)
+    for harvest in active_harvests:
+        if harvest.running_minutes > 45:
+            alerts.append(DashboardAlert(
+                type="long_running_job",
+                paper_id=harvest.paper_id,
+                paper_title=harvest.paper_title,
+                job_id=harvest.job_id,
+                value=float(harvest.running_minutes),
+                message=f"Running for {harvest.running_minutes} minutes",
+            ))
+
+    # Alert: Repeated failures (3+ failed jobs for same paper in 24h)
+    failed_counts_result = await db.execute(
+        select(Job.paper_id, func.count(Job.id).label("fail_count")).where(
+            Job.status == "failed",
+            Job.completed_at >= twenty_four_hours_ago,
+            Job.paper_id.isnot(None)
+        ).group_by(Job.paper_id).having(func.count(Job.id) >= 3)
+    )
+    failed_papers = failed_counts_result.all()
+    for paper_id, fail_count in failed_papers:
+        paper_result = await db.execute(select(Paper).where(Paper.id == paper_id))
+        paper = paper_result.scalar_one_or_none()
+        if paper:
+            alerts.append(DashboardAlert(
+                type="repeated_failures",
+                paper_id=paper.id,
+                paper_title=paper.title[:60] if paper.title else f"Paper #{paper.id}",
+                value=float(fail_count),
+                message=f"{fail_count} failed jobs in last 24h",
+            ))
+
+    return HarvestDashboardResponse(
+        system_health=system_health,
+        active_harvests=active_harvests,
+        recently_completed=recently_completed,
+        alerts=alerts,
+        job_history_summary={
+            "last_hour": jobs_1h,
+            "last_6h": jobs_6h,
+            "last_24h": jobs_24h,
+        },
+    )
+
+
+@app.get("/api/dashboard/job-history", response_model=JobHistoryResponse)
+async def get_job_history(
+    hours: int = 6,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get paginated job history with optional filters"""
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+
+    # Base query
+    query = select(Job).where(
+        Job.created_at >= since
+    )
+
+    if status:
+        query = query.where(Job.status == status)
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Get paginated results
+    query = query.order_by(Job.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    jobs = result.scalars().all()
+
+    # Build response with paper titles
+    items = []
+    for job in jobs:
+        # Get paper title
+        paper_title = None
+        if job.paper_id:
+            paper_result = await db.execute(select(Paper.title).where(Paper.id == job.paper_id))
+            paper_title = paper_result.scalar()
+
+        # Parse result for citations/duplicates
+        citations_saved = 0
+        duplicates_found = 0
+        try:
+            if job.result:
+                result_data = json.loads(job.result) if isinstance(job.result, str) else job.result
+                citations_saved = result_data.get("citations_saved", 0)
+                duplicates_found = result_data.get("duplicates_found", 0)
+        except:
+            pass
+
+        # Calculate duration
+        duration_seconds = None
+        if job.started_at and job.completed_at:
+            duration_seconds = int((job.completed_at - job.started_at).total_seconds())
+
+        items.append(JobHistoryItem(
+            id=job.id,
+            paper_id=job.paper_id,
+            paper_title=paper_title[:60] if paper_title else None,
+            job_type=job.job_type,
+            status=job.status,
+            citations_saved=citations_saved,
+            duplicates_found=duplicates_found,
+            duration_seconds=duration_seconds,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            error=job.error[:200] if job.error else None,
+        ))
+
+    return JobHistoryResponse(
+        jobs=items,
+        total=total,
+        has_more=offset + len(items) < total,
+    )
 
 
 # ============== Bibliography Parsing ==============

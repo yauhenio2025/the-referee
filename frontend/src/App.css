@@ -2006,6 +2006,402 @@ button:disabled {
   50% { opacity: 0.7; }
 }
 
+/* ============== Harvest Dashboard ============== */
+
+.harvest-dashboard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.harvest-dashboard.loading-state,
+.harvest-dashboard.error-state {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-secondary);
+}
+
+.harvest-dashboard .error-message {
+  color: var(--danger);
+}
+
+/* Health Cards Row */
+.dashboard-health-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.health-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.health-card.health-ok {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.health-card.health-warning {
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
+}
+
+.health-card.health-danger {
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+}
+
+.health-card-icon {
+  font-size: 1.5rem;
+}
+
+.health-card-content {
+  flex: 1;
+}
+
+.health-card-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.health-card-title {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.health-card-subtext {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+/* Alerts Section */
+.dashboard-alerts {
+  margin-bottom: 1.5rem;
+}
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.alert-item.alert-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.alert-item.alert-danger {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.alert-icon {
+  font-size: 1rem;
+}
+
+.alert-paper {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.alert-message {
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+/* Dashboard Sections */
+.dashboard-section {
+  margin-bottom: 1rem;
+}
+
+.dashboard-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dashboard-section-title.clickable {
+  cursor: pointer;
+}
+
+.dashboard-section-title.clickable:hover {
+  color: var(--text-primary);
+}
+
+.dashboard-section-title span {
+  font-size: 0.7rem;
+}
+
+.history-count {
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+/* Dashboard Tables */
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard-table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--bg-secondary);
+}
+
+.dashboard-table.compact td {
+  padding: 0.4rem 0.6rem;
+}
+
+.dashboard-table tbody tr:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+/* Table Cell Styles */
+.cell-paper {
+  max-width: 200px;
+}
+
+.cell-paper .paper-title {
+  display: block;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-paper .paper-id {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.cell-progress {
+  width: 120px;
+}
+
+.mini-progress-bar {
+  position: relative;
+  height: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mini-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #818cf8);
+  border-radius: 8px;
+  transition: width 0.3s;
+}
+
+.mini-progress-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-shadow: 0 0 3px rgba(0,0,0,0.5);
+}
+
+.cell-current .current-info {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.cell-saved .saved-job {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.cell-saved .saved-hour {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+}
+
+.cell-dups {
+  color: var(--text-secondary);
+}
+
+.cell-dups.dups-high {
+  color: var(--warning);
+}
+
+.cell-dups .dup-percent {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.cell-gap .gap-remaining {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.cell-gap .gap-total {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+}
+
+.cell-time {
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.cell-time.time-long {
+  color: var(--warning);
+}
+
+.cell-status {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.stall-badge {
+  background: var(--danger);
+  color: white;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.edition-badge {
+  background: var(--accent);
+  color: white;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+}
+
+.cell-percent {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.cell-status-icon {
+  font-size: 0.9rem;
+}
+
+.cell-type {
+  text-transform: capitalize;
+  color: var(--text-secondary);
+}
+
+.cell-saved-small {
+  color: var(--success);
+}
+
+.cell-duration {
+  font-family: monospace;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.cell-error .error-text {
+  color: var(--danger);
+  font-size: 0.7rem;
+  cursor: help;
+}
+
+/* History Filters */
+.history-filters {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.history-filters select {
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.history-filters select:hover {
+  border-color: var(--accent);
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Status Row Colors for History */
+.dashboard-table tbody tr.status-failed {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.dashboard-table tbody tr.status-cancelled {
+  background: rgba(107, 114, 128, 0.05);
+}
+
+/* Light Theme Overrides */
+[data-theme="light"] .harvest-dashboard {
+  background: #ffffff;
+}
+
+[data-theme="light"] .health-card {
+  background: #f9fafb;
+}
+
+[data-theme="light"] .mini-progress-bar {
+  background: #e5e7eb;
+}
+
+[data-theme="light"] .mini-progress-text {
+  text-shadow: none;
+}
+
 /* Advanced Job Queue */
 .job-queue-advanced h2 {
   margin: 0 0 1.5rem 0;

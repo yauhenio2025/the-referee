@@ -667,6 +667,34 @@ class RefereeAPI {
       body: metadata,
     });
   }
+
+  // ============== Harvest Dashboard ==============
+
+  /**
+   * Get comprehensive harvesting dashboard data
+   * Returns system health, active harvests, recently completed, and alerts
+   */
+  async getHarvestDashboard() {
+    return this.request('/api/dashboard/harvest-stats');
+  }
+
+  /**
+   * Get paginated job history
+   * @param {object} options - Query options
+   * @param {number} options.hours - Time range in hours (default 6)
+   * @param {string} options.status - Filter by status (optional)
+   * @param {number} options.limit - Max results (default 50)
+   * @param {number} options.offset - Pagination offset (default 0)
+   */
+  async getJobHistory(options = {}) {
+    const params = new URLSearchParams();
+    if (options.hours) params.append('hours', options.hours);
+    if (options.status) params.append('status', options.status);
+    if (options.limit) params.append('limit', options.limit);
+    if (options.offset) params.append('offset', options.offset);
+    const queryString = params.toString();
+    return this.request(`/api/dashboard/job-history${queryString ? '?' + queryString : ''}`);
+  }
 }
 
 export const api = new RefereeAPI();

@@ -698,6 +698,96 @@ class BatchForeignEditionResponse(BaseModel):
     paper_ids: List[int]
 
 
+# ============== Dashboard Schemas ==============
+
+class JobHistorySummary(BaseModel):
+    """Summary of job outcomes in a time period"""
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+
+class SystemHealthStats(BaseModel):
+    """System health metrics"""
+    active_jobs: int
+    max_concurrent_jobs: int
+    citations_last_hour: int
+    papers_with_active_jobs: int
+    jobs_24h: JobHistorySummary
+    avg_duplicate_rate_1h: float = 0.0
+
+
+class ActiveHarvestInfo(BaseModel):
+    """Information about a currently running harvest"""
+    paper_id: int
+    paper_title: str
+    job_id: int
+    job_progress: float
+    current_year: Optional[int] = None
+    current_page: Optional[int] = None
+    citations_saved_job: int = 0
+    citations_saved_hour: int = 0
+    duplicates_job: int = 0
+    duplicate_rate: float = 0.0
+    gap_remaining: int = 0
+    expected_total: int = 0
+    harvested_total: int = 0
+    running_minutes: int = 0
+    stall_count: int = 0
+    edition_count: int = 1
+
+
+class RecentlyCompletedPaper(BaseModel):
+    """Paper that recently completed harvesting"""
+    paper_id: int
+    paper_title: str
+    total_harvested: int
+    expected_total: int
+    gap_percent: float  # 1.0 = 100% complete
+    completed_at: Optional[datetime] = None
+
+
+class DashboardAlert(BaseModel):
+    """Alert for a problem that needs attention"""
+    type: str  # high_duplicate_rate, stalled_paper, repeated_failures, etc.
+    paper_id: Optional[int] = None
+    paper_title: Optional[str] = None
+    job_id: Optional[int] = None
+    value: Optional[float] = None
+    message: str
+
+
+class HarvestDashboardResponse(BaseModel):
+    """Complete dashboard data"""
+    system_health: SystemHealthStats
+    active_harvests: List[ActiveHarvestInfo]
+    recently_completed: List[RecentlyCompletedPaper]
+    alerts: List[DashboardAlert]
+    job_history_summary: dict  # {"last_hour": {...}, "last_6h": {...}, "last_24h": {...}}
+
+
+class JobHistoryItem(BaseModel):
+    """A job in the history view"""
+    id: int
+    paper_id: Optional[int] = None
+    paper_title: Optional[str] = None
+    job_type: str
+    status: str
+    citations_saved: int = 0
+    duplicates_found: int = 0
+    duration_seconds: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+
+class JobHistoryResponse(BaseModel):
+    """Paginated job history"""
+    jobs: List[JobHistoryItem]
+    total: int
+    has_more: bool
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 PapersPaginatedResponse.model_rebuild()
