@@ -44,11 +44,60 @@ export default function PaperInput({ onPaperAdded }) {
   const [bulkPasteText, setBulkPasteText] = useState('')
   const [selectedDossierId, setSelectedDossierId] = useState(null)
 
+  // Create new dossier state
+  const [isCreatingDossier, setIsCreatingDossier] = useState(false)
+  const [newDossierName, setNewDossierName] = useState('')
+  const [newDossierCollectionId, setNewDossierCollectionId] = useState(null)
+
   // Group dossiers by collection for the dropdown
   const dossiersByCollection = collections.map(col => ({
     collection: col,
     dossiers: allDossiers.filter(d => d.collection_id === col.id)
-  })).filter(group => group.dossiers.length > 0)
+  }))
+
+  // Create dossier mutation
+  const createDossierMutation = useMutation({
+    mutationFn: (dossierData) => api.createDossier(dossierData),
+    onSuccess: (newDossier) => {
+      queryClient.invalidateQueries(['all-dossiers'])
+      queryClient.invalidateQueries(['dossiers'])
+      setSelectedDossierId(newDossier.id)
+      setIsCreatingDossier(false)
+      setNewDossierName('')
+      setNewDossierCollectionId(null)
+    },
+  })
+
+  // Handle dossier dropdown change
+  const handleDossierChange = (value) => {
+    if (value === '__create_new__') {
+      setIsCreatingDossier(true)
+      setSelectedDossierId(null)
+      // Default to first collection if available
+      if (collections.length > 0 && !newDossierCollectionId) {
+        setNewDossierCollectionId(collections[0].id)
+      }
+    } else {
+      setSelectedDossierId(value ? parseInt(value) : null)
+      setIsCreatingDossier(false)
+    }
+  }
+
+  // Handle creating the new dossier
+  const handleCreateDossier = () => {
+    if (!newDossierName.trim() || !newDossierCollectionId) return
+    createDossierMutation.mutate({
+      name: newDossierName.trim(),
+      collection_id: newDossierCollectionId,
+    })
+  }
+
+  // Cancel creating dossier
+  const handleCancelCreateDossier = () => {
+    setIsCreatingDossier(false)
+    setNewDossierName('')
+    setNewDossierCollectionId(null)
+  }
 
   const createPaper = useMutation({
     mutationFn: (paper) => api.createPaper(paper),
@@ -515,24 +564,66 @@ https://scholar.google.com/scholar?cites=4592822924704713920..."
             {/* Dossier selector */}
             <div className="dossier-selector-inline">
               <label htmlFor="quick-add-dossier">Add to dossier:</label>
-              <select
-                id="quick-add-dossier"
-                value={selectedDossierId || ''}
-                onChange={(e) => setSelectedDossierId(e.target.value ? parseInt(e.target.value) : null)}
-                disabled={quickAddLoading}
-                className="dossier-select"
-              >
-                <option value="">— No dossier —</option>
-                {dossiersByCollection.map(group => (
-                  <optgroup key={group.collection.id} label={group.collection.name}>
-                    {group.dossiers.map(dossier => (
-                      <option key={dossier.id} value={dossier.id}>
-                        {dossier.name}
-                      </option>
+              {!isCreatingDossier ? (
+                <select
+                  id="quick-add-dossier"
+                  value={selectedDossierId || ''}
+                  onChange={(e) => handleDossierChange(e.target.value)}
+                  disabled={quickAddLoading}
+                  className="dossier-select"
+                >
+                  <option value="">— No dossier —</option>
+                  <option value="__create_new__">+ Create new dossier...</option>
+                  {dossiersByCollection.map(group => (
+                    <optgroup key={group.collection.id} label={group.collection.name}>
+                      {group.dossiers.map(dossier => (
+                        <option key={dossier.id} value={dossier.id}>
+                          {dossier.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              ) : (
+                <div className="create-dossier-inline">
+                  <select
+                    value={newDossierCollectionId || ''}
+                    onChange={(e) => setNewDossierCollectionId(parseInt(e.target.value))}
+                    className="collection-select-small"
+                    disabled={createDossierMutation.isPending}
+                  >
+                    <option value="" disabled>Collection...</option>
+                    {collections.map(col => (
+                      <option key={col.id} value={col.id}>{col.name}</option>
                     ))}
-                  </optgroup>
-                ))}
-              </select>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Dossier name..."
+                    value={newDossierName}
+                    onChange={(e) => setNewDossierName(e.target.value)}
+                    className="dossier-name-input"
+                    disabled={createDossierMutation.isPending}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateDossier()}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateDossier}
+                    disabled={!newDossierName.trim() || !newDossierCollectionId || createDossierMutation.isPending}
+                    className="btn-create-dossier"
+                  >
+                    {createDossierMutation.isPending ? '...' : '✓'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelCreateDossier}
+                    disabled={createDossierMutation.isPending}
+                    className="btn-cancel-dossier"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             <label className="quick-add-option">
