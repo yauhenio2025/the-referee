@@ -4152,8 +4152,7 @@ async def execute_ai_action(
         # Queue new harvest job
         job_id = await create_extract_citations_job(
             db,
-            edition.paper_id,
-            force_full_refresh=False
+            edition.paper_id
         )
 
         return ExecuteAIActionResponse(
@@ -4174,8 +4173,7 @@ async def execute_ai_action(
 
         job_id = await create_extract_citations_job(
             db,
-            edition.paper_id,
-            force_full_refresh=False
+            edition.paper_id
         )
 
         return ExecuteAIActionResponse(
@@ -4215,8 +4213,7 @@ async def execute_ai_action(
 
         job_id = await create_extract_citations_job(
             db,
-            edition.paper_id,
-            force_full_refresh=False
+            edition.paper_id
         )
 
         return ExecuteAIActionResponse(
