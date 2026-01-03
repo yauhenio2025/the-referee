@@ -1322,59 +1322,42 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     log_now(f"[EDITION {i+1}] Will fetch from {current_year} backwards to {min_year}...")
 
                 # Check for existing resume state (year-by-year progress tracking)
-                # IMPORTANT: Only trust completed_years if we have saved state from year-by-year mode
-                # If previous harvest was non-year-by-year, existing citations are scattered across years
-                # and we need to re-scan all years to get complete coverage
+                # ALWAYS check harvest_targets first - this is the authoritative source
+                # Then merge with resume_state for any in-flight progress
                 resume_state_json = edition.harvest_resume_state
-                completed_years = set()  # Start empty - only trust saved state
                 resume_year = None
                 resume_page_for_year = 0
 
+                # STEP 1: Always check harvest_targets first - this is the authoritative source
+                completed_targets_result = await db.execute(
+                    select(HarvestTarget.year)
+                    .where(HarvestTarget.edition_id == edition.id)
+                    .where(HarvestTarget.status == 'complete')
+                )
+                completed_years = {row.year for row in completed_targets_result.fetchall()}
+                log_now(f"[EDITION {i+1}] 📊 harvest_targets: {len(completed_years)} completed years")
+
+                # STEP 2: Check resume_state for resume position (year/page to continue from)
                 if resume_state_json:
                     try:
                         resume_state = json.loads(resume_state_json)
                         if resume_state.get("mode") == "year_by_year":
-                            # Only trust completed_years from saved year-by-year state
-                            completed_years = set(resume_state.get("completed_years", []))
+                            # Get resume position
                             resume_year = resume_state.get("current_year")
                             resume_page_for_year = resume_state.get("current_page", 0)
-                            log_now(f"[EDITION {i+1}] 🔄 RESUMING from saved state: completed years={sorted(completed_years, reverse=True)[:5]}..., resume from year {resume_year} page {resume_page_for_year}")
+
+                            # Merge any completed years from resume_state (in case harvest_targets is stale)
+                            resume_completed = set(resume_state.get("completed_years", []))
+                            completed_years = completed_years.union(resume_completed)
+
+                            log_now(f"[EDITION {i+1}] 🔄 RESUMING: {len(completed_years)} total completed years, resume from year {resume_year} page {resume_page_for_year}")
                     except json.JSONDecodeError:
-                        log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state, starting fresh")
+                        log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state")
                 else:
-                    # No saved state - RECONSTRUCT completed_years from harvest_targets table
-                    # This is the authoritative source for which years have been fully harvested
-                    log_now(f"[EDITION {i+1}] 🔧 No saved state - checking harvest_targets for completed years...")
+                    log_now(f"[EDITION {i+1}] ℹ️ No resume state - starting from current year")
 
-                    # Query harvest_targets for completed years (the authoritative source)
-                    completed_targets_result = await db.execute(
-                        select(HarvestTarget.year)
-                        .where(HarvestTarget.edition_id == edition.id)
-                        .where(HarvestTarget.status == 'complete')
-                    )
-                    completed_from_targets = {row.year for row in completed_targets_result.fetchall()}
-
-                    if completed_from_targets:
-                        completed_years = completed_from_targets
-                        log_now(f"[EDITION {i+1}] 🔧 Found {len(completed_years)} completed years in harvest_targets: {sorted(completed_years, reverse=True)[:10]}...")
-
-                        # Save this reconstructed state so future resumes are faster
-                        reconstructed_state = {
-                            "mode": "year_by_year",
-                            "current_year": None,  # Start fresh from current year
-                            "current_page": 0,
-                            "completed_years": sorted(list(completed_years), reverse=True),
-                            "reconstructed": True,  # Mark as reconstructed
-                        }
-                        await db.execute(
-                            update(Edition)
-                            .where(Edition.id == edition.id)
-                            .values(harvest_resume_state=json.dumps(reconstructed_state))
-                        )
-                        await db.commit()
-                        log_now(f"[EDITION {i+1}] ✓ Saved reconstructed resume state")
-                    else:
-                        log_now(f"[EDITION {i+1}] ℹ️ No completed years in harvest_targets - will scan all years")
+                if completed_years:
+                    log_now(f"[EDITION {i+1}] ✓ Will skip {len(completed_years)} completed years: {sorted(completed_years, reverse=True)[:10]}...")
 
                 # Helper to save year-by-year resume state to edition
                 # IMPORTANT: Uses fresh DB session to avoid greenlet context issues

@@ -4130,15 +4130,29 @@ async def execute_ai_action(
         mode = params.get("mode", "year_by_year")
         continue_backwards_to = params.get("continue_backwards_to")
 
+        # ALWAYS preserve completed years from harvest_targets - this is the authoritative source
+        # Query harvest_targets for years with status='complete'
+        from app.models import HarvestTarget
+        completed_targets_result = await db.execute(
+            select(HarvestTarget.year)
+            .where(HarvestTarget.edition_id == edition_id)
+            .where(HarvestTarget.status == 'complete')
+        )
+        completed_from_targets = {row.year for row in completed_targets_result.fetchall()}
+
+        # Merge with any explicitly kept years (union)
+        all_completed_years = completed_from_targets.union(set(keep_completed_years))
+
         new_resume_state = {
             "mode": mode,
             "current_year": start_year,
             "current_page": start_page,
-            "completed_years": sorted(keep_completed_years, reverse=True) if keep_completed_years else [],
+            "completed_years": sorted(all_completed_years, reverse=True),
             "ai_reset": {
                 "reset_at": datetime.utcnow().isoformat(),
                 "start_year": start_year,
-                "continue_backwards_to": continue_backwards_to
+                "continue_backwards_to": continue_backwards_to,
+                "preserved_from_harvest_targets": len(completed_from_targets)
             }
         }
 
@@ -4159,7 +4173,7 @@ async def execute_ai_action(
             success=True,
             action_type=action_type,
             edition_id=edition_id,
-            message=f"Reset resume state to year {start_year}, page {start_page}. Queued job #{job.id}.",
+            message=f"Reset to year {start_year}, page {start_page}. Preserved {len(completed_from_targets)} completed years. Queued job #{job.id}.",
             job_id=job.id,
             resume_state=new_resume_state
         )
