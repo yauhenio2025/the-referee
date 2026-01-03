@@ -1,9 +1,21 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
 export default function PaperInput({ onPaperAdded }) {
   const queryClient = useQueryClient()
+
+  // Fetch all dossiers for the selector
+  const { data: allDossiers = [] } = useQuery({
+    queryKey: ['all-dossiers'],
+    queryFn: () => api.getDossiers(),
+  })
+
+  // Fetch all collections for grouping dossiers
+  const { data: collections = [] } = useQuery({
+    queryKey: ['collections'],
+    queryFn: () => api.getCollections(),
+  })
 
   // Input mode toggle
   const [inputMode, setInputMode] = useState('manual') // 'manual' | 'smart' | 'quick'
@@ -30,6 +42,13 @@ export default function PaperInput({ onPaperAdded }) {
   const [quickAddResults, setQuickAddResults] = useState([]) // Array of {input, success, result, error}
   const [startHarvestAfterAdd, setStartHarvestAfterAdd] = useState(true)
   const [bulkPasteText, setBulkPasteText] = useState('')
+  const [selectedDossierId, setSelectedDossierId] = useState(null)
+
+  // Group dossiers by collection for the dropdown
+  const dossiersByCollection = collections.map(col => ({
+    collection: col,
+    dossiers: allDossiers.filter(d => d.collection_id === col.id)
+  })).filter(group => group.dossiers.length > 0)
 
   const createPaper = useMutation({
     mutationFn: (paper) => api.createPaper(paper),
@@ -212,6 +231,7 @@ export default function PaperInput({ onPaperAdded }) {
         try {
           const result = await api.quickAdd(input.trim(), {
             startHarvest: startHarvestAfterAdd,
+            dossierId: selectedDossierId,
           })
           return { input, success: true, result, error: null }
         } catch (err) {
@@ -231,6 +251,8 @@ export default function PaperInput({ onPaperAdded }) {
     // Refresh if any succeeded
     if (results.some(r => r.success)) {
       queryClient.invalidateQueries(['papers'])
+      queryClient.invalidateQueries(['dossiers'])
+      queryClient.invalidateQueries(['all-dossiers'])
       onPaperAdded?.()
     }
 
@@ -488,19 +510,52 @@ https://scholar.google.com/scholar?cites=4592822924704713920..."
             </button>
           </div>
 
-          <label className="quick-add-option">
-            <input
-              type="checkbox"
-              checked={startHarvestAfterAdd}
-              onChange={(e) => setStartHarvestAfterAdd(e.target.checked)}
-            />
-            Start harvesting citations immediately
-          </label>
+          {/* Options row */}
+          <div className="quick-add-options-row">
+            {/* Dossier selector */}
+            <div className="dossier-selector-inline">
+              <label htmlFor="quick-add-dossier">Add to dossier:</label>
+              <select
+                id="quick-add-dossier"
+                value={selectedDossierId || ''}
+                onChange={(e) => setSelectedDossierId(e.target.value ? parseInt(e.target.value) : null)}
+                disabled={quickAddLoading}
+                className="dossier-select"
+              >
+                <option value="">— No dossier —</option>
+                {dossiersByCollection.map(group => (
+                  <optgroup key={group.collection.id} label={group.collection.name}>
+                    {group.dossiers.map(dossier => (
+                      <option key={dossier.id} value={dossier.id}>
+                        {dossier.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            <label className="quick-add-option">
+              <input
+                type="checkbox"
+                checked={startHarvestAfterAdd}
+                onChange={(e) => setStartHarvestAfterAdd(e.target.checked)}
+              />
+              Start harvesting citations immediately
+            </label>
+          </div>
 
           {/* Results display */}
           {quickAddResults.length > 0 && (
             <div className="quick-add-results">
-              <h4>Results ({quickAddResults.filter(r => r.success).length}/{quickAddResults.length} succeeded)</h4>
+              <h4>
+                Results ({quickAddResults.filter(r => r.success).length}/{quickAddResults.length} succeeded)
+                {selectedDossierId && allDossiers.find(d => d.id === selectedDossierId) && (
+                  <span className="results-dossier-badge">
+                    → {allDossiers.find(d => d.id === selectedDossierId)?.name}
+                  </span>
+                )}
+              </h4>
               {quickAddResults.map((r, idx) => (
                 <div key={idx} className={`quick-add-result ${r.success ? 'success' : 'error'}`}>
                   {r.success ? (

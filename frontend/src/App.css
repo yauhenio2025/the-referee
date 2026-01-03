@@ -520,6 +520,68 @@ body {
   accent-color: var(--accent);
 }
 
+/* Quick Add Options Row - contains dossier selector and checkbox */
+.quick-add-options-row {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-dark);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.quick-add-options-row .quick-add-option {
+  margin-bottom: 0;
+}
+
+/* Dossier selector inline */
+.dossier-selector-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dossier-selector-inline label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.dossier-selector-inline .dossier-select {
+  min-width: 200px;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.dossier-selector-inline .dossier-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dossier-selector-inline .dossier-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dossier-selector-inline .dossier-select option {
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.dossier-selector-inline .dossier-select optgroup {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-dark);
+}
+
 /* Bulk Paste Area */
 .bulk-paste-area {
   margin-bottom: 1.5rem;
@@ -700,6 +762,16 @@ body {
   margin: 0 0 0.75rem 0;
   font-size: 0.9rem;
   color: var(--text-secondary);
+}
+
+.quick-add-results h4 .results-dossier-badge {
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 .quick-add-result {
