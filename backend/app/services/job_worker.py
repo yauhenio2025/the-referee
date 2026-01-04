@@ -1337,6 +1337,22 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 completed_years = {row.year for row in completed_targets_result.fetchall()}
                 log_now(f"[EDITION {i+1}] 📊 harvest_targets: {len(completed_years)} completed years")
 
+                # STEP 1.5: Check for incomplete targets that are BELOW calculated min_year
+                # This handles the case where expected counts were added for older years (e.g., via refresh-expected-counts)
+                # but min_year was calculated based on edition.year metadata which may be wrong (e.g., reprint date)
+                min_incomplete_result = await db.execute(
+                    select(func.min(HarvestTarget.year))
+                    .where(HarvestTarget.edition_id == edition.id)
+                    .where(HarvestTarget.status != 'complete')
+                    .where(HarvestTarget.expected_count > 0)
+                )
+                min_incomplete_year = min_incomplete_result.scalar()
+
+                if min_incomplete_year and min_incomplete_year < min_year:
+                    log_now(f"[EDITION {i+1}] ⚠️ Found incomplete harvest_targets down to year {min_incomplete_year} (below calculated min_year {min_year})")
+                    log_now(f"[EDITION {i+1}] 📅 EXTENDING min_year from {min_year} to {min_incomplete_year} to cover all incomplete targets")
+                    min_year = min_incomplete_year
+
                 # STEP 2: Check resume_state for resume position (year/page to continue from)
                 if resume_state_json:
                     try:
@@ -1512,19 +1528,21 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 job_id=job.id,
                             )
 
+                            # NOTE: year_citations from partition_stats is for logging only
+                            # The actual total_new_citations was already incremented by save_page_citations callback
+                            # during the harvest - DO NOT add again (was causing double counting bug)
                             year_citations = partition_stats.get("total_new", 0)
                             year_harvest_succeeded = partition_stats.get("success", False)
 
                             if year_harvest_succeeded:
-                                total_new_citations += year_citations
+                                # Don't add year_citations - callback already incremented total_new_citations
                                 log_now(f"[EDITION {i+1}] 📅 Year {year}: ✓ Stratified harvest complete - {year_citations} new citations")
                             else:
                                 # Partition failed (couldn't reduce below 990)
                                 error_msg = partition_stats.get("error", "Unknown partition failure")
                                 log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ Stratified harvest FAILED - {error_msg}", "warning")
                                 log_now(f"[EDITION {i+1}] 📅 Year {year}: Will NOT mark as complete - needs manual review or different strategy")
-                                # Add whatever we did harvest
-                                total_new_citations += year_citations
+                                # Don't add year_citations - callback already incremented total_new_citations
 
                         except Exception as partition_err:
                             log_now(f"[EDITION {i+1}] ⚠️ Stratified harvest exception: {partition_err}", "warning")
@@ -1550,7 +1568,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
                     else:
                         # Normal case: <= 1000 citations, standard harvest
-                        year_harvest_succeeded = True  # Normal harvests succeed unless exception
+                        # NOTE: Don't set year_harvest_succeeded here - determine after harvest based on actual vs expected
                         result = await scholar_service.get_cited_by(
                             scholar_id=edition.scholar_id,
                             max_results=1000,  # Max per year
@@ -1569,32 +1587,54 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             year_pages_attempted = result.get("pages_fetched", 0)
                         log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total, pages OK={year_pages_succeeded}, FAIL={year_pages_failed})")
 
+                    # Query ACTUAL count of citations in DB for this edition+year
+                    # This is the authoritative count, not year_citations (which is just new this job)
+                    actual_count_result = await db.execute(
+                        select(func.count(Citation.id))
+                        .where(Citation.edition_id == edition.id)
+                        .where(Citation.year == year)
+                    )
+                    actual_citations_in_db = actual_count_result.scalar() or 0
+
+                    # Determine if year harvest succeeded by comparing actual vs expected
+                    # Use 95% threshold to allow for GS counting discrepancies
+                    # Also succeed if expected is 0 (nothing to harvest)
+                    completion_threshold = 0.95
+                    if total_this_year == 0:
+                        year_harvest_succeeded = True  # Nothing expected, nothing to do
+                    elif actual_citations_in_db >= total_this_year * completion_threshold:
+                        year_harvest_succeeded = True  # Got enough citations
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: ✓ COMPLETE ({actual_citations_in_db}/{total_this_year} = {actual_citations_in_db/total_this_year*100:.1f}%)")
+                    else:
+                        year_harvest_succeeded = False  # Still missing citations
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ INCOMPLETE ({actual_citations_in_db}/{total_this_year} = {actual_citations_in_db/total_this_year*100:.1f}%)")
+
                     # Only mark year as completed if harvest succeeded
                     # For overflow years, year_harvest_succeeded is set based on partition/stratified result
                     if year_harvest_succeeded:
                         completed_years.add(year)
                         await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
 
-                        # Update HarvestTarget with actual results - mark as complete
+                        # Update HarvestTarget with ACTUAL count from DB (not just new this job)
                         await update_harvest_target_progress(
                             db=db,
                             edition_id=edition.id,
                             year=year,
-                            actual_count=year_citations,
+                            actual_count=actual_citations_in_db,
                             pages_succeeded=year_pages_succeeded,
                             pages_failed=year_pages_failed,
                             pages_attempted=year_pages_attempted,
                             mark_complete=True
                         )
                     else:
-                        # Harvest failed (e.g., partition couldn't reduce below threshold)
-                        # Update HarvestTarget but mark as INCOMPLETE so it gets retried
-                        log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ Harvest INCOMPLETE - will retry in future jobs")
+                        # Harvest incomplete - still need more citations
+                        # Update HarvestTarget with actual count but mark as INCOMPLETE so it gets retried
+                        log_now(f"[EDITION {i+1}] 📅 Year {year}: Will retry in future jobs (need {total_this_year - actual_citations_in_db} more)")
                         await update_harvest_target_progress(
                             db=db,
                             edition_id=edition.id,
                             year=year,
-                            actual_count=year_citations,
+                            actual_count=actual_citations_in_db,
                             pages_succeeded=year_pages_succeeded,
                             pages_failed=year_pages_failed,
                             pages_attempted=year_pages_attempted,
