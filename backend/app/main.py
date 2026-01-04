@@ -4386,6 +4386,68 @@ async def sync_harvest_targets(edition_id: int, db: AsyncSession = Depends(get_d
     )
 
 
+# ============== Fix Incorrectly Complete Targets ==============
+
+class FixIncompleteTargetsResponse(BaseModel):
+    success: bool
+    targets_fixed: int
+    editions_affected: int
+    total_missing_citations: int
+    message: str
+
+@app.post("/api/admin/fix-incomplete-harvest-targets", response_model=FixIncompleteTargetsResponse)
+async def fix_incomplete_harvest_targets(
+    threshold: float = 0.95,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Fix harvest_targets that are incorrectly marked 'complete' when actual < expected * threshold.
+
+    This fixes the bug where years were marked complete even when they had gaps.
+    Resets such targets to 'incomplete' so they get retried by the harvester.
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func, and_
+
+    # Find all incorrectly complete targets
+    # Must have expected_count > 0 and actual_count < expected_count * threshold
+    result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.status == 'complete')
+        .where(HarvestTarget.expected_count > 0)
+        .where(HarvestTarget.actual_count < HarvestTarget.expected_count * threshold)
+    )
+    targets = result.scalars().all()
+
+    if not targets:
+        return FixIncompleteTargetsResponse(
+            success=True,
+            targets_fixed=0,
+            editions_affected=0,
+            total_missing_citations=0,
+            message="No incorrectly complete targets found"
+        )
+
+    # Calculate stats
+    editions_affected = len(set(t.edition_id for t in targets))
+    total_missing = sum((t.expected_count or 0) - (t.actual_count or 0) for t in targets)
+
+    # Reset to incomplete
+    for target in targets:
+        target.status = 'incomplete'
+        target.completed_at = None
+
+    await db.commit()
+
+    return FixIncompleteTargetsResponse(
+        success=True,
+        targets_fixed=len(targets),
+        editions_affected=editions_affected,
+        total_missing_citations=total_missing,
+        message=f"Reset {len(targets)} targets across {editions_affected} editions to 'incomplete' (~{total_missing:,} missing citations)"
+    )
+
+
 # ============== Refresh Expected Counts from GS ==============
 
 class RefreshExpectedCountsRequest(BaseModel):
