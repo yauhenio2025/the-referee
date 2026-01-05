@@ -1885,9 +1885,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 current_stall = edition.harvest_stall_count or 0
                 edition.harvest_stall_count = current_stall + 1
                 incomplete_years = [t.year for t in incomplete_list if t.year]
+
+                # Track stall details for diagnostics
+                if incomplete_list:
+                    # Get the first incomplete target's details
+                    first_incomplete = incomplete_list[0]
+                    edition.last_stall_year = first_incomplete.year
+                    edition.last_stall_offset = first_incomplete.pages_attempted or 0
+                    edition.last_stall_reason = "zero_new"
+                    edition.last_stall_at = datetime.utcnow()
+
                 if edition.harvest_stall_count >= AUTO_RESUME_MAX_STALL_COUNT:
                     log_now(f"[STALL] Edition {edition.id} has stalled after {edition.harvest_stall_count} consecutive zero-progress jobs")
                     log_now(f"[STALL] Incomplete years: {incomplete_years[:10]}")
+                    log_now(f"[STALL] Last stall point: year={edition.last_stall_year}, offset={edition.last_stall_offset}")
                     # Log completion stats for debugging
                     if all_targets:
                         log_now(f"[STALL] Completion: {total_actual}/{total_expected} ({overall_completion*100:.1f}%), gap={total_gap}")

@@ -5206,11 +5206,16 @@ async def reset_stall_counts(db: AsyncSession = Depends(get_db)):
     reset_count = 0
     reset_editions = []
     for edition in editions:
+        old_stall_count = edition.harvest_stall_count or 0
         edition.harvest_stall_count = 0
+        # Increment reset count for tracking how many times we've reset
+        edition.harvest_reset_count = (edition.harvest_reset_count or 0) + 1
         reset_count += 1
         reset_editions.append({
             "id": edition.id,
-            "title": edition.title[:50] if edition.title else "Unknown"
+            "title": edition.title[:50] if edition.title else "Unknown",
+            "old_stall_count": old_stall_count,
+            "total_resets": edition.harvest_reset_count
         })
 
     await db.commit()
@@ -5353,6 +5358,12 @@ async def get_harvest_report(
             Edition.harvest_stall_count,
             Edition.harvest_complete,
             Edition.last_harvested_at,
+            # Stall tracking fields
+            Edition.harvest_reset_count,
+            Edition.last_stall_year,
+            Edition.last_stall_offset,
+            Edition.last_stall_reason,
+            Edition.last_stall_at,
             target_summary.c.total_expected,
             target_summary.c.total_actual,
             target_summary.c.complete_years,
@@ -5416,6 +5427,12 @@ async def get_harvest_report(
             "harvest_stall_count": row.harvest_stall_count,
             "harvest_complete": row.harvest_complete,
             "last_harvested_at": row.last_harvested_at.isoformat() if row.last_harvested_at else None,
+            # Stall tracking fields
+            "harvest_reset_count": row.harvest_reset_count or 0,
+            "last_stall_year": row.last_stall_year,
+            "last_stall_offset": row.last_stall_offset,
+            "last_stall_reason": row.last_stall_reason,
+            "last_stall_at": row.last_stall_at.isoformat() if row.last_stall_at else None,
             "total_expected": total_exp,
             "total_actual": total_act,
             "gap": total_exp - total_act,
@@ -5426,7 +5443,9 @@ async def get_harvest_report(
             "max_incomplete_year": row.max_incomplete_year,
             "status": status,
             "likely_reason": reason,
-            "gs_url": f"https://scholar.google.com/scholar?cites={row.scholar_id}&hl=en" if row.scholar_id else None
+            "gs_url": f"https://scholar.google.com/scholar?cites={row.scholar_id}&hl=en" if row.scholar_id else None,
+            # Add year-specific GS URL if there's a known stall year
+            "gs_stall_year_url": f"https://scholar.google.com/scholar?cites={row.scholar_id}&hl=en&as_ylo={row.last_stall_year}&as_yhi={row.last_stall_year}" if row.scholar_id and row.last_stall_year else None
         })
 
     # Summary stats
