@@ -4809,6 +4809,321 @@ async def refresh_expected_counts(edition_id: int, request: RefreshExpectedCount
     )
 
 
+# ============== Populate Missing Harvest Targets ==============
+
+class PopulateMissingTargetsRequest(BaseModel):
+    start_year: int = 1950  # Go back to 1950 by default
+    end_year: int = None    # Defaults to current year
+    dry_run: bool = False   # If true, only report what would be created
+
+class PopulateMissingTargetsResponse(BaseModel):
+    success: bool
+    edition_id: int
+    years_checked: int
+    targets_created: int
+    total_expected_added: int
+    results: list[dict]
+    message: str
+
+@app.post("/api/editions/{edition_id}/populate-missing-targets", response_model=PopulateMissingTargetsResponse)
+async def populate_missing_targets(edition_id: int, request: PopulateMissingTargetsRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Create harvest_targets for years that don't exist yet.
+
+    This fixes the issue where harvest_targets only exist from edition.year onwards,
+    but the work was published much earlier. Queries GS for expected counts and
+    creates new harvest_target records.
+    """
+    from app.models import HarvestTarget
+    from app.services.scholar_search import ScholarSearchService
+    import asyncio
+    from datetime import datetime
+
+    # Get edition
+    result = await db.execute(select(Edition).where(Edition.id == edition_id))
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    scholar_id = edition.cluster_id or edition.scholar_id
+    if not scholar_id:
+        raise HTTPException(status_code=400, detail="Edition has no scholar_id/cluster_id")
+
+    end_year = request.end_year or datetime.now().year
+
+    # Get existing harvest_target years
+    existing_result = await db.execute(
+        select(HarvestTarget.year)
+        .where(HarvestTarget.edition_id == edition_id)
+        .where(HarvestTarget.year.isnot(None))
+    )
+    existing_years = {row[0] for row in existing_result.fetchall()}
+
+    # Find years that are missing
+    all_years = set(range(request.start_year, end_year + 1))
+    missing_years = sorted(all_years - existing_years)
+
+    if not missing_years:
+        return PopulateMissingTargetsResponse(
+            success=True,
+            edition_id=edition_id,
+            years_checked=len(all_years),
+            targets_created=0,
+            total_expected_added=0,
+            results=[],
+            message=f"No missing years found between {request.start_year} and {end_year}"
+        )
+
+    # Query GS for each missing year
+    scholar_service = ScholarSearchService()
+    results = []
+    targets_created = 0
+    total_expected_added = 0
+
+    for year in missing_years:
+        try:
+            expected = await scholar_service.get_year_citation_count(scholar_id, year)
+
+            result_entry = {
+                "year": year,
+                "expected_count": expected or 0,
+                "action": "skipped" if expected == 0 else ("would_create" if request.dry_run else "created")
+            }
+
+            # Only create target if there are expected citations
+            if expected and expected > 0:
+                if not request.dry_run:
+                    new_target = HarvestTarget(
+                        edition_id=edition_id,
+                        year=year,
+                        expected_count=expected,
+                        actual_count=0,
+                        status='incomplete',
+                        pages_attempted=0,
+                        pages_succeeded=0,
+                        pages_failed=0
+                    )
+                    db.add(new_target)
+                targets_created += 1
+                total_expected_added += expected
+
+            results.append(result_entry)
+
+            # Rate limit - wait between requests
+            await asyncio.sleep(2)
+        except Exception as e:
+            results.append({
+                "year": year,
+                "error": str(e)
+            })
+
+    if not request.dry_run:
+        await db.commit()
+
+        # Also reset stall count if we added targets
+        if targets_created > 0:
+            edition.harvest_stall_count = 0
+            await db.commit()
+
+    return PopulateMissingTargetsResponse(
+        success=True,
+        edition_id=edition_id,
+        years_checked=len(missing_years),
+        targets_created=targets_created,
+        total_expected_added=total_expected_added,
+        results=results,
+        message=f"{'Would create' if request.dry_run else 'Created'} {targets_created} new harvest targets with {total_expected_added} total expected citations"
+    )
+
+
+# ============== Bulk Populate Missing Targets ==============
+
+class BulkPopulateMissingTargetsRequest(BaseModel):
+    coverage_threshold: float = 0.7  # Only editions with < 70% coverage
+    min_citation_count: int = 1000   # Only editions with > 1000 citations
+    start_year: int = 1950
+    limit: int = 10  # Max editions to process
+    dry_run: bool = True  # Default to dry run for safety
+
+class BulkPopulateMissingTargetsResponse(BaseModel):
+    success: bool
+    editions_checked: int
+    editions_needing_fix: int
+    editions_processed: int
+    total_targets_created: int
+    total_expected_added: int
+    results: list[dict]
+    message: str
+
+@app.post("/api/admin/bulk-populate-missing-targets", response_model=BulkPopulateMissingTargetsResponse)
+async def bulk_populate_missing_targets(request: BulkPopulateMissingTargetsRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Find editions with low harvest_target coverage and populate missing years.
+
+    This helps fix the systemic issue where edition.year is a reprint year
+    and harvest_targets are missing for earlier years.
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func
+    from datetime import datetime
+
+    # Find editions with low coverage
+    subq = (
+        select(
+            HarvestTarget.edition_id,
+            func.sum(HarvestTarget.expected_count).label('sum_expected')
+        )
+        .where(HarvestTarget.year.isnot(None))
+        .group_by(HarvestTarget.edition_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(Edition, subq.c.sum_expected)
+        .outerjoin(subq, Edition.id == subq.c.edition_id)
+        .where(Edition.citation_count > request.min_citation_count)
+        .where(
+            (subq.c.sum_expected.is_(None)) |
+            (subq.c.sum_expected < Edition.citation_count * request.coverage_threshold)
+        )
+        .order_by((Edition.citation_count - func.coalesce(subq.c.sum_expected, 0)).desc())
+        .limit(request.limit * 2)  # Get extra to filter
+    )
+
+    editions_needing_fix = []
+    for edition, sum_expected in result:
+        sum_expected = sum_expected or 0
+        coverage = sum_expected / edition.citation_count if edition.citation_count > 0 else 1
+        editions_needing_fix.append({
+            'edition': edition,
+            'sum_expected': sum_expected,
+            'coverage': coverage,
+            'gap': edition.citation_count - sum_expected
+        })
+
+    if not editions_needing_fix:
+        return BulkPopulateMissingTargetsResponse(
+            success=True,
+            editions_checked=0,
+            editions_needing_fix=0,
+            editions_processed=0,
+            total_targets_created=0,
+            total_expected_added=0,
+            results=[],
+            message="No editions found needing target population"
+        )
+
+    # Process editions (limited)
+    editions_to_process = editions_needing_fix[:request.limit]
+    results = []
+    total_targets_created = 0
+    total_expected_added = 0
+
+    for item in editions_to_process:
+        edition = item['edition']
+        try:
+            # Call the single-edition endpoint logic
+            from app.services.scholar_search import ScholarSearchService
+            import asyncio
+
+            scholar_id = edition.cluster_id or edition.scholar_id
+            if not scholar_id:
+                results.append({
+                    'edition_id': edition.id,
+                    'title': edition.title[:50] if edition.title else 'Unknown',
+                    'error': 'No scholar_id'
+                })
+                continue
+
+            end_year = datetime.now().year
+
+            # Get existing years
+            existing_result = await db.execute(
+                select(HarvestTarget.year)
+                .where(HarvestTarget.edition_id == edition.id)
+                .where(HarvestTarget.year.isnot(None))
+            )
+            existing_years = {row[0] for row in existing_result.fetchall()}
+
+            # Find missing years
+            all_years = set(range(request.start_year, end_year + 1))
+            missing_years = sorted(all_years - existing_years)
+
+            if not missing_years:
+                results.append({
+                    'edition_id': edition.id,
+                    'title': edition.title[:50] if edition.title else 'Unknown',
+                    'coverage': round(item['coverage'] * 100, 1),
+                    'message': 'All years already have targets'
+                })
+                continue
+
+            # Query GS for missing years
+            scholar_service = ScholarSearchService()
+            edition_targets_created = 0
+            edition_expected_added = 0
+
+            for year in missing_years:
+                try:
+                    expected = await scholar_service.get_year_citation_count(scholar_id, year)
+
+                    if expected and expected > 0:
+                        if not request.dry_run:
+                            new_target = HarvestTarget(
+                                edition_id=edition.id,
+                                year=year,
+                                expected_count=expected,
+                                actual_count=0,
+                                status='incomplete',
+                                pages_attempted=0,
+                                pages_succeeded=0,
+                                pages_failed=0
+                            )
+                            db.add(new_target)
+                        edition_targets_created += 1
+                        edition_expected_added += expected
+
+                    await asyncio.sleep(2)  # Rate limit
+                except Exception as e:
+                    pass  # Skip failed years
+
+            if not request.dry_run and edition_targets_created > 0:
+                edition.harvest_stall_count = 0
+
+            total_targets_created += edition_targets_created
+            total_expected_added += edition_expected_added
+
+            results.append({
+                'edition_id': edition.id,
+                'title': edition.title[:50] if edition.title else 'Unknown',
+                'old_coverage': round(item['coverage'] * 100, 1),
+                'targets_created': edition_targets_created,
+                'expected_added': edition_expected_added,
+                'new_coverage_estimate': round(100 * (item['sum_expected'] + edition_expected_added) / edition.citation_count, 1) if edition.citation_count > 0 else 0
+            })
+
+        except Exception as e:
+            results.append({
+                'edition_id': edition.id,
+                'title': edition.title[:50] if edition.title else 'Unknown',
+                'error': str(e)
+            })
+
+    if not request.dry_run:
+        await db.commit()
+
+    return BulkPopulateMissingTargetsResponse(
+        success=True,
+        editions_checked=len(editions_needing_fix),
+        editions_needing_fix=len(editions_needing_fix),
+        editions_processed=len(editions_to_process),
+        total_targets_created=total_targets_created,
+        total_expected_added=total_expected_added,
+        results=results,
+        message=f"{'Would create' if request.dry_run else 'Created'} {total_targets_created} targets across {len(editions_to_process)} editions ({total_expected_added} expected citations)"
+    )
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
