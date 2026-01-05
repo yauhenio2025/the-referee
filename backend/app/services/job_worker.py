@@ -1832,13 +1832,49 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             incomplete_list = list(incomplete_targets.scalars().all())
 
             if incomplete_list:
-                # There ARE incomplete targets but we found nothing - this is a stall
+                # Before marking as stalled, check if edition is MOSTLY complete
+                # If >= 95% complete overall, auto-complete remaining targets instead of stalling
+                all_targets_result = await db.execute(
+                    select(HarvestTarget)
+                    .where(HarvestTarget.edition_id == edition.id)
+                    .where(HarvestTarget.expected_count > 0)
+                )
+                all_targets = list(all_targets_result.scalars().all())
+
+                if all_targets:
+                    total_expected = sum(t.expected_count or 0 for t in all_targets)
+                    total_actual = sum(t.actual_count or 0 for t in all_targets)
+                    overall_completion = total_actual / total_expected if total_expected > 0 else 0
+                    total_gap = total_expected - total_actual
+
+                    # AUTO-COMPLETE: If >= 95% complete OR gap is tiny (< 100 citations), mark remaining as complete
+                    # This prevents stalling on small unfetchable gaps due to GS inconsistency
+                    if overall_completion >= 0.95 or total_gap < 100:
+                        log_now(f"[AUTO-COMPLETE] Edition {edition.id}: {overall_completion*100:.1f}% complete ({total_actual}/{total_expected}), gap={total_gap}")
+                        log_now(f"[AUTO-COMPLETE] Auto-completing {len(incomplete_list)} remaining incomplete targets")
+
+                        for target in incomplete_list:
+                            target.status = 'complete'
+                            target.completed_at = datetime.utcnow()
+
+                        # Reset stall count - harvest is effectively done
+                        if edition.harvest_stall_count and edition.harvest_stall_count > 0:
+                            log_now(f"[AUTO-COMPLETE] Resetting stall count (was {edition.harvest_stall_count})")
+                        edition.harvest_stall_count = 0
+
+                        await db.commit()
+                        continue  # Skip to next edition, don't increment stall count
+
+                # Edition is NOT mostly complete - this is a real stall
                 current_stall = edition.harvest_stall_count or 0
                 edition.harvest_stall_count = current_stall + 1
                 incomplete_years = [t.year for t in incomplete_list if t.year]
                 if edition.harvest_stall_count >= AUTO_RESUME_MAX_STALL_COUNT:
                     log_now(f"[STALL] Edition {edition.id} has stalled after {edition.harvest_stall_count} consecutive zero-progress jobs")
                     log_now(f"[STALL] Incomplete years: {incomplete_years[:10]}")
+                    # Log completion stats for debugging
+                    if all_targets:
+                        log_now(f"[STALL] Completion: {total_actual}/{total_expected} ({overall_completion*100:.1f}%), gap={total_gap}")
                 else:
                     log_now(f"[STALL] Edition {edition.id} made no progress (stall count: {edition.harvest_stall_count})")
             else:

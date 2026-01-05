@@ -4448,6 +4448,139 @@ async def fix_incomplete_harvest_targets(
     )
 
 
+# ============== Auto-Unstall Editions ==============
+
+class AutoUnstallResponse(BaseModel):
+    success: bool
+    editions_unstalled: int
+    editions_auto_completed: int
+    targets_auto_completed: int
+    details: list[dict]
+    message: str
+
+@app.post("/api/admin/auto-unstall-editions", response_model=AutoUnstallResponse)
+async def auto_unstall_editions(
+    completion_threshold: float = 0.95,
+    gap_threshold: int = 100,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Auto-unstall editions that are stalled but mostly complete.
+
+    For each stalled edition (stall_count > 2):
+    1. Calculate overall completion percentage
+    2. If >= 95% complete OR total gap < 100 citations:
+       - Mark remaining incomplete targets as complete
+       - Reset stall_count to 0
+    3. If not mostly complete, just reset stall_count to allow retry
+
+    This fixes the issue where editions stall on small unfetchable gaps
+    due to Google Scholar inconsistency.
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func
+
+    # Find all stalled editions
+    result = await db.execute(
+        select(Edition).where(Edition.harvest_stall_count > 2)
+    )
+    stalled_editions = result.scalars().all()
+
+    if not stalled_editions:
+        return AutoUnstallResponse(
+            success=True,
+            editions_unstalled=0,
+            editions_auto_completed=0,
+            targets_auto_completed=0,
+            details=[],
+            message="No stalled editions found"
+        )
+
+    editions_unstalled = 0
+    editions_auto_completed = 0
+    targets_auto_completed = 0
+    details = []
+
+    for edition in stalled_editions:
+        # Get all harvest targets with expected_count > 0
+        targets_result = await db.execute(
+            select(HarvestTarget)
+            .where(HarvestTarget.edition_id == edition.id)
+            .where(HarvestTarget.expected_count > 0)
+        )
+        all_targets = list(targets_result.scalars().all())
+
+        if not all_targets:
+            # No targets - just reset stall count
+            old_stall = edition.harvest_stall_count
+            edition.harvest_stall_count = 0
+            editions_unstalled += 1
+            details.append({
+                "edition_id": edition.id,
+                "title": edition.title[:50],
+                "action": "unstalled",
+                "old_stall_count": old_stall
+            })
+            continue
+
+        # Calculate completion stats
+        total_expected = sum(t.expected_count or 0 for t in all_targets)
+        total_actual = sum(t.actual_count or 0 for t in all_targets)
+        completion_pct = total_actual / total_expected if total_expected > 0 else 0
+        total_gap = total_expected - total_actual
+
+        incomplete_targets = [t for t in all_targets if t.status != 'complete']
+
+        # Check if we should auto-complete
+        if completion_pct >= completion_threshold or total_gap < gap_threshold:
+            # Auto-complete remaining targets
+            for target in incomplete_targets:
+                target.status = 'complete'
+                target.completed_at = datetime.utcnow()
+                targets_auto_completed += 1
+
+            old_stall = edition.harvest_stall_count
+            edition.harvest_stall_count = 0
+            editions_auto_completed += 1
+            editions_unstalled += 1
+
+            details.append({
+                "edition_id": edition.id,
+                "title": edition.title[:50],
+                "action": "auto_completed",
+                "completion_pct": round(completion_pct * 100, 1),
+                "gap": total_gap,
+                "targets_completed": len(incomplete_targets),
+                "old_stall_count": old_stall
+            })
+        else:
+            # Not mostly complete - just reset stall count to allow retry
+            old_stall = edition.harvest_stall_count
+            edition.harvest_stall_count = 0
+            editions_unstalled += 1
+
+            details.append({
+                "edition_id": edition.id,
+                "title": edition.title[:50],
+                "action": "unstalled_for_retry",
+                "completion_pct": round(completion_pct * 100, 1),
+                "gap": total_gap,
+                "incomplete_targets": len(incomplete_targets),
+                "old_stall_count": old_stall
+            })
+
+    await db.commit()
+
+    return AutoUnstallResponse(
+        success=True,
+        editions_unstalled=editions_unstalled,
+        editions_auto_completed=editions_auto_completed,
+        targets_auto_completed=targets_auto_completed,
+        details=details,
+        message=f"Unstalled {editions_unstalled} editions: {editions_auto_completed} auto-completed, {editions_unstalled - editions_auto_completed} reset for retry"
+    )
+
+
 # ============== Refresh Expected Counts from GS ==============
 
 class RefreshExpectedCountsRequest(BaseModel):
