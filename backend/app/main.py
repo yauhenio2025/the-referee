@@ -5168,6 +5168,61 @@ async def bulk_populate_missing_targets(request: BulkPopulateMissingTargetsReque
     )
 
 
+# ============== Reset Stall Counts ==============
+
+@app.post("/api/admin/reset-stall-counts")
+async def reset_stall_counts(db: AsyncSession = Depends(get_db)):
+    """
+    Reset harvest_stall_count for editions that have new incomplete targets.
+
+    This is needed after running bulk-populate-missing-targets, because:
+    1. Old stall counts block harvesting
+    2. New targets with expected_count=0 need to be processed
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func, and_, or_
+
+    # Find editions with:
+    # - harvest_stall_count >= 5
+    # - At least one incomplete target (status != 'complete')
+    subq = (
+        select(HarvestTarget.edition_id)
+        .where(
+            HarvestTarget.status != 'complete',
+            HarvestTarget.year.isnot(None)
+        )
+        .group_by(HarvestTarget.edition_id)
+    )
+
+    result = await db.execute(
+        select(Edition)
+        .where(
+            Edition.harvest_stall_count >= 5,
+            Edition.id.in_(subq)
+        )
+    )
+    editions = list(result.scalars().all())
+
+    reset_count = 0
+    reset_editions = []
+    for edition in editions:
+        edition.harvest_stall_count = 0
+        reset_count += 1
+        reset_editions.append({
+            "id": edition.id,
+            "title": edition.title[:50] if edition.title else "Unknown"
+        })
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "reset_count": reset_count,
+        "editions": reset_editions,
+        "message": f"Reset stall count for {reset_count} editions"
+    }
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):

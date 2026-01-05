@@ -620,11 +620,15 @@ async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     )
 
     # Subquery: check if edition has at least one incomplete harvest_target
+    # Include targets with expected_count=0 (never queried yet) OR expected_count > 0 and not complete
     has_incomplete_target = exists(
         select(HarvestTarget.id).where(
             HarvestTarget.edition_id == Edition.id,
             HarvestTarget.status != 'complete',
-            HarvestTarget.expected_count > 0
+            or_(
+                HarvestTarget.expected_count > 0,  # Has known work to do
+                and_(HarvestTarget.expected_count == 0, HarvestTarget.actual_count == 0)  # Never queried
+            )
         )
     )
 
