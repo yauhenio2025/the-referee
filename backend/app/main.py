@@ -4623,10 +4623,8 @@ async def sync_actual_counts(db: AsyncSession = Depends(get_db)):
         logger.info(f"[SYNC] Found {len(real_counts)} edition+year combinations with citations")
 
         logger.info("[SYNC] Step 2: Query all harvest_targets...")
-        # Get all harvest_targets
-        targets_result = await db.execute(
-            select(HarvestTarget).options(selectinload(HarvestTarget.edition))
-        )
+        # Get all harvest_targets (no relationship to Edition, just edition_id FK)
+        targets_result = await db.execute(select(HarvestTarget))
         targets = list(targets_result.scalars().all())
         logger.info(f"[SYNC] Found {len(targets)} harvest targets")
 
@@ -4662,17 +4660,15 @@ async def sync_actual_counts(db: AsyncSession = Depends(get_db)):
                             target.completed_at = None
                             targets_status_changed += 1
 
-                if target.edition:
-                    details.append({
-                        "edition_id": target.edition_id,
-                        "title": target.edition.title[:40] if target.edition.title else "Unknown",
-                        "year": target.year,
-                        "old_actual": old_actual,
-                        "new_actual": real_count,
-                        "expected": expected,
-                        "old_status": old_status,
-                        "new_status": target.status
-                    })
+                details.append({
+                    "edition_id": target.edition_id,
+                    "year": target.year,
+                    "old_actual": old_actual,
+                    "new_actual": real_count,
+                    "expected": expected,
+                    "old_status": old_status,
+                    "new_status": target.status
+                })
 
         logger.info(f"[SYNC] Processed {len(targets)} targets, {targets_synced} need syncing")
         logger.info("[SYNC] Step 4: Committing changes...")
