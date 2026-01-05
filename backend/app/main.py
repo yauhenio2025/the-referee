@@ -5295,6 +5295,217 @@ async def mark_near_complete_targets(
     }
 
 
+# ============== Harvest Report ==============
+
+@app.get("/api/admin/harvest-report")
+async def get_harvest_report(
+    include_all: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get comprehensive harvest diagnostics for all editions.
+
+    Returns data suitable for Excel export with:
+    - Edition info (id, title, scholar_id, citation_count)
+    - Harvest status (stall_count, completion %)
+    - Target breakdown (expected vs actual, incomplete years)
+    - Google Scholar URLs for debugging
+
+    Parameters:
+    - include_all: If True, include all editions with harvesting activity. If False (default), only stalled.
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func, case
+    from datetime import datetime
+
+    # Build target summary subquery
+    target_summary = (
+        select(
+            HarvestTarget.edition_id,
+            func.sum(HarvestTarget.expected_count).label('total_expected'),
+            func.sum(HarvestTarget.actual_count).label('total_actual'),
+            func.count().filter(HarvestTarget.status == 'complete').label('complete_years'),
+            func.count().filter(
+                HarvestTarget.status != 'complete',
+                HarvestTarget.expected_count > 0
+            ).label('incomplete_years'),
+            func.min(case(
+                (HarvestTarget.status != 'complete', HarvestTarget.year),
+                else_=None
+            )).label('min_incomplete_year'),
+            func.max(case(
+                (HarvestTarget.status != 'complete', HarvestTarget.year),
+                else_=None
+            )).label('max_incomplete_year'),
+        )
+        .group_by(HarvestTarget.edition_id)
+        .subquery()
+    )
+
+    # Main query
+    query = (
+        select(
+            Edition.id,
+            Edition.title,
+            Edition.scholar_id,
+            Edition.year.label('publication_year'),
+            Edition.citation_count,
+            Edition.harvest_stall_count,
+            Edition.harvest_complete,
+            Edition.last_harvested_at,
+            target_summary.c.total_expected,
+            target_summary.c.total_actual,
+            target_summary.c.complete_years,
+            target_summary.c.incomplete_years,
+            target_summary.c.min_incomplete_year,
+            target_summary.c.max_incomplete_year,
+        )
+        .outerjoin(target_summary, target_summary.c.edition_id == Edition.id)
+    )
+
+    if not include_all:
+        # Only stalled editions
+        query = query.where(Edition.harvest_stall_count >= 5)
+    else:
+        # All with activity
+        query = query.where(
+            (Edition.harvest_stall_count > 0) |
+            (target_summary.c.incomplete_years > 0)
+        )
+
+    query = query.order_by(Edition.harvest_stall_count.desc())
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    editions = []
+    for row in rows:
+        total_exp = row.total_expected or 0
+        total_act = row.total_actual or 0
+        pct = round(100 * total_act / max(total_exp, 1), 1)
+
+        # Determine status category
+        if row.harvest_complete:
+            status = 'Complete'
+        elif row.harvest_stall_count >= 5:
+            status = 'Stalled'
+        elif (row.incomplete_years or 0) > 0:
+            status = 'Has Work'
+        else:
+            status = 'Unknown'
+
+        # Determine likely stall reason
+        if row.harvest_stall_count >= 5:
+            if pct > 90:
+                reason = 'Near complete - likely duplicates'
+            elif pct > 70:
+                reason = 'High progress - pagination issue?'
+            elif pct > 50:
+                reason = 'Medium progress - rate limit?'
+            else:
+                reason = 'Low progress - needs investigation'
+        else:
+            reason = ''
+
+        editions.append({
+            "id": row.id,
+            "title": row.title[:80] if row.title else None,
+            "scholar_id": row.scholar_id,
+            "publication_year": row.publication_year,
+            "citation_count": row.citation_count,
+            "harvest_stall_count": row.harvest_stall_count,
+            "harvest_complete": row.harvest_complete,
+            "last_harvested_at": row.last_harvested_at.isoformat() if row.last_harvested_at else None,
+            "total_expected": total_exp,
+            "total_actual": total_act,
+            "gap": total_exp - total_act,
+            "pct_complete": pct,
+            "complete_years": row.complete_years or 0,
+            "incomplete_years": row.incomplete_years or 0,
+            "min_incomplete_year": row.min_incomplete_year,
+            "max_incomplete_year": row.max_incomplete_year,
+            "status": status,
+            "likely_reason": reason,
+            "gs_url": f"https://scholar.google.com/scholar?cites={row.scholar_id}&hl=en" if row.scholar_id else None
+        })
+
+    # Summary stats
+    stalled_count = len([e for e in editions if e['status'] == 'Stalled'])
+    has_work_count = len([e for e in editions if e['status'] == 'Has Work'])
+    total_expected = sum(e['total_expected'] for e in editions)
+    total_actual = sum(e['total_actual'] for e in editions)
+
+    return {
+        "success": True,
+        "summary": {
+            "total_editions": len(editions),
+            "stalled": stalled_count,
+            "has_work": has_work_count,
+            "total_expected": total_expected,
+            "total_actual": total_actual,
+            "overall_pct": round(100 * total_actual / max(total_expected, 1), 1)
+        },
+        "editions": editions,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/admin/harvest-report/year-details/{edition_id}")
+async def get_harvest_year_details(
+    edition_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get detailed year-by-year breakdown for a specific edition.
+    Useful for diagnosing exactly where harvesting got stuck.
+    """
+    from app.models import HarvestTarget
+
+    # Get edition info
+    result = await db.execute(
+        select(Edition).where(Edition.id == edition_id)
+    )
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Get all targets for this edition
+    result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.edition_id == edition_id)
+        .order_by(HarvestTarget.year.desc())
+    )
+    targets = result.scalars().all()
+
+    years = []
+    for t in targets:
+        pct = round(100 * t.actual_count / max(t.expected_count, 1), 1)
+        years.append({
+            "year": t.year,
+            "expected": t.expected_count,
+            "actual": t.actual_count,
+            "gap": t.expected_count - t.actual_count,
+            "pct": pct,
+            "status": t.status,
+            "pages_attempted": t.pages_attempted,
+            "pages_succeeded": t.pages_succeeded,
+            "pages_failed": t.pages_failed,
+            "gs_year_url": f"https://scholar.google.com/scholar?cites={edition.scholar_id}&hl=en&as_ylo={t.year}&as_yhi={t.year}" if edition.scholar_id and t.year else None
+        })
+
+    return {
+        "success": True,
+        "edition": {
+            "id": edition.id,
+            "title": edition.title,
+            "scholar_id": edition.scholar_id,
+            "harvest_stall_count": edition.harvest_stall_count,
+            "gs_url": f"https://scholar.google.com/scholar?cites={edition.scholar_id}&hl=en" if edition.scholar_id else None
+        },
+        "years": years
+    }
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):

@@ -188,6 +188,13 @@ class Edition(Base):
     # Reason: "exhausted" (all years complete), "manual" (user marked), "gs_inaccuracy" (verified gap is GS fault)
     harvest_complete_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default=None)
 
+    # Stall tracking for diagnostics
+    harvest_reset_count: Mapped[int] = mapped_column(Integer, default=0)  # How many times stall was reset
+    last_stall_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Year that caused last stall
+    last_stall_offset: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Page offset at stall
+    last_stall_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Reason: "zero_new", "rate_limit", "parse_error"
+    last_stall_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # When the stall occurred
+
     # Edition merging - when editions are duplicates (same work, different URLs/scholar_ids)
     # The merged edition's citations are pooled into the canonical edition
     # But we keep both scholar_ids for harvesting from both Google Scholar entries
