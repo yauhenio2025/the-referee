@@ -12,7 +12,7 @@ import traceback
 import sys
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget
@@ -1344,11 +1344,17 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 # STEP 1.5: Check for incomplete targets that are BELOW calculated min_year
                 # This handles the case where expected counts were added for older years (e.g., via refresh-expected-counts)
                 # but min_year was calculated based on edition.year metadata which may be wrong (e.g., reprint date)
+                # Also include targets with expected_count=0 AND actual_count=0 (never queried yet)
                 min_incomplete_result = await db.execute(
                     select(func.min(HarvestTarget.year))
                     .where(HarvestTarget.edition_id == edition.id)
                     .where(HarvestTarget.status != 'complete')
-                    .where(HarvestTarget.expected_count > 0)
+                    .where(
+                        or_(
+                            HarvestTarget.expected_count > 0,  # Has known work to do
+                            and_(HarvestTarget.expected_count == 0, HarvestTarget.actual_count == 0)  # Never queried
+                        )
+                    )
                 )
                 min_incomplete_year = min_incomplete_result.scalar()
 
