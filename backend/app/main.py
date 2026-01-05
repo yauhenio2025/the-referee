@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, text, or_
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from pydantic import BaseModel
 import json
