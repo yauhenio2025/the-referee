@@ -4815,6 +4815,7 @@ class PopulateMissingTargetsRequest(BaseModel):
     start_year: int = 1950  # Go back to 1950 by default
     end_year: int = None    # Defaults to current year
     dry_run: bool = False   # If true, only report what would be created
+    skip_gs_query: bool = True  # If true, skip GS query and create with expected=0 (fast mode)
 
 class PopulateMissingTargetsResponse(BaseModel):
     success: bool
@@ -4874,48 +4875,72 @@ async def populate_missing_targets(edition_id: int, request: PopulateMissingTarg
             message=f"No missing years found between {request.start_year} and {end_year}"
         )
 
-    # Query GS for each missing year
-    scholar_service = ScholarSearchService()
+    # Query GS for each missing year (unless skip_gs_query is True)
     results = []
     targets_created = 0
     total_expected_added = 0
 
-    for year in missing_years:
-        try:
-            expected = await scholar_service.get_year_citation_count(scholar_id, year)
-
-            result_entry = {
-                "year": year,
-                "expected_count": expected or 0,
-                "action": "skipped" if expected == 0 else ("would_create" if request.dry_run else "created")
-            }
-
-            # Only create target if there are expected citations
-            if expected and expected > 0:
-                if not request.dry_run:
-                    new_target = HarvestTarget(
-                        edition_id=edition_id,
-                        year=year,
-                        expected_count=expected,
-                        actual_count=0,
-                        status='incomplete',
-                        pages_attempted=0,
-                        pages_succeeded=0,
-                        pages_failed=0
-                    )
-                    db.add(new_target)
-                targets_created += 1
-                total_expected_added += expected
-
-            results.append(result_entry)
-
-            # Rate limit - wait between requests
-            await asyncio.sleep(2)
-        except Exception as e:
+    if request.skip_gs_query:
+        # Fast mode: create all targets with expected_count=0
+        # The harvester will query GS when it runs
+        for year in missing_years:
+            if not request.dry_run:
+                new_target = HarvestTarget(
+                    edition_id=edition_id,
+                    year=year,
+                    expected_count=0,  # Will be updated by harvester
+                    actual_count=0,
+                    status='incomplete',
+                    pages_attempted=0,
+                    pages_succeeded=0,
+                    pages_failed=0
+                )
+                db.add(new_target)
+            targets_created += 1
             results.append({
                 "year": year,
-                "error": str(e)
+                "expected_count": 0,
+                "action": "would_create" if request.dry_run else "created"
             })
+    else:
+        # Slow mode: query GS for each year
+        scholar_service = ScholarSearchService()
+        for year in missing_years:
+            try:
+                expected = await scholar_service.get_year_citation_count(scholar_id, year)
+
+                result_entry = {
+                    "year": year,
+                    "expected_count": expected or 0,
+                    "action": "skipped" if expected == 0 else ("would_create" if request.dry_run else "created")
+                }
+
+                # Only create target if there are expected citations
+                if expected and expected > 0:
+                    if not request.dry_run:
+                        new_target = HarvestTarget(
+                            edition_id=edition_id,
+                            year=year,
+                            expected_count=expected,
+                            actual_count=0,
+                            status='incomplete',
+                            pages_attempted=0,
+                            pages_succeeded=0,
+                            pages_failed=0
+                        )
+                        db.add(new_target)
+                    targets_created += 1
+                    total_expected_added += expected
+
+                results.append(result_entry)
+
+                # Rate limit - wait between requests
+                await asyncio.sleep(2)
+            except Exception as e:
+                results.append({
+                    "year": year,
+                    "error": str(e)
+                })
 
     if not request.dry_run:
         await db.commit()
@@ -4944,6 +4969,7 @@ class BulkPopulateMissingTargetsRequest(BaseModel):
     start_year: int = 1950
     limit: int = 10  # Max editions to process
     dry_run: bool = True  # Default to dry run for safety
+    skip_gs_query: bool = True  # If true, skip GS query and create with expected=0 (fast mode)
 
 class BulkPopulateMissingTargetsResponse(BaseModel):
     success: bool
@@ -5058,34 +5084,52 @@ async def bulk_populate_missing_targets(request: BulkPopulateMissingTargetsReque
                 })
                 continue
 
-            # Query GS for missing years
-            scholar_service = ScholarSearchService()
+            # Create targets for missing years
             edition_targets_created = 0
             edition_expected_added = 0
 
-            for year in missing_years:
-                try:
-                    expected = await scholar_service.get_year_citation_count(scholar_id, year)
+            if request.skip_gs_query:
+                # Fast mode: create all targets with expected_count=0
+                for year in missing_years:
+                    if not request.dry_run:
+                        new_target = HarvestTarget(
+                            edition_id=edition.id,
+                            year=year,
+                            expected_count=0,  # Will be updated by harvester
+                            actual_count=0,
+                            status='incomplete',
+                            pages_attempted=0,
+                            pages_succeeded=0,
+                            pages_failed=0
+                        )
+                        db.add(new_target)
+                    edition_targets_created += 1
+            else:
+                # Slow mode: query GS for each year
+                scholar_service = ScholarSearchService()
+                for year in missing_years:
+                    try:
+                        expected = await scholar_service.get_year_citation_count(scholar_id, year)
 
-                    if expected and expected > 0:
-                        if not request.dry_run:
-                            new_target = HarvestTarget(
-                                edition_id=edition.id,
-                                year=year,
-                                expected_count=expected,
-                                actual_count=0,
-                                status='incomplete',
-                                pages_attempted=0,
-                                pages_succeeded=0,
-                                pages_failed=0
-                            )
-                            db.add(new_target)
-                        edition_targets_created += 1
-                        edition_expected_added += expected
+                        if expected and expected > 0:
+                            if not request.dry_run:
+                                new_target = HarvestTarget(
+                                    edition_id=edition.id,
+                                    year=year,
+                                    expected_count=expected,
+                                    actual_count=0,
+                                    status='incomplete',
+                                    pages_attempted=0,
+                                    pages_succeeded=0,
+                                    pages_failed=0
+                                )
+                                db.add(new_target)
+                            edition_targets_created += 1
+                            edition_expected_added += expected
 
-                    await asyncio.sleep(2)  # Rate limit
-                except Exception as e:
-                    pass  # Skip failed years
+                        await asyncio.sleep(2)  # Rate limit
+                    except Exception as e:
+                        pass  # Skip failed years
 
             if not request.dry_run and edition_targets_created > 0:
                 edition.harvest_stall_count = 0
