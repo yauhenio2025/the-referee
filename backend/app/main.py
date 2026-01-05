@@ -4667,6 +4667,7 @@ async def sync_actual_counts(db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # Also reset stall counts for editions that now have correct data
+    stalled_editions = []
     if editions_affected:
         reset_result = await db.execute(
             select(Edition).where(
