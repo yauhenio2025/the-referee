@@ -268,9 +268,22 @@ async def update_harvest_target_progress(
     pages_succeeded: int = 0,
     pages_failed: int = 0,
     pages_attempted: int = 0,
-    mark_complete: bool = False
+    mark_complete: bool = False,
+    # Gap tracking parameters (NEW)
+    first_gs_count: Optional[int] = None,
+    last_gs_count: Optional[int] = None,
+    gap_reason: Optional[str] = None,
+    gap_details: Optional[dict] = None,
 ):
-    """Update a HarvestTarget with progress data after harvesting."""
+    """Update a HarvestTarget with progress data after harvesting.
+
+    Gap tracking parameters:
+    - first_gs_count: GS's reported count on page 0 (the "expected" that gets saved)
+    - last_gs_count: GS's reported count on the final page (may differ from first!)
+    - gap_reason: One of: gs_estimate_changed, rate_limit, parse_error, max_pages_reached,
+                  blocked, captcha, empty_page, pagination_ended, unknown
+    - gap_details: Additional context as JSONB (e.g., error messages, page numbers)
+    """
     result = await db.execute(
         select(HarvestTarget).where(
             HarvestTarget.edition_id == edition_id,
@@ -285,6 +298,43 @@ async def update_harvest_target_progress(
         target.pages_failed = pages_failed
         target.pages_attempted = pages_attempted
         target.updated_at = datetime.utcnow()
+
+        # Update gap tracking fields if provided
+        if first_gs_count is not None:
+            # Store original expected count (what GS showed on page 0)
+            target.original_expected = first_gs_count
+        if last_gs_count is not None:
+            # Store final GS count (what GS showed on last page - may differ!)
+            target.final_gs_count = last_gs_count
+        if pages_attempted is not None and pages_attempted > 0:
+            target.last_scraped_page = pages_attempted
+
+        # Auto-determine gap reason if not provided
+        if gap_reason:
+            target.gap_reason = gap_reason
+        elif first_gs_count is not None and last_gs_count is not None:
+            # Auto-detect if GS estimate changed during pagination
+            if first_gs_count != last_gs_count:
+                target.gap_reason = "gs_estimate_changed"
+                if not gap_details:
+                    gap_details = {}
+                gap_details["first_gs_count"] = first_gs_count
+                gap_details["last_gs_count"] = last_gs_count
+                gap_details["estimate_change"] = last_gs_count - first_gs_count
+                log_now(f"[HarvestTarget] 📊 GS estimate changed: {first_gs_count} → {last_gs_count} (diff: {last_gs_count - first_gs_count})")
+            elif actual_count < last_gs_count:
+                # GS estimate didn't change, but we still have a gap - needs investigation
+                target.gap_reason = "unknown"
+                if not gap_details:
+                    gap_details = {}
+                gap_details["expected_vs_actual"] = {
+                    "expected": last_gs_count,
+                    "actual": actual_count,
+                    "gap": last_gs_count - actual_count,
+                }
+
+        if gap_details:
+            target.gap_details = gap_details
 
         if mark_complete:
             # Only mark as "complete" if we actually attempted pages OR expected was 0
@@ -302,9 +352,21 @@ async def update_harvest_target_progress(
                 log_now(f"[HarvestTarget] WARNING: edition {edition_id} year {year} has expected={target.expected_count} but 0 pages attempted - marking incomplete")
             target.completed_at = datetime.utcnow()
 
+        # AUTO-COMPLETE for GS estimate changes:
+        # If gap is due to GS changing its estimate AND we got all the results GS now reports,
+        # mark as complete since there's nothing more we can do
+        if (target.gap_reason == "gs_estimate_changed" and
+            target.final_gs_count is not None and
+            actual_count >= target.final_gs_count * 0.95):  # 95% threshold for tolerance
+            if target.status == "incomplete":
+                target.status = "complete"
+                target.completed_at = datetime.utcnow()
+                log_now(f"[HarvestTarget] ✓ Auto-completing edition {edition_id} year {year}: GS estimate changed from {target.original_expected} to {target.final_gs_count}, we have {actual_count}")
+
         await db.commit()
         status_str = f", status={target.status}" if mark_complete else ""
-        log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: actual={actual_count}, pages OK={pages_succeeded}, pages FAIL={pages_failed}{status_str}")
+        gap_str = f", gap_reason={target.gap_reason}" if target.gap_reason else ""
+        log_now(f"[HarvestTarget] Updated edition {edition_id} year {year}: actual={actual_count}, pages OK={pages_succeeded}, pages FAIL={pages_failed}{status_str}{gap_str}")
 
 
 async def record_failed_fetch(
@@ -1505,6 +1567,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     year_pages_succeeded = 0
                     year_pages_failed = 0
                     year_pages_attempted = 0
+                    # Gap tracking for diagnostics
+                    year_first_gs_count = None  # GS count from page 0
+                    year_last_gs_count = None   # GS count from final page (may differ!)
 
                     # Create on_page_failed callback for this year
                     async def on_page_failed_for_year(page_num: int, url: str, error: str):
@@ -1567,10 +1632,15 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 on_page_failed=on_page_failed_for_year,
                             )
                             year_citations = total_new_citations - year_start_citations
-                            # Track pages from result
+                            # Track pages and gap data from result
                             if isinstance(result, dict):
                                 year_pages_succeeded = result.get("pages_succeeded", 0)
                                 year_pages_attempted = result.get("pages_fetched", 0)
+                                # Extract gap tracking data
+                                year_first_gs_count = result.get("first_gs_count")
+                                year_last_gs_count = result.get("last_gs_count")
+                                if result.get("gs_count_changed"):
+                                    log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ GS COUNT CHANGED during fallback: {year_first_gs_count} → {year_last_gs_count}")
                             # Fallback harvest counts as partial success if we got pages
                             if year_pages_attempted > 0:
                                 year_harvest_succeeded = True
@@ -1590,11 +1660,16 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         )
 
                         year_citations = total_new_citations - year_start_citations
-                        # Track pages from result
+                        # Track pages and gap data from result
                         if isinstance(result, dict):
                             year_pages_succeeded = result.get("pages_succeeded", 0)
                             year_pages_failed = result.get("pages_failed", 0)
                             year_pages_attempted = result.get("pages_fetched", 0)
+                            # Extract gap tracking data
+                            year_first_gs_count = result.get("first_gs_count")
+                            year_last_gs_count = result.get("last_gs_count")
+                            if result.get("gs_count_changed"):
+                                log_now(f"[EDITION {i+1}] 📅 Year {year}: ⚠️ GS COUNT CHANGED during scraping: {year_first_gs_count} → {year_last_gs_count}")
                         log_now(f"[EDITION {i+1}] 📅 Year {year}: {year_citations} new citations (Scholar reports {total_this_year} total, pages OK={year_pages_succeeded}, FAIL={year_pages_failed})")
 
                     # Query ACTUAL count of citations in DB for this edition+year
@@ -1626,6 +1701,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         await save_year_resume_state(year, 0, completed_years)  # page=0 since year is done
 
                         # Update HarvestTarget with ACTUAL count from DB (not just new this job)
+                        # Include gap tracking data for diagnostics
                         await update_harvest_target_progress(
                             db=db,
                             edition_id=edition.id,
@@ -1634,7 +1710,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             pages_succeeded=year_pages_succeeded,
                             pages_failed=year_pages_failed,
                             pages_attempted=year_pages_attempted,
-                            mark_complete=True
+                            mark_complete=True,
+                            first_gs_count=year_first_gs_count,
+                            last_gs_count=year_last_gs_count,
                         )
                     else:
                         # Harvest incomplete - still need more citations
@@ -1648,7 +1726,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             pages_succeeded=year_pages_succeeded,
                             pages_failed=year_pages_failed,
                             pages_attempted=year_pages_attempted,
-                            mark_complete=False  # Don't mark complete - needs retry
+                            mark_complete=False,  # Don't mark complete - needs retry
+                            first_gs_count=year_first_gs_count,
+                            last_gs_count=year_last_gs_count,
                         )
 
                     # Track consecutive empty years for early termination
@@ -1732,6 +1812,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 log_now(f"[EDITION {i+1}]   result keys: {result.keys() if isinstance(result, dict) else 'NOT A DICT'}")
                 log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
                 log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
+                # Log gap tracking info
+                if isinstance(result, dict) and result.get("gs_count_changed"):
+                    log_now(f"[EDITION {i+1}]   ⚠️ GS COUNT CHANGED: {result.get('first_gs_count')} → {result.get('last_gs_count')}")
 
                 # Update HarvestTarget with ACTUAL total count from database (not just new this job)
                 if isinstance(result, dict) and edition.citation_count and edition.citation_count > 0:
@@ -1742,6 +1825,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     )
                     std_actual_count = std_actual_result.scalar() or 0
 
+                    # Include gap tracking data for diagnostics
                     await update_harvest_target_progress(
                         db=db,
                         edition_id=edition.id,
@@ -1750,7 +1834,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         pages_succeeded=result.get("pages_succeeded", 0),
                         pages_failed=result.get("pages_failed", 0),
                         pages_attempted=result.get("pages_fetched", 0),
-                        mark_complete=True
+                        mark_complete=True,
+                        first_gs_count=result.get("first_gs_count"),
+                        last_gs_count=result.get("last_gs_count"),
                     )
 
             edition_citations = total_new_citations - edition_start_citations

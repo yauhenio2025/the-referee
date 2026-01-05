@@ -5525,6 +5525,397 @@ async def get_harvest_year_details(
     }
 
 
+# ============== Gap Diagnostics ==============
+
+@app.get("/api/admin/gap-diagnostics")
+async def get_gap_diagnostics(
+    include_explained: bool = False,
+    min_gap: int = 1,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get harvest targets with unexplained gaps for manual diagnosis.
+
+    By default, excludes gaps where gap_reason = 'gs_estimate_changed' (these are acceptable).
+    Use include_explained=true to see all gaps including those with known causes.
+
+    Returns targets grouped by edition with gap details for investigation.
+    """
+    # Build query for harvest targets with gaps
+    query = (
+        select(HarvestTarget, Edition)
+        .join(Edition, HarvestTarget.edition_id == Edition.id)
+        .where(HarvestTarget.status == "incomplete")
+        .where(HarvestTarget.expected_count > 0)
+    )
+
+    result = await db.execute(query)
+    all_targets = result.all()
+
+    # Filter and organize targets
+    editions_with_gaps = {}
+
+    for target, edition in all_targets:
+        # Calculate gap
+        actual = target.actual_count or 0
+        expected = target.expected_count or 0
+        gap = expected - actual
+
+        # Skip if gap too small
+        if gap < min_gap:
+            continue
+
+        # Skip explained gaps unless requested
+        if not include_explained and target.gap_reason == "gs_estimate_changed":
+            continue
+
+        # Group by edition
+        if edition.id not in editions_with_gaps:
+            editions_with_gaps[edition.id] = {
+                "id": edition.id,
+                "title": edition.title[:80] if edition.title else "Unknown",
+                "scholar_id": edition.scholar_id,
+                "gs_url": f"https://scholar.google.com/scholar?cites={edition.scholar_id}&hl=en" if edition.scholar_id else None,
+                "harvest_stall_count": edition.harvest_stall_count,
+                "targets": [],
+                "total_gap": 0,
+                "unexplained_gap": 0,
+            }
+
+        # Determine if gap is explained or unexplained
+        is_explained = target.gap_reason == "gs_estimate_changed"
+
+        target_info = {
+            "year": target.year,
+            "expected": expected,
+            "actual": actual,
+            "gap": gap,
+            "gap_pct": round((gap / expected) * 100, 1) if expected > 0 else 0,
+            "original_expected": target.original_expected,
+            "final_gs_count": target.final_gs_count,
+            "gap_reason": target.gap_reason,
+            "gap_details": target.gap_details,
+            "last_scraped_page": target.last_scraped_page,
+            "pages_attempted": target.pages_attempted,
+            "pages_succeeded": target.pages_succeeded,
+            "pages_failed": target.pages_failed,
+            "is_explained": is_explained,
+            "gap_reviewed": target.gap_reviewed,
+            "gap_review_notes": target.gap_review_notes,
+            "gs_year_url": f"https://scholar.google.com/scholar?cites={edition.scholar_id}&hl=en&as_ylo={target.year}&as_yhi={target.year}" if edition.scholar_id and target.year else None
+        }
+
+        editions_with_gaps[edition.id]["targets"].append(target_info)
+        editions_with_gaps[edition.id]["total_gap"] += gap
+        if not is_explained:
+            editions_with_gaps[edition.id]["unexplained_gap"] += gap
+
+    # Sort editions by unexplained gap (descending)
+    sorted_editions = sorted(
+        editions_with_gaps.values(),
+        key=lambda e: e["unexplained_gap"],
+        reverse=True
+    )
+
+    # Summary stats
+    total_targets = sum(len(e["targets"]) for e in sorted_editions)
+    total_gap = sum(e["total_gap"] for e in sorted_editions)
+    total_unexplained = sum(e["unexplained_gap"] for e in sorted_editions)
+
+    return {
+        "success": True,
+        "summary": {
+            "editions_with_gaps": len(sorted_editions),
+            "total_targets_with_gaps": total_targets,
+            "total_gap": total_gap,
+            "total_unexplained_gap": total_unexplained,
+            "include_explained": include_explained,
+            "min_gap_filter": min_gap,
+        },
+        "editions": sorted_editions,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.post("/api/admin/gap-diagnostics/mark-reviewed")
+async def mark_gap_reviewed(
+    edition_id: int,
+    year: int = None,
+    reviewed: bool = True,
+    notes: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a harvest target gap as manually reviewed.
+
+    This allows tracking which gaps have been investigated and what was found.
+    """
+    query = select(HarvestTarget).where(
+        HarvestTarget.edition_id == edition_id,
+        HarvestTarget.year == year
+    )
+    result = await db.execute(query)
+    target = result.scalar_one_or_none()
+
+    if not target:
+        raise HTTPException(status_code=404, detail=f"HarvestTarget not found for edition {edition_id}, year {year}")
+
+    target.gap_reviewed = reviewed
+    if notes:
+        target.gap_review_notes = notes
+    target.updated_at = datetime.utcnow()
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": f"Marked gap for edition {edition_id}, year {year} as {'reviewed' if reviewed else 'unreviewed'}",
+        "gap_reviewed": target.gap_reviewed,
+        "gap_review_notes": target.gap_review_notes,
+    }
+
+
+@app.post("/api/admin/gap-diagnostics/set-reason")
+async def set_gap_reason(
+    edition_id: int,
+    year: int = None,
+    gap_reason: str = None,
+    gap_details: dict = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually set the gap reason for a harvest target.
+
+    Valid gap reasons:
+    - gs_estimate_changed: GS's count changed during pagination (acceptable)
+    - rate_limit: We got rate-limited
+    - parse_error: Page parsing failed
+    - max_pages_reached: Hit the 100-page limit
+    - blocked: Got blocked by CAPTCHA
+    - empty_page: Page returned no results unexpectedly
+    - pagination_ended: GS stopped returning results early
+    - unknown: Needs investigation
+    """
+    query = select(HarvestTarget).where(
+        HarvestTarget.edition_id == edition_id,
+        HarvestTarget.year == year
+    )
+    result = await db.execute(query)
+    target = result.scalar_one_or_none()
+
+    if not target:
+        raise HTTPException(status_code=404, detail=f"HarvestTarget not found for edition {edition_id}, year {year}")
+
+    if gap_reason:
+        target.gap_reason = gap_reason
+    if gap_details:
+        target.gap_details = gap_details
+    target.updated_at = datetime.utcnow()
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": f"Updated gap reason for edition {edition_id}, year {year}",
+        "gap_reason": target.gap_reason,
+        "gap_details": target.gap_details,
+    }
+
+
+@app.post("/api/admin/gap-diagnostics/auto-complete-estimate-changes")
+async def auto_complete_estimate_changes(
+    dry_run: bool = True,
+    completion_threshold: float = 0.95,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Auto-complete harvest targets where the gap is due to GS estimate changes.
+
+    This finds all incomplete targets where:
+    1. We have gap tracking data (first_gs_count, last_gs_count)
+    2. The GS count changed (first != last)
+    3. We got >= 95% of what GS now reports (actual >= last_gs_count * threshold)
+
+    These targets are "complete" in the sense that we can't get more results -
+    GS simply reduced its count during pagination.
+
+    Args:
+        dry_run: If true, just return what would be completed without making changes
+        completion_threshold: What % of final_gs_count we need to consider it complete (default 0.95)
+
+    Returns:
+        List of targets that were/would be auto-completed
+    """
+    # Find incomplete targets with gap tracking data
+    query = (
+        select(HarvestTarget, Edition)
+        .join(Edition, HarvestTarget.edition_id == Edition.id)
+        .where(HarvestTarget.status == "incomplete")
+        .where(HarvestTarget.original_expected.isnot(None))
+        .where(HarvestTarget.final_gs_count.isnot(None))
+    )
+
+    result = await db.execute(query)
+    all_targets = result.all()
+
+    candidates = []
+    auto_completed = []
+
+    for target, edition in all_targets:
+        # Check if GS count changed
+        if target.original_expected == target.final_gs_count:
+            continue  # No estimate change
+
+        # Check if we got enough of the final count
+        actual = target.actual_count or 0
+        final = target.final_gs_count or 0
+        if final <= 0:
+            continue
+
+        ratio = actual / final
+        if ratio >= completion_threshold:
+            candidates.append({
+                "edition_id": edition.id,
+                "edition_title": edition.title[:60] if edition.title else "Unknown",
+                "year": target.year,
+                "original_expected": target.original_expected,
+                "final_gs_count": target.final_gs_count,
+                "actual_count": actual,
+                "completion_ratio": round(ratio * 100, 1),
+                "estimate_change": target.final_gs_count - target.original_expected,
+            })
+
+            if not dry_run:
+                # Mark as complete
+                target.status = "complete"
+                target.gap_reason = "gs_estimate_changed"
+                target.gap_details = {
+                    "original_expected": target.original_expected,
+                    "final_gs_count": target.final_gs_count,
+                    "auto_completed": True,
+                    "completion_ratio": ratio,
+                }
+                target.completed_at = datetime.utcnow()
+                auto_completed.append(target)
+
+    if not dry_run and auto_completed:
+        await db.commit()
+
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "completion_threshold": completion_threshold,
+        "candidates_found": len(candidates),
+        "auto_completed_count": len(auto_completed) if not dry_run else 0,
+        "candidates": candidates,
+        "message": f"{'Would auto-complete' if dry_run else 'Auto-completed'} {len(candidates)} targets where GS estimate changed"
+    }
+
+
+@app.post("/api/admin/gap-diagnostics/analyze-gaps")
+async def analyze_existing_gaps(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Analyze all incomplete harvest targets to determine gap reasons.
+
+    This is a one-time remediation that looks at existing data and tries to
+    categorize gaps based on available information:
+
+    1. If actual >= expected * 0.95: Mark as complete (within tolerance)
+    2. If original_expected != final_gs_count: Gap is "gs_estimate_changed"
+    3. If pages_failed > 0: Gap might be due to rate_limit or parse_error
+    4. Otherwise: Mark as "unknown" for manual investigation
+
+    Returns summary of what was found and updated.
+    """
+    # Find all incomplete targets
+    query = (
+        select(HarvestTarget)
+        .where(HarvestTarget.status == "incomplete")
+        .where(HarvestTarget.expected_count > 0)
+    )
+
+    result = await db.execute(query)
+    targets = result.scalars().all()
+
+    stats = {
+        "total_incomplete": len(targets),
+        "already_categorized": 0,
+        "auto_completed": 0,
+        "gs_estimate_changed": 0,
+        "with_failed_pages": 0,
+        "unknown": 0,
+    }
+
+    updated_targets = []
+
+    for target in targets:
+        expected = target.expected_count or 0
+        actual = target.actual_count or 0
+
+        # Skip if already has a gap reason
+        if target.gap_reason:
+            stats["already_categorized"] += 1
+            continue
+
+        # Check if within completion tolerance (95%)
+        if expected > 0 and actual >= expected * 0.95:
+            target.status = "complete"
+            target.completed_at = datetime.utcnow()
+            stats["auto_completed"] += 1
+            updated_targets.append(target)
+            continue
+
+        # Check for GS estimate changes (using expected_count difference from actual)
+        # Note: This is a heuristic since we don't have first/last counts for old data
+        gap_pct = ((expected - actual) / expected * 100) if expected > 0 else 0
+        if 5 <= gap_pct <= 25:
+            # Typical GS estimate drift is 10-20%
+            target.gap_reason = "gs_estimate_changed"
+            target.gap_details = {
+                "heuristic": True,
+                "note": "Categorized based on gap percentage typical of GS estimate drift"
+            }
+            stats["gs_estimate_changed"] += 1
+            updated_targets.append(target)
+            continue
+
+        # Check for failed pages
+        if target.pages_failed and target.pages_failed > 0:
+            target.gap_reason = "rate_limit"
+            target.gap_details = {
+                "pages_failed": target.pages_failed,
+                "note": "Has failed pages that may need retry"
+            }
+            stats["with_failed_pages"] += 1
+            updated_targets.append(target)
+            continue
+
+        # Otherwise unknown
+        target.gap_reason = "unknown"
+        target.gap_details = {
+            "expected": expected,
+            "actual": actual,
+            "gap": expected - actual,
+            "gap_pct": gap_pct,
+            "note": "Needs manual investigation"
+        }
+        stats["unknown"] += 1
+        updated_targets.append(target)
+
+    # Commit changes
+    if updated_targets:
+        await db.commit()
+
+    return {
+        "success": True,
+        "stats": stats,
+        "updated_count": len(updated_targets),
+        "message": f"Analyzed {len(targets)} incomplete targets, updated {len(updated_targets)}"
+    }
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):

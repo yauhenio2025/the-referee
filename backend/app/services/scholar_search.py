@@ -284,6 +284,8 @@ class ScholarSearchService:
         all_papers = []
         failed_pages = []  # Track failed pages for retry
         total_results = None
+        first_gs_count = None  # GS count from page 0 (for gap tracking)
+        last_gs_count = None   # GS count from most recent page (may differ)
         current_page = start_page
         max_pages = (max_results + 9) // 10
         consecutive_failures = 0
@@ -305,9 +307,20 @@ class ScholarSearchService:
                 log_now(f"[PAGE {current_page + 1}] HTML received, length: {len(html)} bytes")
                 log_now(f"[PAGE {current_page + 1}] HTML preview: {html[:500]}...")
 
+                # Extract GS count from EVERY page to detect estimate changes
+                page_gs_count = self._extract_result_count(html)
+                log_now(f"[PAGE {current_page + 1}] GS reports: {page_gs_count} results")
+
                 if current_page == 0 or total_results is None:
-                    total_results = self._extract_result_count(html)
-                    log_now(f"[PAGE {current_page + 1}] Extracted total_results: {total_results}")
+                    total_results = page_gs_count
+                    first_gs_count = page_gs_count
+                    log_now(f"[PAGE {current_page + 1}] First GS count: {first_gs_count}")
+
+                # Always track the most recent GS count (may differ from first)
+                if page_gs_count is not None:
+                    if last_gs_count is not None and page_gs_count != last_gs_count:
+                        log_now(f"[PAGE {current_page + 1}] ⚠️ GS COUNT CHANGED: {last_gs_count} → {page_gs_count}")
+                    last_gs_count = page_gs_count
 
                 log_now(f"[PAGE {current_page + 1}] Calling _parse_scholar_page...")
                 extracted = self._parse_scholar_page(html)
@@ -385,6 +398,10 @@ class ScholarSearchService:
                 current_page += 1
                 await asyncio.sleep(5)
 
+        # Determine if GS count changed during pagination (explains gaps)
+        gs_count_changed = (first_gs_count is not None and last_gs_count is not None
+                          and first_gs_count != last_gs_count)
+
         log_now(f"╔{'═'*60}╗")
         log_now(f"║  CITED_BY_IMPL COMPLETE")
         log_now(f"╠{'═'*60}╣")
@@ -392,7 +409,10 @@ class ScholarSearchService:
         log_now(f"║  Pages succeeded: {pages_succeeded}")
         log_now(f"║  Pages failed: {len(failed_pages)}")
         log_now(f"║  Last page: {current_page}")
-        log_now(f"║  Total results (Scholar count): {total_results}")
+        log_now(f"║  First GS count (page 0): {first_gs_count}")
+        log_now(f"║  Last GS count (final page): {last_gs_count}")
+        if gs_count_changed:
+            log_now(f"║  ⚠️ GS COUNT CHANGED: {first_gs_count} → {last_gs_count}")
         log_now(f"╚{'═'*60}╝")
 
         return {
@@ -401,8 +421,12 @@ class ScholarSearchService:
             "pages_fetched": current_page,
             "pages_succeeded": pages_succeeded,
             "pages_failed": len(failed_pages),
-            "failed_pages": failed_pages,  # NEW: include failed page details
+            "failed_pages": failed_pages,  # Include failed page details
             "last_page": current_page,  # For resume
+            # Gap tracking fields
+            "first_gs_count": first_gs_count,  # GS count from page 0
+            "last_gs_count": last_gs_count,    # GS count from final page (may differ)
+            "gs_count_changed": gs_count_changed,  # True if estimate changed during scraping
         }
 
     async def verify_last_page(

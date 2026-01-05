@@ -4,6 +4,7 @@ Database models for The Referee
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import String, Integer, Text, DateTime, Boolean, ForeignKey, JSON, Float, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -410,6 +411,22 @@ class HarvestTarget(Base):
     pages_attempted: Mapped[int] = mapped_column(Integer, default=0)
     pages_succeeded: Mapped[int] = mapped_column(Integer, default=0)
     pages_failed: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Gap tracking for diagnostics
+    # Original count GS showed on page 1
+    original_expected: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Last count GS showed (may differ from original as we paginate)
+    final_gs_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Reason for gap: gs_estimate_changed, rate_limit, parse_error, max_pages_reached,
+    #                 blocked, captcha, empty_page, pagination_ended, unknown
+    gap_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Additional context as JSON
+    gap_details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Page number where scraping stopped
+    last_scraped_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Manual review tracking
+    gap_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    gap_review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
