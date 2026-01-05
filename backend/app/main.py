@@ -5223,6 +5223,78 @@ async def reset_stall_counts(db: AsyncSession = Depends(get_db)):
     }
 
 
+# ============== Mark Near-Complete Targets ==============
+
+class MarkNearCompleteRequest(BaseModel):
+    threshold_percent: float = 95.0  # Mark as complete if actual >= threshold% of expected
+    min_expected: int = 10  # Only consider targets with at least this many expected
+    dry_run: bool = True
+
+@app.post("/api/admin/mark-near-complete-targets")
+async def mark_near_complete_targets(
+    request: MarkNearCompleteRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark harvest_targets as 'complete' when they're nearly done.
+
+    This helps prevent stalls for targets that are 95%+ complete but
+    Google Scholar keeps returning duplicates for the remaining citations.
+
+    Parameters:
+    - threshold_percent: Mark as complete if actual >= this % of expected (default: 95)
+    - min_expected: Only process targets with at least this many expected (default: 10)
+    - dry_run: If True, just report what would be marked (default: True)
+    """
+    from app.models import HarvestTarget
+    from sqlalchemy import func
+
+    # Find targets that are:
+    # - Not complete
+    # - Have expected_count >= min_expected
+    # - Have actual_count >= threshold_percent of expected_count
+    result = await db.execute(
+        select(HarvestTarget, Edition.title)
+        .join(Edition, Edition.id == HarvestTarget.edition_id)
+        .where(
+            HarvestTarget.status != 'complete',
+            HarvestTarget.expected_count >= request.min_expected,
+            HarvestTarget.actual_count >= (HarvestTarget.expected_count * request.threshold_percent / 100.0)
+        )
+        .order_by(HarvestTarget.edition_id, HarvestTarget.year)
+    )
+    rows = result.all()
+
+    targets_to_mark = []
+    for target, title in rows:
+        pct = (target.actual_count / target.expected_count * 100) if target.expected_count > 0 else 0
+        targets_to_mark.append({
+            "edition_id": target.edition_id,
+            "title": title[:50] if title else "Unknown",
+            "year": target.year,
+            "expected": target.expected_count,
+            "actual": target.actual_count,
+            "percent_complete": round(pct, 1),
+            "gap": target.expected_count - target.actual_count
+        })
+
+        if not request.dry_run:
+            target.status = 'complete'
+
+    if not request.dry_run:
+        await db.commit()
+
+    return {
+        "success": True,
+        "dry_run": request.dry_run,
+        "threshold_percent": request.threshold_percent,
+        "min_expected": request.min_expected,
+        "targets_count": len(targets_to_mark),
+        "targets": targets_to_mark,
+        "message": f"{'Would mark' if request.dry_run else 'Marked'} {len(targets_to_mark)} targets as complete"
+    }
+
+
 # ============== Bibliography Parsing ==============
 
 class BibliographyParseRequest(BaseModel):
