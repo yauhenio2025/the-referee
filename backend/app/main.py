@@ -4581,6 +4581,113 @@ async def auto_unstall_editions(
     )
 
 
+# ============== Sync Actual Counts with Real Citation Data ==============
+
+class SyncActualCountsResponse(BaseModel):
+    success: bool
+    targets_synced: int
+    targets_status_changed: int
+    editions_affected: int
+    details: list[dict]
+    message: str
+
+@app.post("/api/admin/sync-actual-counts", response_model=SyncActualCountsResponse)
+async def sync_actual_counts(db: AsyncSession = Depends(get_db)):
+    """
+    Sync harvest_targets.actual_count with real citation counts from the database.
+
+    This fixes the ROOT CAUSE of stalling: actual_count=0 while citations actually exist.
+    After syncing, it re-evaluates completion status based on real data.
+    """
+    from app.models import HarvestTarget, Citation
+    from sqlalchemy import func
+
+    # Get real citation counts per edition+year
+    real_counts_query = (
+        select(
+            Citation.edition_id,
+            Citation.year,
+            func.count().label('real_count')
+        )
+        .group_by(Citation.edition_id, Citation.year)
+    )
+    real_counts_result = await db.execute(real_counts_query)
+    real_counts = {(row.edition_id, row.year): row.real_count for row in real_counts_result}
+
+    # Get all harvest_targets
+    targets_result = await db.execute(
+        select(HarvestTarget).options(selectinload(HarvestTarget.edition))
+    )
+    targets = list(targets_result.scalars().all())
+
+    targets_synced = 0
+    targets_status_changed = 0
+    editions_affected = set()
+    details = []
+
+    for target in targets:
+        real_count = real_counts.get((target.edition_id, target.year), 0)
+        old_actual = target.actual_count or 0
+        old_status = target.status
+
+        if old_actual != real_count:
+            target.actual_count = real_count
+            targets_synced += 1
+            editions_affected.add(target.edition_id)
+
+            # Re-evaluate status based on synced data
+            expected = target.expected_count or 0
+            if expected > 0:
+                completion_ratio = real_count / expected
+                # Mark as complete if >= 95% or if we got more than expected
+                if completion_ratio >= 0.95 or real_count >= expected:
+                    if old_status != 'complete':
+                        target.status = 'complete'
+                        target.completed_at = datetime.utcnow()
+                        targets_status_changed += 1
+                else:
+                    if old_status == 'complete':
+                        target.status = 'incomplete'
+                        target.completed_at = None
+                        targets_status_changed += 1
+
+            if target.edition:
+                details.append({
+                    "edition_id": target.edition_id,
+                    "title": target.edition.title[:40] if target.edition.title else "Unknown",
+                    "year": target.year,
+                    "old_actual": old_actual,
+                    "new_actual": real_count,
+                    "expected": expected,
+                    "old_status": old_status,
+                    "new_status": target.status
+                })
+
+    await db.commit()
+
+    # Also reset stall counts for editions that now have correct data
+    if editions_affected:
+        reset_result = await db.execute(
+            select(Edition).where(
+                Edition.id.in_(editions_affected),
+                Edition.harvest_stall_count > 0
+            )
+        )
+        stalled_editions = list(reset_result.scalars().all())
+        for edition in stalled_editions:
+            edition.harvest_stall_count = 0
+        await db.commit()
+
+    return SyncActualCountsResponse(
+        success=True,
+        targets_synced=targets_synced,
+        targets_status_changed=targets_status_changed,
+        editions_affected=len(editions_affected),
+        details=details[:100],  # Limit details to first 100
+        message=f"Synced {targets_synced} targets across {len(editions_affected)} editions. {targets_status_changed} status changes. Reset stall counts for {len(stalled_editions)} editions."
+    )
+
+
 # ============== Refresh Expected Counts from GS ==============
 
 class RefreshExpectedCountsRequest(BaseModel):

@@ -1723,14 +1723,20 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 log_now(f"[EDITION {i+1}]   papers count: {len(result.get('papers', [])) if isinstance(result, dict) else 'N/A'}")
                 log_now(f"[EDITION {i+1}]   totalResults: {result.get('totalResults', 'N/A') if isinstance(result, dict) else 'N/A'}")
 
-                # Update HarvestTarget with actual results
+                # Update HarvestTarget with ACTUAL total count from database (not just new this job)
                 if isinstance(result, dict) and edition.citation_count and edition.citation_count > 0:
-                    std_citations = total_new_citations - edition_start_citations
+                    # Query actual total citations in DB for this edition (all years)
+                    std_actual_result = await db.execute(
+                        select(func.count(Citation.id))
+                        .where(Citation.edition_id == edition.id)
+                    )
+                    std_actual_count = std_actual_result.scalar() or 0
+
                     await update_harvest_target_progress(
                         db=db,
                         edition_id=edition.id,
                         year=None,  # Standard harvest = all years
-                        actual_count=std_citations,
+                        actual_count=std_actual_count,  # Total in DB, not just new this job
                         pages_succeeded=result.get("pages_succeeded", 0),
                         pages_failed=result.get("pages_failed", 0),
                         pages_attempted=result.get("pages_fetched", 0),
