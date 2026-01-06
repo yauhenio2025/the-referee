@@ -2267,6 +2267,7 @@ button:disabled {
 .activity-stats-table .stat-value {
   color: var(--text-secondary);
   font-family: 'SF Mono', 'Monaco', monospace;
+  display: table-cell;  /* Override generic .stat-value display:block */
 }
 
 .activity-stats-table .stat-citations {
