@@ -1158,18 +1158,26 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
     log_now(f"[Worker] Processing {len(valid_editions)} editions, skipped {len(skipped_editions)}")
 
-    # Get existing citations to avoid duplicates (refreshed after each save)
+    # Get existing citations to avoid redundant DB calls within this job run
+    # IMPORTANT: Only track citations we've already tried to INSERT this session
+    # We used to check paper_id here, but that caused cross-edition duplicates to be
+    # skipped entirely (never even reaching the ON CONFLICT handler)
+    # Now we start with an empty set and add as we go - the ON CONFLICT handles deduplication
     async def get_existing_scholar_ids():
-        result = await db.execute(
-            select(Citation.scholar_id).where(Citation.paper_id == paper_id)
-        )
-        return {r[0] for r in result.fetchall() if r[0]}
+        # Start empty - DB deduplication via ON CONFLICT handles cross-edition duplicates
+        # This ensures we always attempt INSERT for citations we haven't seen this session
+        # even if they exist in DB from another edition
+        return set()
 
     existing_scholar_ids = await get_existing_scholar_ids()
 
-    # Calculate totals for progress tracking (AFTER existing_scholar_ids is fetched)
+    # Calculate totals for progress tracking
+    # Query actual DB count for display (existing_scholar_ids is empty by design for deduplication)
     total_target_citations = sum(e.citation_count or 0 for e in valid_editions)
-    total_previously_harvested = len(existing_scholar_ids)
+    db_count_result = await db.execute(
+        select(func.count(Citation.id)).where(Citation.paper_id == paper_id)
+    )
+    total_previously_harvested = db_count_result.scalar() or 0
 
     # Initial detailed progress
     await update_job_progress(
@@ -2258,7 +2266,11 @@ async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str
     # Get scholar service (not async)
     scholar_service = get_scholar_service()
 
-    # Get existing citation scholar IDs to avoid duplicates
+    # Get existing citation scholar IDs to avoid duplicate key violations
+    # NOTE: Unlike the main harvester (which uses ON CONFLICT to increment encounter_count),
+    # this job uses ORM insert so we MUST skip existing citations to avoid constraint errors.
+    # This means cross-edition duplicates won't increment encounter_count, but that's acceptable
+    # for this diagnostic job type.
     existing_result = await db.execute(
         select(Citation.scholar_id).where(Citation.paper_id == edition.paper_id)
     )
@@ -2392,7 +2404,11 @@ async def process_verify_and_repair_job(job: Job, db: AsyncSession) -> Dict[str,
     all_gap_details = []
     edition_results = []
 
-    # Get existing citations to avoid duplicates
+    # Get existing citations to avoid duplicate key violations
+    # NOTE: Unlike the main harvester (which uses ON CONFLICT to increment encounter_count),
+    # this job uses ORM insert so we MUST skip existing citations to avoid constraint errors.
+    # This means cross-edition duplicates won't increment encounter_count, but that's acceptable
+    # for this diagnostic job type.
     existing_result = await db.execute(
         select(Citation.scholar_id).where(Citation.paper_id == paper_id)
     )
