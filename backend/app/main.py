@@ -8261,3 +8261,54 @@ async def external_health_check(api_key: str = Depends(verify_api_key)):
         "api_auth_enabled": settings.api_auth_enabled,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# ============== Citation Buffer Admin Endpoints ==============
+
+@app.get("/api/admin/citation-buffer/stats")
+async def get_citation_buffer_stats():
+    """
+    Get statistics about the citation buffer (local saves pending DB sync).
+    """
+    from .services.citation_buffer import get_buffer
+
+    buffer = get_buffer()
+    stats = buffer.get_buffer_stats()
+
+    return {
+        "buffer_stats": stats,
+        "description": "Citation buffer holds pages that failed DB save for retry",
+    }
+
+
+@app.post("/api/admin/citation-buffer/retry")
+async def retry_citation_buffer():
+    """
+    Manually trigger retry of failed citation saves from the buffer.
+    """
+    from .services.citation_buffer import retry_failed_saves
+
+    retried = await retry_failed_saves()
+
+    return {
+        "success": True,
+        "pages_retried": retried,
+        "message": f"Retried {retried} pages from citation buffer",
+    }
+
+
+@app.post("/api/admin/citation-buffer/cleanup")
+async def cleanup_citation_buffer(max_age_hours: int = 24):
+    """
+    Clean up old buffer files (default: older than 24 hours).
+    """
+    from .services.citation_buffer import get_buffer
+
+    buffer = get_buffer()
+    removed = buffer.cleanup_old_buffers(max_age_hours=max_age_hours)
+
+    return {
+        "success": True,
+        "files_removed": removed,
+        "message": f"Removed {removed} buffer files older than {max_age_hours} hours",
+    }

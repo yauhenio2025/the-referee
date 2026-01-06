@@ -19,6 +19,7 @@ from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
+from .citation_buffer import get_buffer, BufferedPage
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,66 @@ async def update_job_progress(
         .values(**values)
     )
     await db.commit()
+
+
+async def save_buffered_citations(page: 'BufferedPage') -> int:
+    """
+    Save citations from a buffered page to the database.
+
+    Called by the retry mechanism to process failed saves.
+    Returns count of citations saved.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    papers = page.papers
+    paper_id = page.paper_id
+    target_edition_id = page.target_edition_id
+
+    log_now(f"[RETRY] Processing buffered page {page.page_num} for job {page.job_id}: {len(papers)} papers")
+
+    saved_count = 0
+
+    async with async_session() as db:
+        try:
+            for paper_data in papers:
+                if not isinstance(paper_data, dict):
+                    continue
+
+                scholar_id = paper_data.get("scholarId")
+                if not scholar_id:
+                    continue
+
+                stmt = pg_insert(Citation).values(
+                    paper_id=paper_id,
+                    edition_id=target_edition_id,
+                    scholar_id=scholar_id,
+                    title=paper_data.get("title", "Unknown"),
+                    authors=paper_data.get("authorsRaw"),
+                    year=paper_data.get("year"),
+                    venue=paper_data.get("venue"),
+                    abstract=paper_data.get("abstract"),
+                    link=paper_data.get("link"),
+                    citation_count=paper_data.get("citationCount", 0),
+                    intersection_count=1,
+                    encounter_count=1,
+                ).on_conflict_do_update(
+                    index_elements=['paper_id', 'scholar_id'],
+                    set_={'encounter_count': Citation.encounter_count + 1}
+                )
+                await db.execute(stmt)
+                saved_count += 1
+
+            await db.commit()
+            log_now(f"[RETRY] ✓ Saved {saved_count} citations from buffered page {page.page_num}")
+            return saved_count
+
+        except Exception as e:
+            log_now(f"[RETRY] ✗ Failed to save buffered page {page.page_num}: {e}")
+            try:
+                await db.rollback()
+            except:
+                pass
+            raise
 
 
 async def update_edition_harvest_stats(db: AsyncSession, edition_id: int):
@@ -1200,11 +1261,26 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
             new_count = 0
             skipped_no_id = 0
 
+            # STEP 1: Save to local buffer FIRST (resilient to DB timeouts)
+            buffer = get_buffer()
+            buffer.save_page(
+                job_id=job.id,
+                paper_id=paper_id,
+                edition_id=edition.id,
+                target_edition_id=target_edition_id,
+                page_num=page_num,
+                papers=papers
+            )
+            log_now(f"[CALLBACK] ✓ Buffered page {page_num + 1} locally ({len(papers)} papers)")
+
+            # STEP 2: Try to save to DB
             # Use a FRESH session to avoid greenlet context issues
             # The parent session's greenlet context can be lost during async operations
             # (rate limits, retries) in scholar_search.py
-            async with async_session() as callback_db:
-                try:
+            # CRITICAL: Wrap the entire session block in try/except to catch CancelledError
+            # which can occur during DB connection and corrupts greenlet state
+            try:
+                async with async_session() as callback_db:
                     for idx, paper_data in enumerate(papers):
                         if not isinstance(paper_data, dict):
                             log_now(f"[CALLBACK] Paper {idx} is not a dict! Type: {type(paper_data)}, Value: {paper_data}")
@@ -1258,67 +1334,77 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
                     # COMMIT IMMEDIATELY after each page
                     await callback_db.commit()
-                except Exception as insert_err:
-                    log_now(f"[CALLBACK] ✗ Error inserting citations: {insert_err}")
-                    try:
-                        await callback_db.rollback()
-                        log_now(f"[CALLBACK] Rolled back transaction after insert error")
-                    except Exception as rollback_err:
-                        log_now(f"[CALLBACK] Failed to rollback: {rollback_err}")
-                    raise  # Re-raise to be handled by caller
 
-                log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
+                    # STEP 3: DB save successful - remove from buffer
+                    buffer.mark_saved(job.id, page_num)
+                    log_now(f"[CALLBACK] ✓ DB save successful, buffer cleared")
+                    log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
-                # Update job progress with current state for resume
-                # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
-                raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
-                progress_pct = min(raw_progress, 90)
-                year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
+                    # Update job progress with current state for resume
+                    # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
+                    raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
+                    progress_pct = min(raw_progress, 90)
+                    year_info = f" ({current_harvest_year['year']})" if current_harvest_year['year'] else ""
 
-                # Update job progress using fresh session
-                # Store progress details in params["progress_details"] (Job model has no 'details' column)
-                params["progress_details"] = {
-                    "edition_index": i + 1,
-                    "editions_total": total_editions,
-                    "edition_id": edition.id,
-                    "edition_title": edition.title[:80] if edition.title else "Unknown",
-                    "edition_language": edition.language,
-                    "edition_citation_count": edition.citation_count,
-                    "current_page": page_num + 1,
-                    "current_year": current_harvest_year.get("year"),
-                    "harvest_mode": current_harvest_year.get("mode", "standard"),
-                    "citations_saved": total_new_citations,
-                    "citations_this_edition": total_new_citations - edition_start_citations,
-                    "citations_updated": total_updated_citations,
-                    "stage": "harvesting",
-                    # CRITICAL: Include these for UI display (was missing, causing "Already Had: 0" bug)
-                    "previously_harvested": total_previously_harvested,
-                    "target_citations_total": total_target_citations,
-                }
-                await callback_db.execute(
-                    update(Job)
-                    .where(Job.id == job.id)
-                    .values(
-                        progress=progress_pct,
-                        progress_message=f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
-                        params=json.dumps(params),
+                    # Update job progress using fresh session
+                    # Store progress details in params["progress_details"] (Job model has no 'details' column)
+                    params["progress_details"] = {
+                        "edition_index": i + 1,
+                        "editions_total": total_editions,
+                        "edition_id": edition.id,
+                        "edition_title": edition.title[:80] if edition.title else "Unknown",
+                        "edition_language": edition.language,
+                        "edition_citation_count": edition.citation_count,
+                        "current_page": page_num + 1,
+                        "current_year": current_harvest_year.get("year"),
+                        "harvest_mode": current_harvest_year.get("mode", "standard"),
+                        "citations_saved": total_new_citations,
+                        "citations_this_edition": total_new_citations - edition_start_citations,
+                        "citations_updated": total_updated_citations,
+                        "stage": "harvesting",
+                        # CRITICAL: Include these for UI display (was missing, causing "Already Had: 0" bug)
+                        "previously_harvested": total_previously_harvested,
+                        "target_citations_total": total_target_citations,
+                    }
+                    await callback_db.execute(
+                        update(Job)
+                        .where(Job.id == job.id)
+                        .values(
+                            progress=progress_pct,
+                            progress_message=f"Edition {i+1}/{total_editions}{year_info}, page {page_num + 1}: {total_new_citations} citations saved",
+                            params=json.dumps(params),
+                        )
                     )
-                )
-                await callback_db.commit()
+                    await callback_db.commit()
 
-                # Save resume state (update params dict and serialize to job)
-                # MUST be inside fresh session block to avoid greenlet issues
-                params["resume_state"] = {
-                    "edition_id": edition.id,
-                    "last_page": page_num + 1,
-                    "total_citations": total_new_citations,
-                }
-                await callback_db.execute(
-                    update(Job)
-                    .where(Job.id == job.id)
-                    .values(params=json.dumps(params))
-                )
-                await callback_db.commit()
+                    # Save resume state (update params dict and serialize to job)
+                    # MUST be inside fresh session block to avoid greenlet issues
+                    params["resume_state"] = {
+                        "edition_id": edition.id,
+                        "last_page": page_num + 1,
+                        "total_citations": total_new_citations,
+                    }
+                    await callback_db.execute(
+                        update(Job)
+                        .where(Job.id == job.id)
+                        .values(params=json.dumps(params))
+                    )
+                    await callback_db.commit()
+
+            except asyncio.CancelledError:
+                # Task was cancelled (timeout, shutdown, etc.) - this corrupts greenlet state
+                # Mark for buffer retry and re-raise to propagate cancellation
+                log_now(f"[CALLBACK] ⚠ Task cancelled during DB save - page {page_num + 1} buffered for retry")
+                buffer.mark_failed(job.id, page_num, "CancelledError during DB save")
+                raise
+
+            except Exception as insert_err:
+                log_now(f"[CALLBACK] ✗ Error inserting citations: {insert_err}")
+
+                # STEP 3b: DB save failed - mark in buffer for retry
+                buffer.mark_failed(job.id, page_num, str(insert_err))
+                log_now(f"[CALLBACK] ⚠ Marked for retry in buffer")
+                raise  # Re-raise to be handled by caller
 
         try:
             log_now(f"[EDITION {i+1}/{total_editions}] ═══════════════════════════════════════════════")
@@ -2727,6 +2813,15 @@ async def worker_loop():
                                 continue  # Immediately process the new job
                         except Exception as e:
                             log_now(f"[Worker] Auto-retry check failed: {e}")
+
+                        # Retry buffered citation saves that failed (DB timeouts, etc.)
+                        try:
+                            from .citation_buffer import retry_failed_saves
+                            retried_citations = await retry_failed_saves()
+                            if retried_citations > 0:
+                                log_now(f"[Worker] Retried {retried_citations} buffered citation pages")
+                        except Exception as e:
+                            log_now(f"[Worker] Citation buffer retry failed: {e}")
 
                     # If no pending jobs at all, wait before checking again
                     if not pending_jobs:

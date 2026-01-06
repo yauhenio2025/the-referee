@@ -18,8 +18,8 @@ engine = create_async_engine(
     echo=settings.debug,
     poolclass=NullPool,  # Better for serverless/Render
     connect_args={
-        "command_timeout": 30,  # 30 second query timeout
-        "timeout": 15,  # 15 second connection timeout
+        "command_timeout": 120,  # 120 second query timeout (increased for remote DB latency)
+        "timeout": 30,  # 30 second connection timeout
     },
 )
 
