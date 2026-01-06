@@ -20,6 +20,7 @@ from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
 from .citation_buffer import get_buffer, BufferedPage
+from .api_logger import log_api_call
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -700,7 +701,7 @@ async def auto_retry_failed_fetches(db: AsyncSession) -> int:
 AUTO_RESUME_MIN_MISSING = 50  # Only resume if at least this many citations missing (lowered from 100)
 AUTO_RESUME_MIN_PERCENT = 0.05  # Or at least 5% missing (lowered from 10%)
 AUTO_RESUME_CHECK_INTERVAL = 15  # Seconds between auto-resume checks (lowered from 60)
-AUTO_RESUME_MAX_STALL_COUNT = 5  # Stop auto-resume after this many consecutive zero-progress jobs (increased from 3)
+AUTO_RESUME_MAX_STALL_COUNT = 20  # Stop auto-resume after this many consecutive zero-progress jobs (increased from 5 to 20)
 _last_auto_resume_check = None
 
 
@@ -1340,6 +1341,16 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     log_now(f"[CALLBACK] ✓ DB save successful, buffer cleared")
                     log_now(f"[CALLBACK] ✓ Page {page_num + 1} complete: {new_count} new, {skipped_no_id} skipped (no ID), total: {total_new_citations}")
 
+                    # Log citation saves for activity stats
+                    if new_count > 0:
+                        asyncio.create_task(log_api_call(
+                            call_type='citation_save',
+                            job_id=job.id,
+                            edition_id=target_edition_id,
+                            count=new_count,
+                            success=True
+                        ))
+
                     # Update job progress with current state for resume
                     # Cap progress at 90% (leave 10% for completion), handle year-by-year mode with many pages
                     raw_progress = 10 + ((i + min(page_num / 100, 0.9)) / total_editions) * 80
@@ -1520,11 +1531,14 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             resume_year = resume_state.get("current_year")
                             resume_page_for_year = resume_state.get("current_page", 0)
 
-                            # Merge any completed years from resume_state (in case harvest_targets is stale)
-                            resume_completed = set(resume_state.get("completed_years", []))
-                            completed_years = completed_years.union(resume_completed)
+                            # BUG FIX: Do NOT merge resume_state.completed_years - use harvest_targets.status as source of truth
+                            # The resume_state may have incorrectly marked years as "completed" even when they're incomplete
+                            # This was causing years with status='incomplete' in harvest_targets to be skipped
+                            resume_completed_count = len(resume_state.get("completed_years", []))
+                            if resume_completed_count != len(completed_years):
+                                log_now(f"[EDITION {i+1}] ⚠️ resume_state had {resume_completed_count} completed years, but harvest_targets says {len(completed_years)} - USING harvest_targets as truth")
 
-                            log_now(f"[EDITION {i+1}] 🔄 RESUMING: {len(completed_years)} total completed years, resume from year {resume_year} page {resume_page_for_year}")
+                            log_now(f"[EDITION {i+1}] 🔄 RESUMING: {len(completed_years)} completed years (from harvest_targets), resume from year {resume_year} page {resume_page_for_year}")
                     except json.JSONDecodeError:
                         log_now(f"[EDITION {i+1}] ⚠️ Could not parse resume state")
                 else:
@@ -2730,17 +2744,14 @@ async def worker_loop():
                 for edition in orphan_editions:
                     log_now(f"[Worker] ORPHAN: Edition {edition.id} - {edition.harvested_citation_count}/{edition.citation_count} harvested, rebuilding state...")
 
-                    # Reconstruct completed years from existing citations
-                    year_counts_result = await db.execute(
-                        select(Citation.year, func.count(Citation.id).label('count'))
-                        .where(Citation.edition_id == edition.id)
-                        .where(Citation.year.isnot(None))
-                        .group_by(Citation.year)
+                    # BUG FIX: Use harvest_targets.status as source of truth instead of citation count heuristic
+                    # The old code used "count >= 50" which incorrectly marked years as complete
+                    completed_targets_result = await db.execute(
+                        select(HarvestTarget.year)
+                        .where(HarvestTarget.edition_id == edition.id)
+                        .where(HarvestTarget.status == 'complete')
                     )
-                    year_counts = {row.year: row.count for row in year_counts_result.fetchall()}
-
-                    # Years with significant citations (>50) are likely complete
-                    completed_years = [year for year, count in year_counts.items() if count >= 50]
+                    completed_years = [row.year for row in completed_targets_result.fetchall()]
 
                     if completed_years:
                         reconstructed_state = {

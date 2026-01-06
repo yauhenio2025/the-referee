@@ -141,10 +141,19 @@ async def lifespan(app: FastAPI):
     # Start background job worker
     from .services.job_worker import start_worker
     start_worker()
+
+    # Start API logger flush task
+    from .services.api_logger import start_flush_task, stop_flush_task
+    await start_flush_task()
+
     yield
+
     # Stop worker on shutdown
     from .services.job_worker import stop_worker
     stop_worker()
+
+    # Stop API logger flush task
+    await stop_flush_task()
 
 
 app = FastAPI(
@@ -8311,4 +8320,22 @@ async def cleanup_citation_buffer(max_age_hours: int = 24):
         "success": True,
         "files_removed": removed,
         "message": f"Removed {removed} buffer files older than {max_age_hours} hours",
+    }
+
+
+@app.get("/api/dashboard/activity-stats")
+async def get_activity_stats_endpoint(db: AsyncSession = Depends(get_db)):
+    """
+    Get activity statistics for the dashboard.
+
+    Returns counts of Oxylabs API calls, pages fetched, and citations saved
+    for 15min, 1hr, 6hr, and 24hr time periods.
+    """
+    from .services.api_logger import get_activity_stats
+
+    stats = await get_activity_stats(db)
+
+    return {
+        "success": True,
+        "stats": stats,
     }

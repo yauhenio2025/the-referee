@@ -113,6 +113,20 @@ async def run_migrations():
         # This stops auto-resume even if there's a gap (the gap is GS's fault, not ours)
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_complete BOOLEAN DEFAULT FALSE",
         "ALTER TABLE editions ADD COLUMN IF NOT EXISTS harvest_complete_reason VARCHAR(50) NULL",
+        # API call logging for activity statistics (Oxylabs calls, pages fetched, citations saved)
+        """CREATE TABLE IF NOT EXISTS api_call_logs (
+            id SERIAL PRIMARY KEY,
+            call_type VARCHAR(30) NOT NULL,
+            job_id INTEGER,
+            edition_id INTEGER,
+            count INTEGER DEFAULT 1,
+            success BOOLEAN DEFAULT TRUE,
+            extra_info TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_api_call_logs_call_type ON api_call_logs(call_type)",
+        "CREATE INDEX IF NOT EXISTS ix_api_call_logs_created_at ON api_call_logs(created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_api_call_logs_type_created ON api_call_logs(call_type, created_at)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

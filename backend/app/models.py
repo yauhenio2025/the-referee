@@ -702,3 +702,40 @@ class PartitionLLMCall(Base):
     )
 
     # NOTE: Index ix_partition_llm_calls_partition already exists in production
+
+
+class ApiCallLog(Base):
+    """
+    Log of API calls (Oxylabs) and page fetches for statistics tracking.
+
+    Enables dashboard to show activity stats for 15min, 1hr, 6hr, 24hr periods.
+    """
+    __tablename__ = "api_call_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # What type of call: 'oxylabs', 'page_fetch', 'citation_save'
+    call_type: Mapped[str] = mapped_column(String(30), index=True)
+
+    # Related job (optional)
+    job_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+
+    # Related edition (optional)
+    edition_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Count (for batch operations like citation saves)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+
+    # Success/failure
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Optional extra info (e.g., page number, year, error message)
+    extra_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamp for time-based queries
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        # Composite index for efficient time-range + type queries
+        Index('ix_api_call_logs_type_created', 'call_type', 'created_at'),
+    )

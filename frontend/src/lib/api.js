@@ -679,6 +679,14 @@ class RefereeAPI {
   }
 
   /**
+   * Get activity statistics for the dashboard
+   * Returns Oxylabs calls, pages fetched, and citations saved for different time periods
+   */
+  async getActivityStats() {
+    return this.request('/api/dashboard/activity-stats');
+  }
+
+  /**
    * Get paginated job history
    * @param {object} options - Query options
    * @param {number} options.hours - Time range in hours (default 6)

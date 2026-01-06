@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlencode, quote_plus
 
 from ..config import get_settings
+from .api_logger import log_api_call
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -343,6 +344,13 @@ class ScholarSearchService:
                     try:
                         await on_page_complete(current_page, extracted)
                         log_now(f"[PAGE {current_page + 1}] ✓ Callback completed successfully")
+                        # Log successful page fetch for activity stats
+                        asyncio.create_task(log_api_call(
+                            call_type='page_fetch',
+                            count=1,
+                            success=True,
+                            extra_info=f"papers={len(extracted)}"
+                        ))
                     except Exception as save_error:
                         log_now(f"[PAGE {current_page + 1}] ✗✗✗ CALLBACK FAILED ✗✗✗")
                         log_now(f"[PAGE {current_page + 1}] Error type: {type(save_error).__name__}")
@@ -675,6 +683,14 @@ class ScholarSearchService:
             },
             json=payload,
         )
+
+        # Log the Oxylabs API call
+        success = response.status_code == 200
+        asyncio.create_task(log_api_call(
+            call_type='oxylabs',
+            success=success,
+            extra_info=f"status={response.status_code}"
+        ))
 
         if response.status_code != 200:
             raise Exception(f"Oxylabs API HTTP {response.status_code}")

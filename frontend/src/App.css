@@ -2229,6 +2229,59 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* Activity Stats Section */
+.activity-stats {
+  margin-bottom: 1.5rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.activity-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.activity-stats-table th,
+.activity-stats-table td {
+  padding: 0.5rem 1rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.activity-stats-table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.activity-stats-table td.period-label {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.activity-stats-table .stat-value {
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', monospace;
+}
+
+.activity-stats-table .stat-citations {
+  color: var(--success-color);
+  font-weight: 600;
+}
+
+.activity-stats-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.activity-stats-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
 /* Alerts Section */
 .dashboard-alerts {
   margin-bottom: 1.5rem;

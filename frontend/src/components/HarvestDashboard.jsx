@@ -49,6 +49,43 @@ const HealthCard = ({ title, value, subtext, status = 'ok', icon }) => {
   )
 }
 
+// Activity Stats Component - shows Oxylabs calls, pages fetched, citations saved
+const ActivityStatsSection = ({ stats }) => {
+  if (!stats) return null
+
+  const periods = ['15min', '1hr', '6hr', '24hr']
+  const periodLabels = { '15min': '15 min', '1hr': '1 hour', '6hr': '6 hours', '24hr': '24 hours' }
+
+  return (
+    <div className="dashboard-section activity-stats">
+      <h3 className="dashboard-section-title">API Activity</h3>
+      <table className="activity-stats-table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Oxylabs Calls</th>
+            <th>Pages Fetched</th>
+            <th>Citations Saved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {periods.map(period => {
+            const data = stats[period] || {}
+            return (
+              <tr key={period}>
+                <td className="period-label">{periodLabels[period]}</td>
+                <td className="stat-value">{(data.oxylabs_calls || 0).toLocaleString()}</td>
+                <td className="stat-value">{(data.pages_fetched || 0).toLocaleString()}</td>
+                <td className="stat-value stat-citations">{(data.citations_saved || 0).toLocaleString()}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // AI Diagnosis Modal Component
 const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error, editionId, onActionExecuted }) => {
   const [isExecuting, setIsExecuting] = useState(false)
@@ -850,12 +887,20 @@ export default function HarvestDashboard() {
   const handleRefresh = () => {
     // Invalidate dashboard query to trigger immediate refresh
     queryClient.invalidateQueries({ queryKey: ['harvest-dashboard'] })
+    queryClient.invalidateQueries({ queryKey: ['activity-stats'] })
   }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['harvest-dashboard'],
     queryFn: () => api.getHarvestDashboard(),
     refetchInterval: 5000, // Poll every 5 seconds
+  })
+
+  // Fetch activity stats (Oxylabs calls, pages fetched, citations saved)
+  const { data: activityData } = useQuery({
+    queryKey: ['activity-stats'],
+    queryFn: () => api.getActivityStats(),
+    refetchInterval: 30000, // Poll every 30 seconds (less frequent)
   })
 
   if (isLoading) {
@@ -940,6 +985,9 @@ export default function HarvestDashboard() {
           status={getDuplicateStatus()}
         />
       </div>
+
+      {/* API Activity Stats */}
+      <ActivityStatsSection stats={activityData?.stats} />
 
       {/* Alerts */}
       <AlertsSection alerts={alerts} onPaperClick={handlePaperClick} onRefresh={handleRefresh} />
