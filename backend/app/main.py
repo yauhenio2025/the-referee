@@ -146,7 +146,14 @@ async def lifespan(app: FastAPI):
     from .services.api_logger import start_flush_task, stop_flush_task
     await start_flush_task()
 
+    # Start health monitor (LLM-powered autonomous diagnostics)
+    from .services.health_monitor import start_health_monitor, stop_health_monitor
+    await start_health_monitor()
+
     yield
+
+    # Stop health monitor
+    await stop_health_monitor()
 
     # Stop worker on shutdown
     from .services.job_worker import stop_worker
@@ -8338,4 +8345,93 @@ async def get_activity_stats_endpoint(db: AsyncSession = Depends(get_db)):
     return {
         "success": True,
         "stats": stats,
+    }
+
+
+# ============== Health Monitor Endpoints ==============
+
+@app.get("/api/health-monitor/status")
+async def health_monitor_status(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get recent health monitor logs and current status.
+    """
+    from .services.health_monitor import get_recent_logs
+    from .config import get_settings
+
+    settings = get_settings()
+    logs = await get_recent_logs(db, limit=limit)
+
+    return {
+        "enabled": settings.health_monitor_enabled,
+        "dry_run": settings.health_monitor_dry_run,
+        "interval_minutes": settings.health_monitor_interval_minutes,
+        "recent_logs": [
+            {
+                "id": log.id,
+                "trigger_reason": log.trigger_reason,
+                "active_jobs": log.active_jobs_count,
+                "citations_15min": log.citations_15min,
+                "diagnosis": log.llm_diagnosis,
+                "root_cause": log.llm_root_cause,
+                "confidence": log.llm_confidence,
+                "action": log.action_type,
+                "action_executed": log.action_executed,
+                "action_result": log.action_result,
+                "action_error": log.action_error,
+                "llm_duration_ms": log.llm_call_duration_ms,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in logs
+        ],
+    }
+
+
+@app.post("/api/health-monitor/trigger")
+async def health_monitor_trigger():
+    """
+    Manually trigger a health check and LLM diagnosis.
+    Useful for testing or forcing an immediate diagnosis.
+    """
+    from .services.health_monitor import trigger_manual_check
+
+    log_entry = await trigger_manual_check()
+
+    if log_entry:
+        return {
+            "success": True,
+            "log_id": log_entry.id,
+            "diagnosis": log_entry.llm_diagnosis,
+            "root_cause": log_entry.llm_root_cause,
+            "confidence": log_entry.llm_confidence,
+            "action": log_entry.action_type,
+            "action_executed": log_entry.action_executed,
+            "action_result": log_entry.action_result,
+            "action_error": log_entry.action_error,
+        }
+    else:
+        return {
+            "success": False,
+            "error": "Failed to run health check",
+        }
+
+
+@app.post("/api/health-monitor/toggle")
+async def health_monitor_toggle(enabled: bool = True):
+    """
+    Enable or disable the health monitor.
+    Note: This only affects the current runtime; restart will reset to config value.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    # Note: This modifies the cached settings object
+    settings.health_monitor_enabled = enabled
+
+    return {
+        "success": True,
+        "enabled": settings.health_monitor_enabled,
+        "message": f"Health monitor {'enabled' if enabled else 'disabled'} (runtime only)",
     }

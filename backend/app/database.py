@@ -127,6 +127,29 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_api_call_logs_call_type ON api_call_logs(call_type)",
         "CREATE INDEX IF NOT EXISTS ix_api_call_logs_created_at ON api_call_logs(created_at)",
         "CREATE INDEX IF NOT EXISTS ix_api_call_logs_type_created ON api_call_logs(call_type, created_at)",
+        # Health monitor logs: track LLM-powered autonomous diagnoses and actions
+        """CREATE TABLE IF NOT EXISTS health_monitor_logs (
+            id SERIAL PRIMARY KEY,
+            trigger_reason VARCHAR(100) NOT NULL,
+            active_jobs_count INTEGER DEFAULT 0,
+            citations_15min INTEGER DEFAULT 0,
+            diagnostic_data TEXT,
+            llm_model VARCHAR(100),
+            llm_diagnosis TEXT,
+            llm_root_cause VARCHAR(50),
+            llm_confidence VARCHAR(20),
+            llm_raw_response TEXT,
+            action_type VARCHAR(50),
+            action_params TEXT,
+            action_executed BOOLEAN DEFAULT FALSE,
+            action_result TEXT,
+            action_error TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            llm_call_duration_ms INTEGER,
+            action_duration_ms INTEGER
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_health_monitor_logs_created_at ON health_monitor_logs(created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_health_monitor_logs_action_type ON health_monitor_logs(action_type)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

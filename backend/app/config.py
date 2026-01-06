@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     webhook_timeout_seconds: int = 10
     webhook_max_retries: int = 3
 
+    # Health Monitor settings
+    health_monitor_enabled: bool = True
+    health_monitor_interval_minutes: int = 5
+    health_monitor_dry_run: bool = False  # If True, diagnose but don't execute actions
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

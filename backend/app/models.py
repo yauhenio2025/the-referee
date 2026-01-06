@@ -739,3 +739,46 @@ class ApiCallLog(Base):
         # Composite index for efficient time-range + type queries
         Index('ix_api_call_logs_type_created', 'call_type', 'created_at'),
     )
+
+
+class HealthMonitorLog(Base):
+    """
+    Log of health monitor diagnoses and actions taken.
+
+    Tracks when the LLM-powered health monitor detected issues,
+    what it diagnosed, and what actions were executed.
+    """
+    __tablename__ = "health_monitor_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Trigger info
+    trigger_reason: Mapped[str] = mapped_column(String(100))  # e.g., "zero_citations_15min"
+    active_jobs_count: Mapped[int] = mapped_column(Integer, default=0)
+    citations_15min: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Diagnostic data sent to LLM (JSON snapshot)
+    diagnostic_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # LLM response
+    llm_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    llm_diagnosis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Brief explanation
+    llm_root_cause: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # RATE_LIMIT, ZOMBIE_JOBS, etc.
+    llm_confidence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # HIGH, MEDIUM, LOW
+    llm_raw_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Full JSON response
+
+    # Action taken
+    action_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # RESTART_ZOMBIE_JOBS, etc.
+    action_params: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    action_executed: Mapped[bool] = mapped_column(Boolean, default=False)
+    action_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Success/failure details
+    action_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timing
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    llm_call_duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    action_duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index('ix_health_monitor_logs_created', 'created_at'),
+    )
