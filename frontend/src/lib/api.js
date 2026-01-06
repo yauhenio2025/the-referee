@@ -820,7 +820,7 @@ class RefereeAPI {
   async quickAddThinker(query) {
     return this.request('/api/thinkers/quick-add', {
       method: 'POST',
-      body: { query },
+      body: { input: query },
     });
   }
 
