@@ -96,9 +96,13 @@ async def get_activity_stats(db) -> dict:
 
     Returns counts of Oxylabs calls, pages fetched, and citations saved
     for 15min, 1hr, 6hr, and 24hr time periods.
+
+    Gracefully handles missing api_call_logs table by falling back to
+    citation counts only.
     """
     from sqlalchemy import func, select
-    from ..models import ApiCallLog, Citation
+    from datetime import timedelta
+    from ..models import Citation
 
     now = datetime.utcnow()
 
@@ -112,47 +116,67 @@ async def get_activity_stats(db) -> dict:
 
     stats = {}
 
-    for period_name, minutes in periods.items():
-        cutoff = datetime.utcnow()
-        cutoff = cutoff.replace(
-            minute=cutoff.minute - (minutes % 60) if minutes < 60 else 0,
-            second=0,
-            microsecond=0
+    # Check if api_call_logs table exists (may not be migrated yet)
+    api_logs_available = False
+    try:
+        from ..models import ApiCallLog
+        # Test query to see if table exists
+        test_result = await db.execute(
+            select(func.count()).select_from(ApiCallLog).limit(1)
         )
-        # Proper time delta calculation
-        from datetime import timedelta
+        test_result.scalar()
+        api_logs_available = True
+    except Exception as e:
+        logger.warning(f"api_call_logs table not available: {e}")
+
+    for period_name, minutes in periods.items():
         cutoff = now - timedelta(minutes=minutes)
 
-        # Count Oxylabs calls
-        oxylabs_result = await db.execute(
-            select(func.coalesce(func.sum(ApiCallLog.count), 0))
-            .where(ApiCallLog.call_type == 'oxylabs')
-            .where(ApiCallLog.created_at >= cutoff)
-        )
-        oxylabs_count = oxylabs_result.scalar() or 0
+        oxylabs_count = 0
+        pages_count = 0
+        citations_from_log = 0
 
-        # Count page fetches
-        pages_result = await db.execute(
-            select(func.coalesce(func.sum(ApiCallLog.count), 0))
-            .where(ApiCallLog.call_type == 'page_fetch')
-            .where(ApiCallLog.created_at >= cutoff)
-        )
-        pages_count = pages_result.scalar() or 0
+        # Only query api_call_logs if the table exists
+        if api_logs_available:
+            try:
+                from ..models import ApiCallLog
 
-        # Count citations saved (from api_call_logs)
-        citations_log_result = await db.execute(
-            select(func.coalesce(func.sum(ApiCallLog.count), 0))
-            .where(ApiCallLog.call_type == 'citation_save')
-            .where(ApiCallLog.created_at >= cutoff)
-        )
-        citations_from_log = citations_log_result.scalar() or 0
+                # Count Oxylabs calls
+                oxylabs_result = await db.execute(
+                    select(func.coalesce(func.sum(ApiCallLog.count), 0))
+                    .where(ApiCallLog.call_type == 'oxylabs')
+                    .where(ApiCallLog.created_at >= cutoff)
+                )
+                oxylabs_count = oxylabs_result.scalar() or 0
 
-        # Also count from citations table directly (more accurate)
-        citations_direct_result = await db.execute(
-            select(func.count(Citation.id))
-            .where(Citation.created_at >= cutoff)
-        )
-        citations_direct = citations_direct_result.scalar() or 0
+                # Count page fetches
+                pages_result = await db.execute(
+                    select(func.coalesce(func.sum(ApiCallLog.count), 0))
+                    .where(ApiCallLog.call_type == 'page_fetch')
+                    .where(ApiCallLog.created_at >= cutoff)
+                )
+                pages_count = pages_result.scalar() or 0
+
+                # Count citations saved (from api_call_logs)
+                citations_log_result = await db.execute(
+                    select(func.coalesce(func.sum(ApiCallLog.count), 0))
+                    .where(ApiCallLog.call_type == 'citation_save')
+                    .where(ApiCallLog.created_at >= cutoff)
+                )
+                citations_from_log = citations_log_result.scalar() or 0
+            except Exception as e:
+                logger.warning(f"Error querying api_call_logs: {e}")
+
+        # Always count from citations table directly (more reliable)
+        try:
+            citations_direct_result = await db.execute(
+                select(func.count(Citation.id))
+                .where(Citation.created_at >= cutoff)
+            )
+            citations_direct = citations_direct_result.scalar() or 0
+        except Exception as e:
+            logger.warning(f"Error querying citations: {e}")
+            citations_direct = 0
 
         # Use the higher of the two (direct is authoritative, log is backup)
         citations_count = max(citations_from_log, citations_direct)
