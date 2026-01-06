@@ -2713,9 +2713,14 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
         pages_fetched = 0
 
         try:
+            # Combine author variant with full name to reduce false positives
+            # e.g., author:"C Durand" "Cédric Durand" - filters out other "C Durand" academics
+            combined_query = f'{variant} "{thinker.canonical_name}"'
+            log_now(f"[ThinkerDiscover]   Combined query: {combined_query}")
+
             # Execute author search with pagination
             search_result = await scholar.search_by_author(
-                author_query=variant,
+                author_query=combined_query,
                 max_results=max_pages_per_variant * 10,  # 10 results per page
                 start_page=0,
             )
