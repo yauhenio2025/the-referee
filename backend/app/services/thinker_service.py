@@ -233,52 +233,41 @@ ONLY return the JSON object, no other text."""
         prompt = f"""Generate Google Scholar author search queries for this thinker.
 
 THINKER: {thinker.canonical_name}
-Life: {thinker.birth_death or 'Unknown'}
-Domains: {', '.join(domains) if domains else 'Not specified'}
 
-CRITICAL: Google Scholar author: search has SPECIFIC format requirements:
-- GS normalizes names to "F Lastname" format internally
-- Full first names often DON'T WORK - use INITIALS instead!
-- Wildcards: author:"{first_initial}* {last_name}" catches middle initials
+CRITICAL: Google Scholar author: search ONLY works with this format:
+  author:"X Surname" where X is first initial (one letter)
 
-CORRECT VARIANTS TO GENERATE (in order of importance):
+GS DOES NOT ACCEPT full first names! These will NOT work:
+  ❌ author:"Cedric Durand" - WRONG, full name doesn't work
+  ❌ author:"Cédric Durand" - WRONG, full name doesn't work
 
-1. INITIAL + SURNAME (MOST IMPORTANT - this is how GS indexes):
-   - author:"{first_initial} {last_name}" ← PRIMARY QUERY
-   - author:"{first_initial}* {last_name}" ← Wildcard for middle names
+GS ONLY accepts initial + surname:
+  ✓ author:"C Durand" - CORRECT
+  ✓ author:"C* Durand" - CORRECT (wildcard for middle initial)
 
-2. NO-DIACRITICS version (if name has accents like é, ü, ç):
-   - Strip accents: é→e, ü→u, ç→c, ñ→n
+GENERATE ONLY THESE VARIANTS:
 
-3. TRANSLITERATIONS (ONLY for internationally famous scholars):
-   - Chinese: author:"姓" (surname only in Chinese)
-   - Russian: author:"Фамилия" (surname in Cyrillic)
-   - Only if scholar is widely cited in that language!
+1. PRIMARY (always generate these two):
+   - author:"{first_initial} {last_name}"
+   - author:"{first_initial}* {last_name}"
 
-DO NOT GENERATE:
-❌ Full first name queries like author:"Cédric Durand" - GS doesn't index this way!
-❌ Domain keywords like author:"Durand economics" - NEVER do this!
-❌ More than 8 variants - quality over quantity!
+2. TRANSLITERATIONS (ONLY for very famous scholars like Marx, Habermas, Foucault):
+   - Chinese surname: author:"杜兰德"
+   - Russian surname: author:"Дюран"
+   - Skip for less famous scholars!
 
-EXAMPLES FOR "Herbert Marcuse" (famous, transliterations useful):
-- author:"H Marcuse" (initial_surname) ← PRIMARY
-- author:"H* Marcuse" (wildcard)
-- author:"马尔库塞" (chinese)
-- author:"Маркузе" (russian)
+NEVER GENERATE:
+❌ Full first names (author:"Cedric Durand")
+❌ Names without diacritics as full names (author:"Cedric Durand")
+❌ Domain keywords (author:"Durand economics")
 
-EXAMPLES FOR "Cédric Durand" (less famous, skip most transliterations):
-- author:"C Durand" (initial_surname) ← PRIMARY
-- author:"C* Durand" (wildcard)
-
-Return JSON array with 3-8 variants:
+Return JSON array with 2-4 variants ONLY:
 [
   {{"query": "author:\\"C Durand\\"", "type": "initial_surname", "priority": 1}},
   {{"query": "author:\\"C* Durand\\"", "type": "wildcard", "priority": 1}}
 ]
 
-PRIORITY: 1=Essential, 2=Important, 3=Additional
-
-Return ONLY the JSON array."""
+Return ONLY the JSON array, nothing else."""
 
         start_time = datetime.utcnow()
 
