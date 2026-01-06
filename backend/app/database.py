@@ -159,6 +159,8 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_thinker_harvest_runs_status ON thinker_harvest_runs(status)",
         "CREATE INDEX IF NOT EXISTS ix_thinker_llm_calls_thinker ON thinker_llm_calls(thinker_id)",
         "CREATE INDEX IF NOT EXISTS ix_thinker_llm_calls_workflow ON thinker_llm_calls(workflow)",
+        # Make thinker_id nullable in thinker_llm_calls to allow disambiguation before thinker exists
+        "ALTER TABLE thinker_llm_calls ALTER COLUMN thinker_id DROP NOT NULL",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

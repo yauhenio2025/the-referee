@@ -956,7 +956,8 @@ class ThinkerLLMCall(Base):
     __tablename__ = "thinker_llm_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    thinker_id: Mapped[int] = mapped_column(ForeignKey("thinkers.id", ondelete="CASCADE"), index=True)
+    # Nullable to allow LLM calls during disambiguation before thinker is created
+    thinker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("thinkers.id", ondelete="SET NULL"), index=True, nullable=True)
 
     # Workflow type
     workflow: Mapped[str] = mapped_column(String(50), index=True)
