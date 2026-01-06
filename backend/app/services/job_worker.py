@@ -1302,6 +1302,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
                             # Use target_edition_id - allows merged editions to redirect citations to canonical
+                            from datetime import datetime as dt
                             stmt = pg_insert(Citation).values(
                                 paper_id=paper_id,
                                 edition_id=target_edition_id,  # May differ from edition.id for merged editions
@@ -1315,6 +1316,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 citation_count=paper_data.get("citationCount", 0),
                                 intersection_count=1,
                                 encounter_count=1,
+                                created_at=dt.utcnow(),  # MUST set explicitly for pg_insert (ORM defaults don't apply)
                             ).on_conflict_do_update(
                                 index_elements=['paper_id', 'scholar_id'],
                                 set_={'encounter_count': Citation.encounter_count + 1}
