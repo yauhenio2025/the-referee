@@ -8886,9 +8886,14 @@ async def start_work_discovery(
     db.add(job)
     await db.commit()
 
+    # Count variants
+    variants = json.loads(thinker.name_variants) if thinker.name_variants else []
+
     return StartWorkDiscoveryResponse(
         job_id=job.id,
         thinker_id=thinker_id,
+        variants_to_search=len(variants),
+        status="queued",
         message=f"Work discovery job queued for {thinker.canonical_name}",
     )
 
