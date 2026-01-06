@@ -2809,9 +2809,10 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
 
         # Update harvest run
         harvest_run.pages_fetched = pages_fetched
-        harvest_run.results_total = var_accepted + var_rejected + var_uncertain
+        harvest_run.results_processed = var_accepted + var_rejected + var_uncertain
         harvest_run.results_accepted = var_accepted
         harvest_run.results_rejected = var_rejected
+        harvest_run.results_uncertain = var_uncertain
         harvest_run.completed_at = datetime.utcnow()
 
         total_accepted += var_accepted

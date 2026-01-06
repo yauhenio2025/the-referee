@@ -958,9 +958,10 @@ class ThinkerHarvestRunResponse(BaseModel):
     query_used: str
     variant_type: str
     pages_fetched: int = 0
-    results_total: int = 0
+    results_processed: int = 0
     results_accepted: int = 0
     results_rejected: int = 0
+    results_uncertain: int = 0
     status: str  # pending, running, completed, failed
     started_at: datetime
     completed_at: Optional[datetime] = None
