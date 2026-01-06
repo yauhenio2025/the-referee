@@ -32,6 +32,7 @@ class BufferedPage:
     created_at: str
     retry_count: int = 0
     last_error: Optional[str] = None
+    failed_at: Optional[str] = None  # Set when mark_failed is called
 
 
 class CitationBuffer:
