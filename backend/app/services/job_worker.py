@@ -2655,8 +2655,17 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
         if variant_result.get("success"):
             variants = [v.get("query", "") for v in variant_result.get("variants", [])]
         else:
-            # Fallback to canonical name
-            variants = [f'author:"{thinker.canonical_name}"']
+            # Fallback to initial + surname format (how GS actually indexes)
+            name_parts = thinker.canonical_name.split()
+            if len(name_parts) >= 2:
+                first_initial = name_parts[0][0]
+                last_name = name_parts[-1]
+                variants = [
+                    f'author:"{first_initial} {last_name}"',
+                    f'author:"{first_initial}* {last_name}"',
+                ]
+            else:
+                variants = [f'author:"{thinker.canonical_name}"']
 
     log_now(f"[ThinkerDiscover] Processing {len(variants)} name variants")
 

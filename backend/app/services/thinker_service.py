@@ -219,91 +219,66 @@ ONLY return the JSON object, no other text."""
             except json.JSONDecodeError:
                 domains = [thinker.domains]
 
-        prompt = f"""You are generating Google Scholar author search queries to find ALL works by a specific thinker.
+        # Parse the name into parts
+        name_parts = thinker.canonical_name.split()
+        if len(name_parts) >= 2:
+            first_name = name_parts[0]
+            last_name = name_parts[-1]
+            first_initial = first_name[0]
+        else:
+            first_name = thinker.canonical_name
+            last_name = thinker.canonical_name
+            first_initial = first_name[0] if first_name else "X"
 
-THINKER:
-- Name: {thinker.canonical_name}
-- Life: {thinker.birth_death or 'Unknown'}
-- Bio: {thinker.bio or 'Not provided'}
-- Domains: {', '.join(domains) if domains else 'Not specified'}
+        prompt = f"""Generate Google Scholar author search queries for this thinker.
 
-YOUR TASK:
-Generate search query variants to find ALL papers/books authored by this person.
-We will use these queries with Google Scholar's author: operator.
+THINKER: {thinker.canonical_name}
+Life: {thinker.birth_death or 'Unknown'}
+Domains: {', '.join(domains) if domains else 'Not specified'}
 
-VARIANT TYPES TO GENERATE:
+CRITICAL: Google Scholar author: search has SPECIFIC format requirements:
+- GS normalizes names to "F Lastname" format internally
+- Full first names often DON'T WORK - use INITIALS instead!
+- Wildcards: author:"{first_initial}* {last_name}" catches middle initials
 
-1. FULL NAME variants:
-   - author:"{thinker.canonical_name}"
-   - author:"Firstname M Lastname"
-   - author:"F M Lastname"
-   - author:"Lastname, Firstname"
+CORRECT VARIANTS TO GENERATE (in order of importance):
 
-2. INITIAL variants (CRITICAL - catches most variations):
-   - author:"F Lastname" (first initial + surname)
-   - author:"FM Lastname" (initials + surname)
-   - author:"F* Lastname" (wildcard initial)
+1. INITIAL + SURNAME (MOST IMPORTANT - this is how GS indexes):
+   - author:"{first_initial} {last_name}" ← PRIMARY QUERY
+   - author:"{first_initial}* {last_name}" ← Wildcard for middle names
 
-3. SURNAME ONLY (for distinctive names):
-   - author:"*Lastname*" (catches variations)
+2. NO-DIACRITICS version (if name has accents like é, ü, ç):
+   - Strip accents: é→e, ü→u, ç→c, ñ→n
 
-4. TRANSLITERATION variants (for scholars with non-Latin origins):
-   - Chinese: 马克思 (Marx), 韦伯 (Weber), 哈贝马斯 (Habermas)
-   - Russian: Маркузе (Marcuse), Хабермас (Habermas)
-   - Japanese: マルクーゼ (Marcuse), ハーバーマス (Habermas)
-   - Arabic: ماركوزه (Marcuse), هابرماس (Habermas)
-   - Korean: 마르쿠제 (Marcuse), 하버마스 (Habermas)
+3. TRANSLITERATIONS (ONLY for internationally famous scholars):
+   - Chinese: author:"姓" (surname only in Chinese)
+   - Russian: author:"Фамилия" (surname in Cyrillic)
+   - Only if scholar is widely cited in that language!
 
-5. COMMON MISSPELLINGS/VARIATIONS:
-   - Name variations across languages
-   - Spelling variants (e.g., "Habermas" vs "Habermass")
-   - With/without diacritics
+DO NOT GENERATE:
+❌ Full first name queries like author:"Cédric Durand" - GS doesn't index this way!
+❌ Domain keywords like author:"Durand economics" - NEVER do this!
+❌ More than 8 variants - quality over quantity!
 
-EXAMPLES FOR "Herbert Marcuse":
-- author:"Herbert Marcuse" (full_name)
-- author:"H Marcuse" (initial_surname) ← MOST IMPORTANT
-- author:"H* Marcuse" (wildcard_initial)
-- author:"Marcuse, Herbert" (inverted)
-- author:"马尔库塞" (chinese_transliteration)
-- author:"Маркузе" (russian_transliteration)
-- author:"マルクーゼ" (japanese_transliteration)
-- author:"ماركوزه" (arabic_transliteration)
+EXAMPLES FOR "Herbert Marcuse" (famous, transliterations useful):
+- author:"H Marcuse" (initial_surname) ← PRIMARY
+- author:"H* Marcuse" (wildcard)
+- author:"马尔库塞" (chinese)
+- author:"Маркузе" (russian)
 
-EXAMPLES FOR "Jürgen Habermas":
-- author:"Jürgen Habermas" (full_name)
-- author:"Jurgen Habermas" (no_diacritics) ← IMPORTANT
-- author:"J Habermas" (initial_surname)
-- author:"哈贝马斯" (chinese_transliteration)
+EXAMPLES FOR "Cédric Durand" (less famous, skip most transliterations):
+- author:"C Durand" (initial_surname) ← PRIMARY
+- author:"C* Durand" (wildcard)
 
-Return a JSON array with 15-25 variants:
+Return JSON array with 3-8 variants:
 [
-  {{
-    "query": "author:\\"Herbert Marcuse\\"",
-    "variant_type": "full_name",
-    "language": null,
-    "priority": 1
-  }},
-  {{
-    "query": "author:\\"H Marcuse\\"",
-    "variant_type": "initial_surname",
-    "language": null,
-    "priority": 1
-  }},
-  {{
-    "query": "author:\\"马尔库塞\\"",
-    "variant_type": "transliteration",
-    "language": "chinese",
-    "priority": 2
-  }},
-  ...
+  {{"query": "author:\\"C Durand\\"", "type": "initial_surname", "priority": 1}},
+  {{"query": "author:\\"C* Durand\\"", "type": "wildcard", "priority": 1}}
 ]
 
-PRIORITY:
-- 1: Essential (full name, initial+surname, no diacritics) - always search these
-- 2: Important (transliterations for major languages)
-- 3: Additional (misspellings, rare variants)
+PRIORITY: 1=Essential, 2=Important, 3=Additional
 
-ONLY return the JSON array, no other text."""
+Return ONLY the JSON array."""
 
         start_time = datetime.utcnow()
 
@@ -336,7 +311,7 @@ ONLY return the JSON array, no other text."""
 
                 logger.info(f"[Thinker] Generated {len(variants)} name variants")
                 for v in variants[:5]:
-                    logger.info(f"  - {v.get('query')} ({v.get('variant_type')})")
+                    logger.info(f"  - {v.get('query')} ({v.get('type', v.get('variant_type', 'unknown'))})")
                 if len(variants) > 5:
                     logger.info(f"  ... and {len(variants) - 5} more")
 
@@ -363,19 +338,18 @@ ONLY return the JSON array, no other text."""
         llm_call.latency_ms = int((llm_call.completed_at - start_time).total_seconds() * 1000)
         await self.db.commit()
 
-        # Fallback: basic variants
+        # Fallback: basic variants using correct GS format (initial + surname)
         name_parts = thinker.canonical_name.split()
         if len(name_parts) >= 2:
-            first_name = name_parts[0]
+            first_initial = name_parts[0][0]
             last_name = name_parts[-1]
             fallback_variants = [
-                {"query": f'author:"{thinker.canonical_name}"', "variant_type": "full_name", "language": None, "priority": 1},
-                {"query": f'author:"{first_name[0]} {last_name}"', "variant_type": "initial_surname", "language": None, "priority": 1},
-                {"query": f'author:"{last_name}"', "variant_type": "surname_only", "language": None, "priority": 2},
+                {"query": f'author:"{first_initial} {last_name}"', "type": "initial_surname", "priority": 1},
+                {"query": f'author:"{first_initial}* {last_name}"', "type": "wildcard", "priority": 1},
             ]
         else:
             fallback_variants = [
-                {"query": f'author:"{thinker.canonical_name}"', "variant_type": "full_name", "language": None, "priority": 1},
+                {"query": f'author:"{thinker.canonical_name}"', "type": "single_name", "priority": 1},
             ]
 
         return {
