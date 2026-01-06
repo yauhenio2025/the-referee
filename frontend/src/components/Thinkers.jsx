@@ -209,9 +209,9 @@ function Thinkers({ onSelectThinker }) {
                     )}
                   </td>
                   <td className="domains-cell">
-                    {thinker.domains ? (
+                    {thinker.domains && thinker.domains.length > 0 ? (
                       <span className="domains-list">
-                        {JSON.parse(thinker.domains || '[]').slice(0, 3).join(', ')}
+                        {(Array.isArray(thinker.domains) ? thinker.domains : JSON.parse(thinker.domains)).slice(0, 3).join(', ')}
                       </span>
                     ) : (
                       <span className="muted">-</span>

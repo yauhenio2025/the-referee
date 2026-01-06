@@ -77,9 +77,15 @@ function ThinkerDetail({ thinkerId, onBack }) {
   if (error) return <div className="error">Error: {error.message}</div>
   if (!thinker) return <div className="error">Thinker not found</div>
 
-  const domains = thinker.domains ? JSON.parse(thinker.domains) : []
-  const notableWorks = thinker.notable_works ? JSON.parse(thinker.notable_works) : []
-  const nameVariants = thinker.name_variants ? JSON.parse(thinker.name_variants) : []
+  // Handle both array (from API) and JSON string (from DB) formats
+  const parseJsonField = (field) => {
+    if (!field) return []
+    if (Array.isArray(field)) return field
+    try { return JSON.parse(field) } catch { return [] }
+  }
+  const domains = parseJsonField(thinker.domains)
+  const notableWorks = parseJsonField(thinker.notable_works)
+  const nameVariants = parseJsonField(thinker.name_variants)
   const works = worksData?.works || []
 
   return (
