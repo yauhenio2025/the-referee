@@ -2719,9 +2719,10 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
             page_count[0] = page_num + 1
 
             # Skip papers we've already seen
+            # Note: _parse_scholar_page returns camelCase keys: scholarId, authorsRaw, etc.
             new_papers = []
             for p in papers:
-                sid = p.get("scholar_id")
+                sid = p.get("scholarId")  # camelCase from parser
                 if sid and sid not in seen_scholar_ids:
                     new_papers.append(p)
                     seen_scholar_ids.add(sid)
@@ -2757,13 +2758,14 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
                         var_uncertain += 1
 
                     # Save work record immediately
+                    # Note: parser returns camelCase keys: scholarId, authorsRaw, citationCount
                     work = ThinkerWork(
                         thinker_id=thinker_id,
-                        scholar_id=paper_data.get("scholar_id"),
+                        scholar_id=paper_data.get("scholarId"),
                         title=paper_data.get("title", "Unknown"),
-                        authors_raw=paper_data.get("authors"),
+                        authors_raw=paper_data.get("authorsRaw"),
                         year=paper_data.get("year"),
-                        citation_count=paper_data.get("citation_count", 0),
+                        citation_count=paper_data.get("citationCount", 0),
                         decision="accepted" if verdict == "accept" else ("rejected" if verdict == "reject" else "uncertain"),
                         confidence=confidence,
                         reason=reason,
