@@ -1592,30 +1592,92 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         log_now(f"[EDITION {i+1}] 📅 Year {year}: SKIPPING (already completed)")
                         continue
 
+                    # SMART SKIP: Check actual citations in DB vs expected
+                    # If we already have >= 90% of expected, mark complete and skip
+                    # This prevents wasting Oxylabs calls on years that are "close enough"
+                    # (gaps are usually due to GS inconsistency, not missing harvests)
+                    target_result = await db.execute(
+                        select(HarvestTarget)
+                        .where(HarvestTarget.edition_id == edition.id)
+                        .where(HarvestTarget.year == year)
+                    )
+                    existing_target = target_result.scalar_one_or_none()
+
+                    if existing_target and existing_target.expected_count > 0:
+                        # Count actual citations in DB for this edition+year
+                        actual_db_count_result = await db.execute(
+                            select(func.count(Citation.id))
+                            .where(Citation.paper_id == paper.id)
+                            .where(Citation.year == year)
+                        )
+                        actual_db_count = actual_db_count_result.scalar() or 0
+
+                        # If we have >= 90% of expected, mark complete and skip
+                        completion_ratio = actual_db_count / existing_target.expected_count
+                        if completion_ratio >= 0.90:
+                            # Mark as complete with gap reason
+                            gap = existing_target.expected_count - actual_db_count
+                            await db.execute(
+                                update(HarvestTarget)
+                                .where(HarvestTarget.id == existing_target.id)
+                                .values(
+                                    status='complete',
+                                    actual_count=actual_db_count,
+                                    gap_reason='near_complete',
+                                    gap_details=json.dumps({
+                                        "completion_ratio": round(completion_ratio, 3),
+                                        "gap": gap,
+                                        "reason": "Marked complete at 90%+ - remaining gap likely due to GS inconsistency"
+                                    })
+                                )
+                            )
+                            await db.commit()
+                            completed_years.add(year)
+                            log_now(f"[EDITION {i+1}] 📅 Year {year}: SMART SKIP ({actual_db_count}/{existing_target.expected_count} = {completion_ratio:.1%}, gap={gap})")
+                            continue
+
                     year_start_citations = total_new_citations
                     current_harvest_year["year"] = year
 
-                    # Determine start page for this year
+                    # Determine start page for this year using ACTUAL DB count (not harvest_target.actual_count)
                     start_page_for_this_year = 0
                     if resume_year == year and resume_page_for_year > 0:
                         # Resume from saved state (preferred - exact page number)
                         start_page_for_this_year = resume_page_for_year
                         log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from saved state page {start_page_for_this_year})...")
                     else:
-                        # Check harvest_target for this year - if we have actual_count, resume from there
-                        # This handles the case where job was interrupted without saving resume state
-                        target_result = await db.execute(
-                            select(HarvestTarget)
-                            .where(HarvestTarget.edition_id == edition.id)
-                            .where(HarvestTarget.year == year)
-                        )
-                        existing_target = target_result.scalar_one_or_none()
-                        if existing_target and existing_target.actual_count > 0:
-                            # Calculate resume page from actual_count (10 citations per page)
-                            start_page_for_this_year = existing_target.actual_count // 10
-                            log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from calculated page {start_page_for_this_year} based on {existing_target.actual_count} existing citations)...")
+                        # Count actual citations in DB to calculate resume page
+                        # This is more accurate than harvest_target.actual_count which may be stale
+                        if existing_target is None:
+                            # Fetch target if we didn't already
+                            target_result = await db.execute(
+                                select(HarvestTarget)
+                                .where(HarvestTarget.edition_id == edition.id)
+                                .where(HarvestTarget.year == year)
+                            )
+                            existing_target = target_result.scalar_one_or_none()
+
+                        if existing_target and existing_target.expected_count > 0:
+                            # Use actual DB count for resume calculation (already computed in smart skip check above)
+                            if actual_db_count > 0:
+                                # Calculate resume page from actual DB count (10 citations per page)
+                                start_page_for_this_year = actual_db_count // 10
+                                log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from page {start_page_for_this_year} based on {actual_db_count} DB citations)...")
+                            else:
+                                log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
                         else:
-                            log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
+                            # No existing target or no expected count - fetch actual DB count
+                            actual_db_count_result = await db.execute(
+                                select(func.count(Citation.id))
+                                .where(Citation.paper_id == paper.id)
+                                .where(Citation.year == year)
+                            )
+                            actual_db_count = actual_db_count_result.scalar() or 0
+                            if actual_db_count > 0:
+                                start_page_for_this_year = actual_db_count // 10
+                                log_now(f"[EDITION {i+1}] 📅 Fetching year {year} (RESUMING from page {start_page_for_this_year} based on {actual_db_count} DB citations)...")
+                            else:
+                                log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
 
                     # STEP 1: Quick count check - fetch just first page to see total
                     count_result = await scholar_service.get_cited_by(
