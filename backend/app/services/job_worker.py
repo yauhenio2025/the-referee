@@ -2711,6 +2711,74 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
         var_rejected = 0
         var_uncertain = 0
         pages_fetched = 0
+        page_count = [0]  # Use list for mutable reference in callback
+
+        # Page callback - process and save papers incrementally as each page is fetched
+        async def on_page_complete(page_num: int, papers: list):
+            nonlocal var_accepted, var_rejected, var_uncertain
+            page_count[0] = page_num + 1
+
+            # Skip papers we've already seen
+            new_papers = []
+            for p in papers:
+                sid = p.get("scholar_id")
+                if sid and sid not in seen_scholar_ids:
+                    new_papers.append(p)
+                    seen_scholar_ids.add(sid)
+
+            if not new_papers:
+                log_now(f"[ThinkerDiscover]   Page {page_num + 1}: all {len(papers)} papers already seen, skipping")
+                return
+
+            log_now(f"[ThinkerDiscover]   Page {page_num + 1}: filtering {len(new_papers)} new papers via LLM...")
+
+            # Filter via LLM
+            filter_result = await service.filter_page_results(thinker, new_papers)
+
+            if filter_result.get("success"):
+                decisions = filter_result.get("decisions", [])
+                page_accepted = 0
+
+                for i, decision in enumerate(decisions):
+                    if i >= len(new_papers):
+                        break
+
+                    paper_data = new_papers[i]
+                    verdict = decision.get("decision", "uncertain")
+                    confidence = decision.get("confidence", 0.5)
+                    reason = decision.get("reason", "")
+
+                    if verdict == "accept":
+                        var_accepted += 1
+                        page_accepted += 1
+                    elif verdict == "reject":
+                        var_rejected += 1
+                    else:
+                        var_uncertain += 1
+
+                    # Save work record immediately
+                    work = ThinkerWork(
+                        thinker_id=thinker_id,
+                        scholar_id=paper_data.get("scholar_id"),
+                        title=paper_data.get("title", "Unknown"),
+                        authors_raw=paper_data.get("authors"),
+                        year=paper_data.get("year"),
+                        citation_count=paper_data.get("citation_count", 0),
+                        decision="accepted" if verdict == "accept" else ("rejected" if verdict == "reject" else "uncertain"),
+                        confidence=confidence,
+                        reason=reason,
+                        created_at=datetime.utcnow(),
+                    )
+                    db.add(work)
+
+                # Commit after each page - saves progress incrementally
+                await db.commit()
+                log_now(f"[ThinkerDiscover]   Page {page_num + 1}: saved {page_accepted} accepted, {var_accepted} total so far")
+
+            # Update job progress after each page
+            job.progress = int(((var_idx + (page_num / max_pages_per_variant)) / len(variants)) * 100)
+            job.progress_message = f"Variant {var_idx+1}/{len(variants)}, page {page_num + 1}: {var_accepted} accepted"
+            await db.commit()
 
         try:
             # Combine author variant with full name to reduce false positives
@@ -2718,78 +2786,18 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
             combined_query = f'{variant} "{thinker.canonical_name}"'
             log_now(f"[ThinkerDiscover]   Combined query: {combined_query}")
 
-            # Execute author search with pagination
+            # Execute author search with pagination - papers saved incrementally via callback
             search_result = await scholar.search_by_author(
                 author_query=combined_query,
                 max_results=max_pages_per_variant * 10,  # 10 results per page
                 start_page=0,
+                on_page_complete=on_page_complete,  # Process each page as it's fetched
             )
 
-            papers = search_result.get("papers", [])
-            total_results += len(papers)
             pages_fetched = search_result.get("pages_fetched", 0)
+            total_results += search_result.get("totalResults", 0)
 
-            log_now(f"[ThinkerDiscover]   Found {len(papers)} results in {pages_fetched} pages")
-
-            if papers:
-                # Filter results via LLM (batch by page)
-                for page_start in range(0, len(papers), 10):
-                    page = papers[page_start:page_start + 10]
-
-                    # Skip papers we've already seen
-                    new_papers = []
-                    for p in page:
-                        sid = p.get("scholar_id")
-                        if sid and sid not in seen_scholar_ids:
-                            new_papers.append(p)
-                            seen_scholar_ids.add(sid)
-
-                    if not new_papers:
-                        continue
-
-                    # Filter via LLM
-                    filter_result = await service.filter_page_results(thinker, new_papers)
-
-                    if filter_result.get("success"):
-                        decisions = filter_result.get("decisions", [])
-
-                        for i, decision in enumerate(decisions):
-                            if i >= len(new_papers):
-                                break
-
-                            paper_data = new_papers[i]
-                            verdict = decision.get("decision", "uncertain")
-                            confidence = decision.get("confidence", 0.5)
-                            reason = decision.get("reason", "")
-
-                            if verdict == "accept":
-                                var_accepted += 1
-                            elif verdict == "reject":
-                                var_rejected += 1
-                            else:
-                                var_uncertain += 1
-
-                            # Save work record
-                            work = ThinkerWork(
-                                thinker_id=thinker_id,
-                                scholar_id=paper_data.get("scholar_id"),
-                                title=paper_data.get("title", "Unknown"),
-                                authors_raw=paper_data.get("authors"),
-                                year=paper_data.get("year"),
-                                citation_count=paper_data.get("citation_count", 0),
-                                decision="accepted" if verdict == "accept" else ("rejected" if verdict == "reject" else "uncertain"),
-                                confidence=confidence,
-                                reason=reason,
-                                created_at=datetime.utcnow(),
-                            )
-                            db.add(work)
-
-                        await db.commit()
-
-                    # Update job progress
-                    job.progress = int(((var_idx + (page_start / len(papers))) / len(variants)) * 100)
-                    job.progress_message = f"Variant {var_idx+1}/{len(variants)}: {var_accepted} accepted"
-                    await db.commit()
+            log_now(f"[ThinkerDiscover]   Variant complete: {pages_fetched} pages, {var_accepted} accepted")
 
         except Exception as e:
             log_now(f"[ThinkerDiscover] Error processing variant: {e}")
