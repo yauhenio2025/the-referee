@@ -855,7 +855,7 @@ class RefereeAPI {
     return this.request(`/api/thinkers/${thinkerId}/start-discovery`, {
       method: 'POST',
       body: {
-        variant_types: options.variantTypes || null,
+        variant_types: options.variantTypes || [],
         max_pages_per_variant: options.maxPagesPerVariant || 100,
       },
     });
