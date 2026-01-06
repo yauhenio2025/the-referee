@@ -899,8 +899,7 @@ class ThinkerWork(Base):
     )
 
     __table_args__ = (
-        Index("ix_thinker_works_thinker", "thinker_id"),
-        Index("ix_thinker_works_scholar_id", "scholar_id"),
+        # Unique composite index for deduplication - single-column indexes created by index=True on columns
         Index("ix_thinker_works_thinker_scholar", "thinker_id", "scholar_id", unique=True),
     )
 
@@ -940,10 +939,7 @@ class ThinkerHarvestRun(Base):
     # Relationship
     thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="harvest_runs")
 
-    __table_args__ = (
-        Index("ix_thinker_harvest_runs_thinker", "thinker_id"),
-        Index("ix_thinker_harvest_runs_status", "status"),
-    )
+    # Note: Single-column indexes created by index=True on thinker_id and status columns
 
 
 class ThinkerLLMCall(Base):
@@ -1001,7 +997,4 @@ class ThinkerLLMCall(Base):
     # Relationship
     thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="llm_calls")
 
-    __table_args__ = (
-        Index("ix_thinker_llm_calls_thinker", "thinker_id"),
-        Index("ix_thinker_llm_calls_workflow", "workflow"),
-    )
+    # Note: Single-column indexes created by index=True on thinker_id and workflow columns
