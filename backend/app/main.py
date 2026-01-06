@@ -8594,6 +8594,64 @@ async def delete_thinker(thinker_id: int, db: AsyncSession = Depends(get_db)):
     return result
 
 
+@app.post("/api/thinkers/{thinker_id}/refresh-stats")
+async def refresh_thinker_stats(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Recalculate thinker stats from actual thinker_works data.
+
+    Useful for fixing inconsistent state after job crashes.
+    """
+    from sqlalchemy import select, func
+    from .models import Thinker, ThinkerWork
+
+    # Get thinker
+    result = await db.execute(select(Thinker).where(Thinker.id == thinker_id))
+    thinker = result.scalar_one_or_none()
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Count works by decision
+    counts_result = await db.execute(
+        select(
+            ThinkerWork.decision,
+            func.count().label("count")
+        )
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .group_by(ThinkerWork.decision)
+    )
+    counts = {row.decision: row.count for row in counts_result}
+
+    accepted = counts.get("accepted", 0)
+    uncertain = counts.get("uncertain", 0)
+    rejected = counts.get("rejected", 0)
+
+    # Update thinker stats
+    old_discovered = thinker.works_discovered
+    thinker.works_discovered = accepted + uncertain  # Include uncertain for review
+
+    # Count harvested works (those with citations_harvested=True)
+    harvested_result = await db.execute(
+        select(func.count())
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.citations_harvested == True)
+    )
+    thinker.works_harvested = harvested_result.scalar() or 0
+
+    await db.commit()
+
+    return {
+        "thinker_id": thinker_id,
+        "works_discovered": thinker.works_discovered,
+        "works_harvested": thinker.works_harvested,
+        "breakdown": {
+            "accepted": accepted,
+            "uncertain": uncertain,
+            "rejected": rejected,
+        },
+        "previous_discovered": old_discovered,
+    }
+
+
 @app.post("/api/thinkers/{thinker_id}/confirm")
 async def confirm_thinker_disambiguation(
     thinker_id: int,
