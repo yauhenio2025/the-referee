@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget
+from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
@@ -2608,6 +2608,371 @@ async def process_verify_and_repair_job(job: Job, db: AsyncSession) -> Dict[str,
     }
 
 
+# ============== Thinker Bibliography Jobs ==============
+
+async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str, Any]:
+    """
+    Discover works by a thinker using author searches.
+
+    For each name variant:
+    1. Execute author search on Google Scholar
+    2. Paginate through ALL results
+    3. Filter each page via LLM to identify works BY the thinker
+    4. Save accepted works to ThinkerWork table
+    5. Deduplicate across variants (by scholar_id)
+    """
+    from .thinker_service import get_thinker_service
+
+    # Parse job params
+    params = json.loads(job.params) if job.params else {}
+    thinker_id = params.get("thinker_id")
+    max_pages_per_variant = params.get("max_pages", 50)  # Safety limit
+
+    if not thinker_id:
+        raise ValueError("thinker_id required in job params")
+
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        raise ValueError(f"Thinker {thinker_id} not found")
+
+    log_now(f"[ThinkerDiscover] Starting work discovery for: {thinker.canonical_name}")
+
+    service = get_thinker_service(db)
+    scholar = get_scholar_service()
+
+    # Parse name variants
+    variants = []
+    if thinker.name_variants:
+        try:
+            variants = json.loads(thinker.name_variants)
+        except json.JSONDecodeError:
+            variants = [thinker.name_variants]
+
+    if not variants:
+        # Generate variants if not available
+        log_now(f"[ThinkerDiscover] No variants found, generating...")
+        variant_result = await service.generate_name_variants(thinker)
+        if variant_result.get("success"):
+            variants = [v.get("query", "") for v in variant_result.get("variants", [])]
+        else:
+            # Fallback to canonical name
+            variants = [f'author:"{thinker.canonical_name}"']
+
+    log_now(f"[ThinkerDiscover] Processing {len(variants)} name variants")
+
+    # Update thinker status
+    thinker.status = "harvesting"
+    thinker.harvest_started_at = datetime.utcnow()
+
+    # Track results
+    total_results = 0
+    total_accepted = 0
+    total_rejected = 0
+    total_uncertain = 0
+    seen_scholar_ids = set()
+    variant_results = []
+
+    # Get existing works' scholar_ids to avoid duplicates
+    existing_result = await db.execute(
+        select(ThinkerWork.scholar_id)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.scholar_id.isnot(None))
+    )
+    seen_scholar_ids = set(r[0] for r in existing_result.all())
+    log_now(f"[ThinkerDiscover] Found {len(seen_scholar_ids)} existing works to skip")
+
+    for var_idx, variant in enumerate(variants):
+        if not variant:
+            continue
+
+        log_now(f"[ThinkerDiscover] Variant {var_idx+1}/{len(variants)}: {variant}")
+
+        # Create harvest run record
+        harvest_run = ThinkerHarvestRun(
+            thinker_id=thinker_id,
+            query_used=variant,
+            variant_type="search_query",
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+        db.add(harvest_run)
+        await db.flush()
+
+        var_accepted = 0
+        var_rejected = 0
+        var_uncertain = 0
+        pages_fetched = 0
+
+        try:
+            # Execute author search with pagination
+            search_result = await scholar.search_by_author(
+                author_query=variant,
+                max_results=max_pages_per_variant * 10,  # 10 results per page
+                start_page=0,
+            )
+
+            papers = search_result.get("papers", [])
+            total_results += len(papers)
+            pages_fetched = search_result.get("pages_fetched", 0)
+
+            log_now(f"[ThinkerDiscover]   Found {len(papers)} results in {pages_fetched} pages")
+
+            if papers:
+                # Filter results via LLM (batch by page)
+                for page_start in range(0, len(papers), 10):
+                    page = papers[page_start:page_start + 10]
+
+                    # Skip papers we've already seen
+                    new_papers = []
+                    for p in page:
+                        sid = p.get("scholar_id")
+                        if sid and sid not in seen_scholar_ids:
+                            new_papers.append(p)
+                            seen_scholar_ids.add(sid)
+
+                    if not new_papers:
+                        continue
+
+                    # Filter via LLM
+                    filter_result = await service.filter_page_results(thinker, new_papers)
+
+                    if filter_result.get("success"):
+                        decisions = filter_result.get("decisions", [])
+
+                        for i, decision in enumerate(decisions):
+                            if i >= len(new_papers):
+                                break
+
+                            paper_data = new_papers[i]
+                            verdict = decision.get("decision", "uncertain")
+                            confidence = decision.get("confidence", 0.5)
+                            reason = decision.get("reason", "")
+
+                            if verdict == "accept":
+                                var_accepted += 1
+                            elif verdict == "reject":
+                                var_rejected += 1
+                            else:
+                                var_uncertain += 1
+
+                            # Save work record
+                            work = ThinkerWork(
+                                thinker_id=thinker_id,
+                                scholar_id=paper_data.get("scholar_id"),
+                                title=paper_data.get("title", "Unknown"),
+                                authors_raw=paper_data.get("authors"),
+                                year=paper_data.get("year"),
+                                citation_count=paper_data.get("citation_count", 0),
+                                decision="accepted" if verdict == "accept" else ("rejected" if verdict == "reject" else "uncertain"),
+                                confidence=confidence,
+                                reason=reason,
+                                created_at=datetime.utcnow(),
+                            )
+                            db.add(work)
+
+                        await db.commit()
+
+                    # Update job progress
+                    job.progress = int(((var_idx + (page_start / len(papers))) / len(variants)) * 100)
+                    job.progress_message = f"Variant {var_idx+1}/{len(variants)}: {var_accepted} accepted"
+                    await db.commit()
+
+        except Exception as e:
+            log_now(f"[ThinkerDiscover] Error processing variant: {e}")
+            harvest_run.status = "failed"
+        else:
+            harvest_run.status = "completed"
+
+        # Update harvest run
+        harvest_run.pages_fetched = pages_fetched
+        harvest_run.results_total = var_accepted + var_rejected + var_uncertain
+        harvest_run.results_accepted = var_accepted
+        harvest_run.results_rejected = var_rejected
+        harvest_run.completed_at = datetime.utcnow()
+
+        total_accepted += var_accepted
+        total_rejected += var_rejected
+        total_uncertain += var_uncertain
+
+        variant_results.append({
+            "variant": variant,
+            "accepted": var_accepted,
+            "rejected": var_rejected,
+            "uncertain": var_uncertain,
+        })
+
+        await db.commit()
+
+    # Update thinker stats
+    thinker.works_discovered = total_accepted + total_uncertain  # Include uncertain for review
+    await db.commit()
+
+    log_now(f"[ThinkerDiscover] ═══════════════════════════════════════════════")
+    log_now(f"[ThinkerDiscover] COMPLETE: {len(variants)} variants, {total_results} total results")
+    log_now(f"[ThinkerDiscover] Accepted: {total_accepted}, Rejected: {total_rejected}, Uncertain: {total_uncertain}")
+    log_now(f"[ThinkerDiscover] ═══════════════════════════════════════════════")
+
+    return {
+        "thinker_id": thinker_id,
+        "thinker_name": thinker.canonical_name,
+        "variants_processed": len(variants),
+        "total_results": total_results,
+        "accepted": total_accepted,
+        "rejected": total_rejected,
+        "uncertain": total_uncertain,
+        "variant_results": variant_results,
+    }
+
+
+async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[str, Any]:
+    """
+    Harvest citations for a thinker's accepted works.
+
+    For each accepted ThinkerWork:
+    1. Check if Paper already exists (by scholar_id or title match)
+    2. If not, create Paper + Edition
+    3. Queue extract_citations job
+    4. Track progress at thinker level
+    """
+    # Parse job params
+    params = json.loads(job.params) if job.params else {}
+    thinker_id = params.get("thinker_id")
+    max_works = params.get("max_works", 100)  # Safety limit per job
+
+    if not thinker_id:
+        raise ValueError("thinker_id required in job params")
+
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        raise ValueError(f"Thinker {thinker_id} not found")
+
+    log_now(f"[ThinkerHarvest] Starting citation harvest for: {thinker.canonical_name}")
+
+    # Get accepted works that haven't been harvested
+    result = await db.execute(
+        select(ThinkerWork)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+        .where(ThinkerWork.citations_harvested == False)
+        .order_by(ThinkerWork.citation_count.desc())  # Prioritize high-citation works
+        .limit(max_works)
+    )
+    works = list(result.scalars().all())
+
+    if not works:
+        log_now(f"[ThinkerHarvest] No works to harvest for {thinker.canonical_name}")
+        return {
+            "thinker_id": thinker_id,
+            "thinker_name": thinker.canonical_name,
+            "works_processed": 0,
+            "jobs_queued": 0,
+            "message": "No accepted works pending harvest",
+        }
+
+    log_now(f"[ThinkerHarvest] Processing {len(works)} works")
+
+    jobs_queued = 0
+    papers_created = 0
+    papers_linked = 0
+
+    for idx, work in enumerate(works):
+        try:
+            paper = None
+
+            # Try to find existing paper by scholar_id
+            if work.scholar_id:
+                # Check citations table for existing paper with this scholar_id
+                citation_result = await db.execute(
+                    select(Citation.paper_id)
+                    .where(Citation.scholar_id == work.scholar_id)
+                    .limit(1)
+                )
+                existing = citation_result.scalars().first()
+                if existing:
+                    paper = await db.get(Paper, existing)
+
+            # Try to find existing paper by title
+            if not paper and work.title:
+                paper_result = await db.execute(
+                    select(Paper)
+                    .where(Paper.title.ilike(f"%{work.title[:50]}%"))
+                    .where(Paper.deleted_at.is_(None))
+                    .limit(1)
+                )
+                paper = paper_result.scalars().first()
+
+            # Create new paper if not found
+            if not paper:
+                paper = Paper(
+                    title=work.title,
+                    primary_author=work.authors_raw,
+                    year=work.year,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(paper)
+                await db.flush()
+                papers_created += 1
+
+                # Create edition for the paper
+                edition = Edition(
+                    paper_id=paper.id,
+                    title=work.title,
+                    gs_cluster_id=work.scholar_id,
+                    citation_count=work.citation_count,
+                    confidence_score=0.9,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(edition)
+                await db.flush()
+            else:
+                papers_linked += 1
+
+            # Link work to paper
+            work.paper_id = paper.id
+
+            # Queue citation extraction job
+            extract_job = Job(
+                job_type="extract_citations",
+                paper_id=paper.id,
+                status="pending",
+                created_at=datetime.utcnow(),
+            )
+            db.add(extract_job)
+            await db.flush()
+
+            work.citations_harvested = True
+            work.harvest_job_id = extract_job.id
+            jobs_queued += 1
+
+            # Update progress
+            job.progress = int(((idx + 1) / len(works)) * 100)
+            job.progress_message = f"Processing work {idx+1}/{len(works)}"
+            await db.commit()
+
+        except Exception as e:
+            log_now(f"[ThinkerHarvest] Error processing work {work.id}: {e}")
+            continue
+
+    # Update thinker stats
+    thinker.works_harvested = (thinker.works_harvested or 0) + jobs_queued
+    await db.commit()
+
+    log_now(f"[ThinkerHarvest] ═══════════════════════════════════════════════")
+    log_now(f"[ThinkerHarvest] COMPLETE: {len(works)} works processed")
+    log_now(f"[ThinkerHarvest] Papers created: {papers_created}, Linked: {papers_linked}")
+    log_now(f"[ThinkerHarvest] Jobs queued: {jobs_queued}")
+    log_now(f"[ThinkerHarvest] ═══════════════════════════════════════════════")
+
+    return {
+        "thinker_id": thinker_id,
+        "thinker_name": thinker.canonical_name,
+        "works_processed": len(works),
+        "papers_created": papers_created,
+        "papers_linked": papers_linked,
+        "jobs_queued": jobs_queued,
+    }
+
+
 async def process_single_job(job_id: int):
     """Process a single job by ID with concurrency control"""
     global _job_semaphore, _running_jobs
@@ -2657,6 +3022,10 @@ async def process_single_job(job_id: int):
                         result = await process_retry_failed_fetches_job(job, db)
                     elif job.job_type == "verify_and_repair":
                         result = await process_verify_and_repair_job(job, db)
+                    elif job.job_type == "thinker_discover_works":
+                        result = await process_thinker_discover_works(job, db)
+                    elif job.job_type == "thinker_harvest_citations":
+                        result = await process_thinker_harvest_citations(job, db)
                     else:
                         raise ValueError(f"Unknown job type: {job.job_type}")
 

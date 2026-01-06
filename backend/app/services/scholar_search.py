@@ -1231,6 +1231,134 @@ class ScholarSearchService:
         }
 
 
+    async def search_by_author(
+        self,
+        author_query: str,
+        max_results: int = 100,
+        start_page: int = 0,
+        on_page_complete: Optional[callable] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute an author search query on Google Scholar.
+
+        Used for Thinker Bibliographies to find all works by a specific author.
+        Returns ALL results by paginating through the full result set.
+
+        Args:
+            author_query: Author search query (e.g., 'author:"H Marcuse"' or 'author:"马尔库塞"')
+            max_results: Maximum results to fetch (default 100 for safety)
+            start_page: Page to start from (0-indexed, for resume)
+            on_page_complete: Callback(page_num, papers) called after each page
+
+        Returns:
+            Dict with 'papers' list, 'totalResults' count, and pagination info
+        """
+        log_now(f"[AUTHOR SEARCH] Query: \"{author_query[:60]}...\" max={max_results}")
+
+        try:
+            return await asyncio.wait_for(
+                self._search_by_author_impl(author_query, max_results, start_page, on_page_complete),
+                timeout=SEARCH_TOTAL_TIMEOUT * 3  # Allow more time for large author searches
+            )
+        except asyncio.TimeoutError:
+            log_now(f"[AUTHOR SEARCH] Total timeout exceeded for query")
+            return {"papers": [], "totalResults": 0, "error": "Search timeout"}
+
+    async def _search_by_author_impl(
+        self,
+        author_query: str,
+        max_results: int,
+        start_page: int,
+        on_page_complete: Optional[callable],
+    ) -> Dict[str, Any]:
+        """Internal author search implementation with pagination"""
+
+        # Build URL - author searches use regular search with author: operator
+        # Don't restrict language for author searches - we want ALL works
+        params = {
+            "q": author_query,
+            "hl": "en",
+            "as_sdt": "0,5",  # Search articles (not patents/legal)
+        }
+
+        base_url = f"https://scholar.google.com/scholar?{urlencode(params)}"
+
+        all_papers = []
+        total_results = None
+        current_page = start_page
+        max_pages = (max_results + 9) // 10
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+        pages_succeeded = 0
+
+        log_now(f"[AUTHOR SEARCH] Starting from page {start_page}, max_pages={max_pages}")
+
+        while len(all_papers) < max_results and current_page < max_pages:
+            page_url = base_url if current_page == 0 else f"{base_url}&start={current_page * 10}"
+
+            log_now(f"[AUTHOR PAGE {current_page + 1}/{max_pages}] Fetching...")
+
+            try:
+                html = await self._fetch_with_retry(page_url)
+
+                if current_page == start_page:
+                    total_results = self._extract_result_count(html)
+                    log_now(f"[AUTHOR SEARCH] Total results reported by GS: {total_results}")
+
+                    # Adjust max_pages if we now know the actual count
+                    if total_results:
+                        actual_max_pages = min((total_results + 9) // 10, max_pages)
+                        if actual_max_pages < max_pages:
+                            max_pages = actual_max_pages
+                            log_now(f"[AUTHOR SEARCH] Adjusted max_pages to {max_pages}")
+
+                extracted = self._parse_scholar_page(html)
+
+                if not extracted:
+                    log_now(f"[AUTHOR PAGE {current_page + 1}] No results, stopping")
+                    break
+
+                log_now(f"[AUTHOR PAGE {current_page + 1}] ✓ Extracted {len(extracted)} papers")
+
+                # Call page callback if provided
+                if on_page_complete:
+                    try:
+                        await on_page_complete(current_page, extracted)
+                        log_now(f"[AUTHOR PAGE {current_page + 1}] ✓ Callback completed")
+                    except Exception as save_error:
+                        log_now(f"[AUTHOR PAGE {current_page + 1}] ✗ Callback failed: {save_error}")
+
+                all_papers.extend(extracted)
+                current_page += 1
+                consecutive_failures = 0
+                pages_succeeded += 1
+
+                # Rate limiting between pages
+                if current_page < max_pages and len(all_papers) < max_results:
+                    await asyncio.sleep(4)
+
+            except Exception as e:
+                consecutive_failures += 1
+                log_now(f"[AUTHOR PAGE {current_page + 1}] ✗ Failed ({consecutive_failures}/{max_consecutive_failures}): {e}")
+
+                if consecutive_failures >= max_consecutive_failures:
+                    log_now(f"[AUTHOR SEARCH] Too many failures, stopping")
+                    break
+
+                current_page += 1
+                await asyncio.sleep(5)
+
+        log_now(f"[AUTHOR SEARCH] Complete: {len(all_papers)} papers from {pages_succeeded} pages")
+
+        return {
+            "papers": all_papers[:max_results],
+            "totalResults": total_results or len(all_papers),
+            "pages_fetched": current_page,
+            "pages_succeeded": pages_succeeded,
+            "last_page": current_page,
+        }
+
+
 # Singleton instance
 _scholar_service: Optional[ScholarSearchService] = None
 

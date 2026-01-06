@@ -150,6 +150,15 @@ async def run_migrations():
         )""",
         "CREATE INDEX IF NOT EXISTS ix_health_monitor_logs_created_at ON health_monitor_logs(created_at)",
         "CREATE INDEX IF NOT EXISTS ix_health_monitor_logs_action_type ON health_monitor_logs(action_type)",
+        # Thinker Bibliographies feature: tables created by create_all, indexes here for safety
+        "CREATE INDEX IF NOT EXISTS ix_thinkers_status ON thinkers(status)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_works_thinker ON thinker_works(thinker_id)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_works_scholar_id ON thinker_works(scholar_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_thinker_works_thinker_scholar ON thinker_works(thinker_id, scholar_id)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_harvest_runs_thinker ON thinker_harvest_runs(thinker_id)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_harvest_runs_status ON thinker_harvest_runs(status)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_llm_calls_thinker ON thinker_llm_calls(thinker_id)",
+        "CREATE INDEX IF NOT EXISTS ix_thinker_llm_calls_workflow ON thinker_llm_calls(workflow)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

@@ -783,6 +783,159 @@ class RefereeAPI {
       }),
     });
   }
+
+  // ============== Thinker Bibliographies ==============
+
+  /**
+   * List all thinkers
+   */
+  async getThinkers() {
+    return this.request('/api/thinkers');
+  }
+
+  /**
+   * Get thinker details with works
+   * @param {number} thinkerId - Thinker ID
+   */
+  async getThinker(thinkerId) {
+    return this.request(`/api/thinkers/${thinkerId}`);
+  }
+
+  /**
+   * Create a new thinker (triggers disambiguation)
+   * @param {string} name - Thinker name input
+   */
+  async createThinker(name) {
+    return this.request('/api/thinkers', {
+      method: 'POST',
+      body: { name },
+    });
+  }
+
+  /**
+   * Quick-add a thinker from natural language
+   * e.g., "harvest works by Herbert Marcuse"
+   * @param {string} query - Natural language query
+   */
+  async quickAddThinker(query) {
+    return this.request('/api/thinkers/quick-add', {
+      method: 'POST',
+      body: { query },
+    });
+  }
+
+  /**
+   * Confirm disambiguation choice for a thinker
+   * @param {number} thinkerId - Thinker ID
+   * @param {Object} confirmation - { confirmed, selected_index (if multiple candidates) }
+   */
+  async confirmThinker(thinkerId, confirmation) {
+    return this.request(`/api/thinkers/${thinkerId}/confirm`, {
+      method: 'POST',
+      body: confirmation,
+    });
+  }
+
+  /**
+   * Generate name variants for search
+   * @param {number} thinkerId - Thinker ID
+   */
+  async generateThinkerVariants(thinkerId) {
+    return this.request(`/api/thinkers/${thinkerId}/generate-variants`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Start work discovery (author searches)
+   * @param {number} thinkerId - Thinker ID
+   * @param {Object} options - { variant_types, max_pages_per_variant }
+   */
+  async startThinkerDiscovery(thinkerId, options = {}) {
+    return this.request(`/api/thinkers/${thinkerId}/start-discovery`, {
+      method: 'POST',
+      body: {
+        variant_types: options.variantTypes || null,
+        max_pages_per_variant: options.maxPagesPerVariant || 100,
+      },
+    });
+  }
+
+  /**
+   * Get works for a thinker
+   * @param {number} thinkerId - Thinker ID
+   * @param {Object} params - { decision, page, per_page }
+   */
+  async getThinkerWorks(thinkerId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/api/thinkers/${thinkerId}/works${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Detect translations among works
+   * @param {number} thinkerId - Thinker ID
+   * @param {Object} options - { work_ids }
+   */
+  async detectThinkerTranslations(thinkerId, options = {}) {
+    return this.request(`/api/thinkers/${thinkerId}/detect-translations`, {
+      method: 'POST',
+      body: {
+        work_ids: options.workIds || null,
+      },
+    });
+  }
+
+  /**
+   * Start harvesting citations for thinker's works
+   * @param {number} thinkerId - Thinker ID
+   * @param {Object} options - { work_ids, skip_existing }
+   */
+  async startThinkerHarvest(thinkerId, options = {}) {
+    return this.request(`/api/thinkers/${thinkerId}/start-harvest`, {
+      method: 'POST',
+      body: {
+        work_ids: options.workIds || null,
+        skip_existing: options.skipExisting ?? true,
+      },
+    });
+  }
+
+  /**
+   * Run retrospective matching for existing papers
+   * @param {Object} params - { thinker_ids, paper_ids, batch_size }
+   */
+  async retrospectiveMatch(params = {}) {
+    return this.request('/api/thinkers/retrospective-match', {
+      method: 'POST',
+      body: {
+        thinker_ids: params.thinkerIds || null,
+        paper_ids: params.paperIds || null,
+        batch_size: params.batchSize || 50,
+      },
+    });
+  }
+
+  /**
+   * Delete a thinker
+   * @param {number} thinkerId - Thinker ID
+   */
+  async deleteThinker(thinkerId) {
+    return this.request(`/api/thinkers/${thinkerId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Update work decision (accept/reject/uncertain)
+   * @param {number} workId - ThinkerWork ID
+   * @param {Object} update - { decision, reason }
+   */
+  async updateThinkerWorkDecision(workId, update) {
+    return this.request(`/api/thinker-works/${workId}/decision`, {
+      method: 'PATCH',
+      body: update,
+    });
+  }
 }
 
 export const api = new RefereeAPI();

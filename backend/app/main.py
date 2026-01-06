@@ -20,7 +20,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun, ThinkerLLMCall
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch, PapersPaginatedResponse,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -50,6 +50,14 @@ from .schemas import (
     # Dashboard schemas
     HarvestDashboardResponse, JobHistoryResponse, JobHistoryItem,
     SystemHealthStats, ActiveHarvestInfo, RecentlyCompletedPaper, DashboardAlert, JobHistorySummary,
+    # Thinker Bibliographies schemas
+    ThinkerCreate, ThinkerResponse, ThinkerDetail, ThinkerConfirmRequest,
+    ThinkerWorkResponse, ThinkerHarvestRunResponse, ThinkerLLMCallResponse,
+    DisambiguationResponse, NameVariantsResponse, ThinkerQuickAddRequest, ThinkerQuickAddResponse,
+    StartWorkDiscoveryRequest, StartWorkDiscoveryResponse,
+    DetectTranslationsRequest, DetectTranslationsResponse,
+    RetrospectiveMatchRequest, RetrospectiveMatchResponse,
+    HarvestCitationsRequest, HarvestCitationsResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -8435,3 +8443,508 @@ async def health_monitor_toggle(enabled: bool = True):
         "enabled": settings.health_monitor_enabled,
         "message": f"Health monitor {'enabled' if enabled else 'disabled'} (runtime only)",
     }
+
+
+# ============== Thinker Bibliographies Endpoints ==============
+
+@app.post("/api/thinkers", response_model=ThinkerResponse)
+async def create_thinker(
+    request: ThinkerCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new thinker for bibliography harvesting.
+
+    This will:
+    1. Use LLM to disambiguate the thinker (e.g., "Marcuse" → "Herbert Marcuse")
+    2. Create the thinker record with biographical info
+    3. Return disambiguation results if confirmation is needed
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    result = await service.create_thinker(request.name)
+
+    if not result.get("success"):
+        if result.get("existing_thinker_id"):
+            raise HTTPException(
+                status_code=409,
+                detail=result.get("error", "Thinker already exists")
+            )
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to create thinker"))
+
+    thinker = await service.get_thinker(result["thinker_id"])
+    return await service.thinker_to_response(thinker)
+
+
+@app.get("/api/thinkers", response_model=List[ThinkerResponse])
+async def list_thinkers(db: AsyncSession = Depends(get_db)):
+    """List all thinkers"""
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinkers = await service.list_thinkers()
+
+    return [await service.thinker_to_response(t) for t in thinkers]
+
+
+@app.get("/api/thinkers/{thinker_id}", response_model=ThinkerDetail)
+async def get_thinker(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """Get thinker details with works and harvest runs"""
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinker = await service.get_thinker(thinker_id)
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Get basic response
+    response = await service.thinker_to_response(thinker)
+
+    # Add works
+    works_result = await db.execute(
+        select(ThinkerWork)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .order_by(ThinkerWork.citation_count.desc())
+    )
+    works = works_result.scalars().all()
+
+    # Add harvest runs
+    runs_result = await db.execute(
+        select(ThinkerHarvestRun)
+        .where(ThinkerHarvestRun.thinker_id == thinker_id)
+        .order_by(ThinkerHarvestRun.started_at.desc())
+    )
+    harvest_runs = runs_result.scalars().all()
+
+    # Add recent LLM calls
+    llm_result = await db.execute(
+        select(ThinkerLLMCall)
+        .where(ThinkerLLMCall.thinker_id == thinker_id)
+        .order_by(ThinkerLLMCall.started_at.desc())
+        .limit(10)
+    )
+    llm_calls = llm_result.scalars().all()
+
+    return ThinkerDetail(
+        **response,
+        works=[ThinkerWorkResponse(
+            id=w.id,
+            thinker_id=w.thinker_id,
+            paper_id=w.paper_id,
+            scholar_id=w.scholar_id,
+            title=w.title,
+            authors_raw=w.authors_raw,
+            year=w.year,
+            citation_count=w.citation_count,
+            decision=w.decision,
+            confidence=w.confidence,
+            reason=w.reason,
+            is_translation=w.is_translation,
+            canonical_work_id=w.canonical_work_id,
+            original_language=w.original_language,
+            detected_language=w.detected_language,
+            citations_harvested=w.citations_harvested,
+            harvest_job_id=w.harvest_job_id,
+            created_at=w.created_at,
+        ) for w in works],
+        work_groups=[],  # TODO: Group by canonical_work_id
+        harvest_runs=[ThinkerHarvestRunResponse(
+            id=r.id,
+            thinker_id=r.thinker_id,
+            query_used=r.query_used,
+            variant_type=r.variant_type,
+            pages_fetched=r.pages_fetched,
+            results_total=r.results_total,
+            results_accepted=r.results_accepted,
+            results_rejected=r.results_rejected,
+            status=r.status,
+            started_at=r.started_at,
+            completed_at=r.completed_at,
+        ) for r in harvest_runs],
+        recent_llm_calls=[ThinkerLLMCallResponse(
+            id=c.id,
+            thinker_id=c.thinker_id,
+            workflow=c.workflow,
+            model=c.model,
+            status=c.status,
+            input_tokens=c.input_tokens,
+            output_tokens=c.output_tokens,
+            thinking_tokens=c.thinking_tokens,
+            latency_ms=c.latency_ms,
+            started_at=c.started_at,
+            completed_at=c.completed_at,
+        ) for c in llm_calls],
+    )
+
+
+@app.delete("/api/thinkers/{thinker_id}")
+async def delete_thinker(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a thinker and all related data"""
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    result = await service.delete_thinker(thinker_id)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Thinker not found"))
+
+    return result
+
+
+@app.post("/api/thinkers/{thinker_id}/confirm")
+async def confirm_thinker_disambiguation(
+    thinker_id: int,
+    request: ThinkerConfirmRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Confirm disambiguation choice for a thinker.
+
+    Call this after creating a thinker if disambiguation required confirmation.
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    result = await service.confirm_disambiguation(
+        thinker_id,
+        candidate_index=request.candidate_index,
+        custom_domains=request.custom_domains,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to confirm"))
+
+    return result
+
+
+@app.post("/api/thinkers/{thinker_id}/generate-variants", response_model=NameVariantsResponse)
+async def generate_thinker_variants(
+    thinker_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate name variants for author search queries.
+
+    This uses LLM to generate search query variants like:
+    - author:"Herbert Marcuse" (full name)
+    - author:"H Marcuse" (initial + surname)
+    - author:"马尔库塞" (Chinese transliteration)
+    - etc.
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinker = await service.get_thinker(thinker_id)
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    if thinker.status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Thinker disambiguation not confirmed. Call /confirm first."
+        )
+
+    result = await service.generate_name_variants(thinker)
+
+    return NameVariantsResponse(
+        thinker_id=result["thinker_id"],
+        canonical_name=result["canonical_name"],
+        variants=[
+            {
+                "query": v.get("query", ""),
+                "variant_type": v.get("variant_type", "unknown"),
+                "language": v.get("language"),
+            }
+            for v in result.get("variants", [])
+        ],
+    )
+
+
+@app.get("/api/thinkers/{thinker_id}/works", response_model=List[ThinkerWorkResponse])
+async def list_thinker_works(
+    thinker_id: int,
+    decision: Optional[str] = None,  # Filter: accepted, rejected, uncertain
+    db: AsyncSession = Depends(get_db)
+):
+    """List works discovered for a thinker"""
+    # Verify thinker exists
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Build query
+    query = select(ThinkerWork).where(ThinkerWork.thinker_id == thinker_id)
+    if decision:
+        query = query.where(ThinkerWork.decision == decision)
+    query = query.order_by(ThinkerWork.citation_count.desc())
+
+    result = await db.execute(query)
+    works = result.scalars().all()
+
+    return [ThinkerWorkResponse(
+        id=w.id,
+        thinker_id=w.thinker_id,
+        paper_id=w.paper_id,
+        scholar_id=w.scholar_id,
+        title=w.title,
+        authors_raw=w.authors_raw,
+        year=w.year,
+        citation_count=w.citation_count,
+        decision=w.decision,
+        confidence=w.confidence,
+        reason=w.reason,
+        is_translation=w.is_translation,
+        canonical_work_id=w.canonical_work_id,
+        original_language=w.original_language,
+        detected_language=w.detected_language,
+        citations_harvested=w.citations_harvested,
+        harvest_job_id=w.harvest_job_id,
+        created_at=w.created_at,
+    ) for w in works]
+
+
+@app.post("/api/thinkers/quick-add", response_model=ThinkerQuickAddResponse)
+async def quick_add_thinker(
+    request: ThinkerQuickAddRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Quick-add a thinker from natural language input.
+
+    Examples:
+    - "harvest works by Marcuse"
+    - "Herbert Marcuse"
+    - "add thinker Jürgen Habermas"
+    """
+    from .services.thinker_service import get_thinker_service
+    import re
+
+    service = get_thinker_service(db)
+
+    # Extract name from natural language input
+    input_text = request.input.strip()
+
+    # Remove common prefixes
+    patterns = [
+        r"^harvest\s+(?:works\s+)?(?:by\s+)?",
+        r"^add\s+(?:thinker\s+)?",
+        r"^(?:find|get|search)\s+(?:works\s+)?(?:by\s+)?",
+    ]
+    name = input_text
+    for pattern in patterns:
+        name = re.sub(pattern, "", name, flags=re.IGNORECASE).strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Could not extract thinker name from input")
+
+    result = await service.create_thinker(name)
+
+    if not result.get("success"):
+        if result.get("existing_thinker_id"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": result.get("error", "Thinker already exists"),
+                    "existing_thinker_id": result["existing_thinker_id"],
+                }
+            )
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to create thinker"))
+
+    disambiguation = result.get("disambiguation")
+
+    return ThinkerQuickAddResponse(
+        thinker_id=result["thinker_id"],
+        canonical_name=result["canonical_name"],
+        disambiguation_required=result.get("requires_confirmation", False),
+        disambiguation=DisambiguationResponse(
+            is_ambiguous=disambiguation.get("is_ambiguous", False),
+            primary_candidate=disambiguation.get("primary_candidate", {}),
+            alternatives=disambiguation.get("alternatives", []),
+            confidence=disambiguation.get("confidence", 0.0),
+            requires_confirmation=disambiguation.get("requires_confirmation", False),
+        ) if disambiguation else None,
+        message=f"Created thinker '{result['canonical_name']}'" + (
+            " - confirmation required" if result.get("requires_confirmation") else ""
+        ),
+    )
+
+
+@app.post("/api/thinkers/{thinker_id}/detect-translations", response_model=DetectTranslationsResponse)
+async def detect_translations(
+    thinker_id: int,
+    request: DetectTranslationsRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Detect translations and group works into canonical editions.
+
+    Uses Claude Opus with extended thinking (32k budget) to analyze
+    all accepted works and identify translations vs original editions.
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinker = await service.get_thinker(thinker_id)
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    result = await service.detect_translations(thinker)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Translation detection failed"))
+
+    return DetectTranslationsResponse(
+        success=True,
+        work_groups=result.get("work_groups", []),
+        standalone_work_ids=result.get("standalone_works", []),
+        analysis_notes=result.get("analysis_notes", ""),
+        thinking_tokens_used=result.get("thinking_tokens"),
+    )
+
+
+@app.post("/api/thinkers/retrospective-match", response_model=RetrospectiveMatchResponse)
+async def retrospective_match_papers(
+    request: RetrospectiveMatchRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Match existing papers to thinkers (retrospective assignment).
+
+    Analyzes existing papers in the database and determines which ones
+    were authored by known thinkers. Useful for:
+    - Assigning papers that were added before the thinker was created
+    - Bulk-matching papers to multiple thinkers at once
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    result = await service.retrospective_match(
+        thinker_ids=request.thinker_ids,
+        paper_ids=request.paper_ids,
+    )
+
+    if not result.get("success") and "error" in result:
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    return RetrospectiveMatchResponse(
+        success=True,
+        matches=result.get("matches", []),
+        total_papers_analyzed=result.get("total_papers_analyzed", 0),
+        total_matches=result.get("total_matches", 0),
+        thinkers_checked=result.get("thinkers_checked", 0),
+    )
+
+
+@app.post("/api/thinkers/{thinker_id}/start-discovery", response_model=StartWorkDiscoveryResponse)
+async def start_work_discovery(
+    thinker_id: int,
+    request: StartWorkDiscoveryRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Start a job to discover all works by a thinker.
+
+    This queues a background job that will:
+    1. Use all name variants to search Google Scholar
+    2. Filter each page of results via LLM
+    3. Save accepted works to the database
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinker = await service.get_thinker(thinker_id)
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    if thinker.status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Thinker disambiguation not confirmed. Call /confirm first."
+        )
+
+    # Check if name variants exist
+    if not thinker.name_variants:
+        # Generate variants first
+        await service.generate_name_variants(thinker)
+        await db.refresh(thinker)
+
+    # Create job
+    job = Job(
+        job_type="thinker_discover_works",
+        status="pending",
+        params=json.dumps({
+            "thinker_id": thinker_id,
+            "max_pages": request.max_pages_per_variant or 50,
+        }),
+        created_at=datetime.utcnow(),
+    )
+    db.add(job)
+    await db.commit()
+
+    return StartWorkDiscoveryResponse(
+        job_id=job.id,
+        thinker_id=thinker_id,
+        message=f"Work discovery job queued for {thinker.canonical_name}",
+    )
+
+
+@app.post("/api/thinkers/{thinker_id}/start-harvest", response_model=HarvestCitationsResponse)
+async def start_harvest_citations(
+    thinker_id: int,
+    request: HarvestCitationsRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Start a job to harvest citations for a thinker's accepted works.
+
+    This queues a background job that will:
+    1. Create Paper/Edition records for each accepted work
+    2. Queue citation extraction jobs for each paper
+    """
+    from .services.thinker_service import get_thinker_service
+
+    service = get_thinker_service(db)
+    thinker = await service.get_thinker(thinker_id)
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Check if there are accepted works
+    result = await db.execute(
+        select(func.count(ThinkerWork.id))
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+        .where(ThinkerWork.citations_harvested == False)
+    )
+    pending_works = result.scalar()
+
+    if not pending_works:
+        raise HTTPException(
+            status_code=400,
+            detail="No accepted works pending harvest. Run work discovery first."
+        )
+
+    # Create job
+    job = Job(
+        job_type="thinker_harvest_citations",
+        status="pending",
+        params=json.dumps({
+            "thinker_id": thinker_id,
+            "max_works": request.max_works or 100,
+        }),
+        created_at=datetime.utcnow(),
+    )
+    db.add(job)
+    await db.commit()
+
+    return HarvestCitationsResponse(
+        job_id=job.id,
+        thinker_id=thinker_id,
+        works_pending=pending_works,
+        message=f"Citation harvest job queued for {thinker.canonical_name}",
+    )

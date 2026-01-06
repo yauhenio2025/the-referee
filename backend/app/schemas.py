@@ -848,8 +848,229 @@ class AIDiagnosisResponse(BaseModel):
     error: Optional[str] = None
 
 
+# ============== Thinker Bibliographies Schemas ==============
+
+class ThinkerCreate(BaseModel):
+    """Create a new thinker for bibliography harvesting"""
+    name: str  # User input like "Marcuse" or "Herbert Marcuse"
+
+
+class ThinkerCandidate(BaseModel):
+    """A candidate thinker from disambiguation"""
+    canonical_name: str
+    birth_death: Optional[str] = None  # e.g., "1898-1979"
+    bio: Optional[str] = None
+    domains: List[str] = []  # ["critical theory", "Marxism", "Frankfurt School"]
+    notable_works: List[str] = []  # ["One-Dimensional Man", "Eros and Civilization"]
+    confidence: float = 0.0
+
+
+class DisambiguationResponse(BaseModel):
+    """Response from thinker disambiguation"""
+    is_ambiguous: bool
+    primary_candidate: ThinkerCandidate
+    alternatives: List[ThinkerCandidate] = []
+    confidence: float
+    requires_confirmation: bool = False
+
+
+class ThinkerConfirmRequest(BaseModel):
+    """Confirm disambiguation choice"""
+    candidate_index: int = 0  # 0 = primary candidate
+    custom_domains: Optional[List[str]] = None  # Override domains if needed
+
+
+class NameVariant(BaseModel):
+    """A search query variant for a thinker"""
+    query: str  # e.g., 'author:"h marcuse"'
+    variant_type: str  # full_name, initial_surname, transliteration, misspelling
+    language: Optional[str] = None  # For transliterations
+
+
+class NameVariantsResponse(BaseModel):
+    """Response from name variant generation"""
+    thinker_id: int
+    canonical_name: str
+    variants: List[NameVariant]
+
+
+class ThinkerResponse(BaseModel):
+    """Basic thinker information"""
+    id: int
+    canonical_name: str
+    birth_death: Optional[str] = None
+    bio: Optional[str] = None
+    domains: List[str] = []
+    notable_works: List[str] = []
+    name_variants: List[str] = []
+    status: str  # pending, disambiguated, harvesting, complete
+    works_discovered: int = 0
+    works_harvested: int = 0
+    total_citations: int = 0
+    created_at: datetime
+    disambiguated_at: Optional[datetime] = None
+    harvest_started_at: Optional[datetime] = None
+    harvest_completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ThinkerWorkResponse(BaseModel):
+    """A work (paper/book) authored by a thinker"""
+    id: int
+    thinker_id: int
+    paper_id: Optional[int] = None  # Link to Papers table if converted
+    scholar_id: Optional[str] = None
+    title: str
+    authors_raw: Optional[str] = None
+    year: Optional[int] = None
+    citation_count: int = 0
+    # Classification
+    decision: str = "accepted"  # accepted, rejected, uncertain
+    confidence: float = 0.8
+    reason: Optional[str] = None
+    # Translation detection
+    is_translation: bool = False
+    canonical_work_id: Optional[int] = None
+    original_language: Optional[str] = None
+    detected_language: Optional[str] = None
+    # Harvest status
+    citations_harvested: bool = False
+    harvest_job_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ThinkerWorkGroup(BaseModel):
+    """A canonical work with its translations"""
+    canonical_work: ThinkerWorkResponse
+    translations: List[ThinkerWorkResponse] = []
+    total_citation_count: int = 0
+
+
+class ThinkerHarvestRunResponse(BaseModel):
+    """A harvest run for a specific name variant query"""
+    id: int
+    thinker_id: int
+    query_used: str
+    variant_type: str
+    pages_fetched: int = 0
+    results_total: int = 0
+    results_accepted: int = 0
+    results_rejected: int = 0
+    status: str  # pending, running, completed, failed
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ThinkerLLMCallResponse(BaseModel):
+    """Audit trail for LLM calls in thinker workflows"""
+    id: int
+    thinker_id: int
+    workflow: str  # disambiguation, variant_generation, page_filtering, translation_detection, retrospective_matching
+    model: str
+    status: str
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    thinking_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ThinkerDetail(ThinkerResponse):
+    """Thinker with works and harvest runs"""
+    works: List[ThinkerWorkResponse] = []
+    work_groups: List[ThinkerWorkGroup] = []  # Works grouped by translation
+    harvest_runs: List[ThinkerHarvestRunResponse] = []
+    recent_llm_calls: List[ThinkerLLMCallResponse] = []
+
+
+class StartWorkDiscoveryRequest(BaseModel):
+    """Request to start discovering works by a thinker"""
+    variant_types: List[str] = []  # If empty, use all generated variants
+    max_pages_per_variant: int = 100  # Safety limit
+
+
+class StartWorkDiscoveryResponse(BaseModel):
+    """Response from starting work discovery"""
+    thinker_id: int
+    job_id: int
+    variants_to_search: int
+    status: str
+    message: str
+
+
+class DetectTranslationsRequest(BaseModel):
+    """Request to run translation detection on discovered works"""
+    force_rerun: bool = False  # Re-analyze even if already done
+
+
+class DetectTranslationsResponse(BaseModel):
+    """Response from translation detection"""
+    thinker_id: int
+    total_works: int
+    groups_identified: int
+    translations_found: int
+    llm_call_id: int
+
+
+class HarvestCitationsRequest(BaseModel):
+    """Request to harvest citations for all discovered works"""
+    work_ids: Optional[List[int]] = None  # If None, harvest all accepted works
+    skip_existing: bool = True  # Skip works already converted to Papers
+
+
+class HarvestCitationsResponse(BaseModel):
+    """Response from harvesting citations"""
+    thinker_id: int
+    jobs_created: int
+    works_queued: int
+    works_skipped: int
+    message: str
+
+
+class RetrospectiveMatchRequest(BaseModel):
+    """Request to match existing papers to thinkers"""
+    thinker_ids: Optional[List[int]] = None  # If None, match all thinkers
+    paper_ids: Optional[List[int]] = None  # If None, scan all papers
+
+
+class RetrospectiveMatchResponse(BaseModel):
+    """Response from retrospective matching"""
+    matches_found: int
+    papers_scanned: int
+    thinkers_checked: int
+    llm_call_id: int
+    matches: List[dict] = []  # [{paper_id, thinker_id, confidence, reason}]
+
+
+class ThinkerQuickAddRequest(BaseModel):
+    """Quick-add a thinker: 'harvest works by Marcuse'"""
+    input: str  # Natural language input
+
+
+class ThinkerQuickAddResponse(BaseModel):
+    """Response from quick-add"""
+    thinker_id: int
+    canonical_name: str
+    disambiguation_required: bool
+    disambiguation: Optional[DisambiguationResponse] = None
+    message: str
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 PapersPaginatedResponse.model_rebuild()
 CollectionDetail.model_rebuild()
 DossierDetail.model_rebuild()
+ThinkerDetail.model_rebuild()

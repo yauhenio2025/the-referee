@@ -782,3 +782,226 @@ class HealthMonitorLog(Base):
     __table_args__ = (
         Index('ix_health_monitor_logs_created', 'created_at'),
     )
+
+
+# ============== THINKER BIBLIOGRAPHIES ==============
+# Track complete bibliographies of individual thinkers (philosophers, theorists, etc.)
+
+
+class Thinker(Base):
+    """
+    A canonical thinker whose complete bibliography we're harvesting.
+
+    Thinkers are top-level entities (parallel to Collections) representing
+    an author/philosopher whose works we want to systematically discover
+    and harvest citations for.
+    """
+    __tablename__ = "thinkers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+
+    # LLM disambiguation context
+    birth_death: Mapped[Optional[str]] = mapped_column(String(50))  # e.g., "1898-1979"
+    bio: Mapped[Optional[str]] = mapped_column(Text)  # Brief biographical note
+    domains: Mapped[Optional[str]] = mapped_column(Text)  # JSON array: ["critical theory", "Marxism"]
+    notable_works: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of major works
+
+    # Name variants for search queries (JSON array of query strings)
+    # e.g., ['author:"Herbert Marcuse"', 'author:"H Marcuse"', 'マルクーゼ']
+    name_variants: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Status: pending, disambiguated, generating_variants, harvesting, complete
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+
+    # Progress tracking
+    works_discovered: Mapped[int] = mapped_column(Integer, default=0)
+    works_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    total_citations: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    disambiguated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    variants_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    harvest_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    harvest_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    works: Mapped[List["ThinkerWork"]] = relationship(
+        "ThinkerWork", back_populates="thinker", cascade="all, delete-orphan"
+    )
+    harvest_runs: Mapped[List["ThinkerHarvestRun"]] = relationship(
+        "ThinkerHarvestRun", back_populates="thinker", cascade="all, delete-orphan"
+    )
+    llm_calls: Mapped[List["ThinkerLLMCall"]] = relationship(
+        "ThinkerLLMCall", back_populates="thinker", cascade="all, delete-orphan"
+    )
+
+
+class ThinkerWork(Base):
+    """
+    A work (paper/book) authored by a thinker.
+
+    Links a Thinker to their discovered works. Works may or may not
+    be converted to Papers (for citation harvesting). Also tracks
+    translation relationships between works.
+    """
+    __tablename__ = "thinker_works"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thinker_id: Mapped[int] = mapped_column(ForeignKey("thinkers.id", ondelete="CASCADE"), index=True)
+
+    # Link to Paper if created for citation harvesting
+    paper_id: Mapped[Optional[int]] = mapped_column(ForeignKey("papers.id", ondelete="SET NULL"), index=True)
+
+    # Work metadata (from Scholar discovery)
+    scholar_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+    title: Mapped[str] = mapped_column(Text)
+    authors_raw: Mapped[Optional[str]] = mapped_column(Text)  # Raw author string from Scholar
+    year: Mapped[Optional[int]] = mapped_column(Integer)
+    venue: Mapped[Optional[str]] = mapped_column(String(500))
+    citation_count: Mapped[int] = mapped_column(Integer, default=0)
+    link: Mapped[Optional[str]] = mapped_column(Text)
+
+    # LLM classification decision
+    decision: Mapped[str] = mapped_column(String(20), default="accepted")  # accepted, rejected, uncertain
+    confidence: Mapped[float] = mapped_column(Float, default=0.8)
+    reason: Mapped[Optional[str]] = mapped_column(Text)  # Why accepted/rejected
+
+    # Translation detection
+    is_translation: Mapped[bool] = mapped_column(Boolean, default=False)
+    canonical_work_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("thinker_works.id", ondelete="SET NULL"), nullable=True
+    )
+    original_language: Mapped[Optional[str]] = mapped_column(String(50))
+    detected_language: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Harvest status
+    citations_harvested: Mapped[bool] = mapped_column(Boolean, default=False)
+    harvest_job_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Discovery context
+    found_by_variant: Mapped[Optional[str]] = mapped_column(Text)  # Which name variant found this work
+    harvest_run_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("thinker_harvest_runs.id", ondelete="SET NULL"), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="works")
+    translations: Mapped[List["ThinkerWork"]] = relationship(
+        "ThinkerWork",
+        backref="canonical_work",
+        remote_side="ThinkerWork.id",
+        foreign_keys="ThinkerWork.canonical_work_id"
+    )
+
+    __table_args__ = (
+        Index("ix_thinker_works_thinker", "thinker_id"),
+        Index("ix_thinker_works_scholar_id", "scholar_id"),
+        Index("ix_thinker_works_thinker_scholar", "thinker_id", "scholar_id", unique=True),
+    )
+
+
+class ThinkerHarvestRun(Base):
+    """
+    A harvest run for a specific name variant query.
+
+    Each run represents paginating through all results for one
+    author search query variant.
+    """
+    __tablename__ = "thinker_harvest_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thinker_id: Mapped[int] = mapped_column(ForeignKey("thinkers.id", ondelete="CASCADE"), index=True)
+
+    # Query details
+    query_used: Mapped[str] = mapped_column(Text)  # Full query string
+    variant_type: Mapped[str] = mapped_column(String(50))  # full_name, initial_surname, transliteration, etc.
+
+    # Progress tracking
+    total_results_reported: Mapped[int] = mapped_column(Integer, default=0)  # What Scholar reports
+    pages_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    results_processed: Mapped[int] = mapped_column(Integer, default=0)
+    results_accepted: Mapped[int] = mapped_column(Integer, default=0)
+    results_rejected: Mapped[int] = mapped_column(Integer, default=0)
+    results_uncertain: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Status: pending, running, completed, failed
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timing
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationship
+    thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="harvest_runs")
+
+    __table_args__ = (
+        Index("ix_thinker_harvest_runs_thinker", "thinker_id"),
+        Index("ix_thinker_harvest_runs_status", "status"),
+    )
+
+
+class ThinkerLLMCall(Base):
+    """
+    Audit trail for all LLM calls in thinker workflows.
+
+    Provides complete traceability of:
+    - Disambiguation calls
+    - Name variant generation
+    - Per-page filtering decisions
+    - Translation detection
+    - Retrospective matching
+    """
+    __tablename__ = "thinker_llm_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thinker_id: Mapped[int] = mapped_column(ForeignKey("thinkers.id", ondelete="CASCADE"), index=True)
+
+    # Workflow type
+    workflow: Mapped[str] = mapped_column(String(50), index=True)
+    # Values: disambiguation, variant_generation, page_filtering, translation_detection, retrospective_matching
+
+    call_number: Mapped[int] = mapped_column(Integer, default=1)  # 1st, 2nd, 3rd call for this workflow
+
+    # Model info
+    model: Mapped[str] = mapped_column(String(100))
+
+    # Prompt
+    prompt: Mapped[str] = mapped_column(Text)
+
+    # Context provided (JSON)
+    context_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Response
+    raw_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+
+    # Extended thinking (for Opus calls)
+    thinking_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    thinking_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Status: pending, completed, failed, parse_error
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Usage stats
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Timing
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationship
+    thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="llm_calls")
+
+    __table_args__ = (
+        Index("ix_thinker_llm_calls_thinker", "thinker_id"),
+        Index("ix_thinker_llm_calls_workflow", "workflow"),
+    )

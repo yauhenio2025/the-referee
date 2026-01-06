@@ -11,6 +11,8 @@ import EditionDiscovery from './components/EditionDiscovery'
 import Citations from './components/Citations'
 import Collections from './components/Collections'
 import CollectionDetail from './components/CollectionDetail'
+import Thinkers from './components/Thinkers'
+import ThinkerDetail from './components/ThinkerDetail'
 import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
 import ForeignEditionsNeeded from './components/ForeignEditionsNeeded'
@@ -42,6 +44,8 @@ function AppContent() {
     if (location.pathname.startsWith('/paper/')) return 'editions'
     if (location.pathname === '/collections') return 'collections'
     if (location.pathname.startsWith('/collections/')) return 'collections'
+    if (location.pathname === '/thinkers') return 'thinkers'
+    if (location.pathname.startsWith('/thinkers/')) return 'thinkers'
     if (location.pathname === '/foreign-editions') return 'foreign-editions'
     if (location.pathname === '/jobs') return 'jobs'
     return 'papers'
@@ -96,6 +100,12 @@ function AppContent() {
           📁 Collections {stats?.collections > 0 && <span className="badge">{stats.collections}</span>}
         </button>
         <button
+          className={`tab ${activeTab === 'thinkers' ? 'active' : ''}`}
+          onClick={() => navigate('/thinkers')}
+        >
+          🎓 Thinkers
+        </button>
+        <button
           className={`tab ${activeTab === 'foreign-editions' ? 'active' : ''}`}
           onClick={() => navigate('/foreign-editions')}
         >
@@ -133,6 +143,12 @@ function AppContent() {
           } />
           <Route path="/collections" element={
             <Collections onSelectCollection={(c) => navigate(`/collections/${c.id}`)} />
+          } />
+          <Route path="/thinkers" element={
+            <Thinkers onSelectThinker={(t) => navigate(`/thinkers/${t.id}`)} />
+          } />
+          <Route path="/thinkers/:thinkerId" element={
+            <ThinkerDetailRoute />
           } />
           <Route path="/foreign-editions" element={
             <ForeignEditionsNeeded onSelectPaper={handleSelectPaper} />
@@ -244,6 +260,19 @@ function CollectionDetailRoute() {
     <CollectionDetail
       collectionId={parseInt(collectionId)}
       onBack={() => navigate('/collections')}
+    />
+  )
+}
+
+// Route component for thinker detail
+function ThinkerDetailRoute() {
+  const { thinkerId } = useParams()
+  const navigate = useNavigate()
+
+  return (
+    <ThinkerDetail
+      thinkerId={parseInt(thinkerId)}
+      onBack={() => navigate('/thinkers')}
     />
   )
 }
