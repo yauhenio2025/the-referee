@@ -1604,10 +1604,11 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     existing_target = target_result.scalar_one_or_none()
 
                     if existing_target and existing_target.expected_count > 0:
-                        # Count actual citations in DB for this edition+year
+                        # Count actual citations in DB for this EDITION+year (not paper!)
+                        # Paper can have many editions - must compare edition-specific counts
                         actual_db_count_result = await db.execute(
                             select(func.count(Citation.id))
-                            .where(Citation.paper_id == paper.id)
+                            .where(Citation.edition_id == edition.id)
                             .where(Citation.year == year)
                         )
                         actual_db_count = actual_db_count_result.scalar() or 0
@@ -1667,9 +1668,10 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                                 log_now(f"[EDITION {i+1}] 📅 Fetching year {year}...")
                         else:
                             # No existing target or no expected count - fetch actual DB count
+                            # Use edition_id (not paper_id) since papers can have many editions
                             actual_db_count_result = await db.execute(
                                 select(func.count(Citation.id))
-                                .where(Citation.paper_id == paper.id)
+                                .where(Citation.edition_id == edition.id)
                                 .where(Citation.year == year)
                             )
                             actual_db_count = actual_db_count_result.scalar() or 0
