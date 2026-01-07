@@ -8766,6 +8766,209 @@ async def refresh_thinker_stats(thinker_id: int, db: AsyncSession = Depends(get_
     }
 
 
+@app.get("/api/thinkers/{thinker_id}/analytics")
+async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Get comprehensive citation analytics for a thinker.
+
+    Returns:
+    - Top citing papers (most influential papers citing this thinker)
+    - Top citing authors (scholars who cite this thinker most)
+    - Most cited works (this thinker's "greatest hits")
+    - Top venues (where this thinker is cited - shows disciplinary reach)
+    - Citations by year (trend over time)
+    """
+    from sqlalchemy import select, func, distinct
+    from .models import Thinker, ThinkerWork, Paper, Citation
+    from .schemas import ThinkerAnalyticsResponse, CitingPaper, CitingAuthor, MostCitedWork, TopVenue, YearCitations
+
+    # Get thinker
+    result = await db.execute(select(Thinker).where(Thinker.id == thinker_id))
+    thinker = result.scalar_one_or_none()
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Get paper IDs for this thinker's accepted works
+    paper_ids_result = await db.execute(
+        select(ThinkerWork.paper_id)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+        .where(ThinkerWork.paper_id.isnot(None))
+    )
+    paper_ids = [r[0] for r in paper_ids_result.fetchall()]
+
+    if not paper_ids:
+        # No papers harvested yet
+        return ThinkerAnalyticsResponse(
+            thinker_id=thinker_id,
+            thinker_name=thinker.canonical_name,
+            total_citations=0,
+            total_works=0,
+            unique_citing_papers=0,
+            unique_citing_authors=0,
+            unique_venues=0,
+        )
+
+    # 1. Top Citing Papers (most influential papers that cite this thinker)
+    top_papers_result = await db.execute(
+        select(
+            Citation.title,
+            Citation.authors,
+            Citation.year,
+            Citation.venue,
+            Citation.citation_count,
+            func.count(distinct(Citation.paper_id)).label("cites_works")
+        )
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.scholar_id.isnot(None))
+        .group_by(Citation.scholar_id, Citation.title, Citation.authors, Citation.year, Citation.venue, Citation.citation_count)
+        .order_by(Citation.citation_count.desc().nulls_last())
+        .limit(20)
+    )
+    top_citing_papers = [
+        CitingPaper(
+            title=r.title,
+            authors=r.authors,
+            year=r.year,
+            venue=r.venue,
+            citation_count=r.citation_count or 0,
+            cites_works=r.cites_works
+        )
+        for r in top_papers_result.fetchall()
+    ]
+
+    # 2. Top Citing Authors
+    top_authors_result = await db.execute(
+        select(
+            Citation.authors,
+            func.count().label("citation_count"),
+            func.count(distinct(Citation.scholar_id)).label("papers_count")
+        )
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.authors.isnot(None))
+        .where(Citation.authors != "")
+        .group_by(Citation.authors)
+        .order_by(func.count().desc())
+        .limit(20)
+    )
+    top_citing_authors = [
+        CitingAuthor(
+            author=r.authors,
+            citation_count=r.citation_count,
+            papers_count=r.papers_count
+        )
+        for r in top_authors_result.fetchall()
+    ]
+
+    # 3. Most Cited Works (this thinker's works ranked by citations received)
+    most_cited_result = await db.execute(
+        select(
+            ThinkerWork.id,
+            ThinkerWork.title,
+            ThinkerWork.year,
+            func.count(Citation.id).label("citations_received")
+        )
+        .outerjoin(Paper, ThinkerWork.paper_id == Paper.id)
+        .outerjoin(Citation, Citation.paper_id == Paper.id)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+        .group_by(ThinkerWork.id, ThinkerWork.title, ThinkerWork.year)
+        .order_by(func.count(Citation.id).desc())
+        .limit(20)
+    )
+    most_cited_works = [
+        MostCitedWork(
+            work_id=r.id,
+            title=r.title,
+            year=r.year,
+            citations_received=r.citations_received
+        )
+        for r in most_cited_result.fetchall()
+    ]
+
+    # 4. Top Venues (where is this thinker cited)
+    top_venues_result = await db.execute(
+        select(
+            Citation.venue,
+            func.count().label("citation_count"),
+            func.count(distinct(Citation.scholar_id)).label("papers_count")
+        )
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.venue.isnot(None))
+        .where(Citation.venue != "")
+        .group_by(Citation.venue)
+        .order_by(func.count().desc())
+        .limit(20)
+    )
+    top_venues = [
+        TopVenue(
+            venue=r.venue,
+            citation_count=r.citation_count,
+            papers_count=r.papers_count
+        )
+        for r in top_venues_result.fetchall()
+    ]
+
+    # 5. Citations by Year
+    by_year_result = await db.execute(
+        select(
+            Citation.year,
+            func.count().label("count")
+        )
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.year.isnot(None))
+        .group_by(Citation.year)
+        .order_by(Citation.year)
+    )
+    citations_by_year = [
+        YearCitations(year=r.year, count=r.count)
+        for r in by_year_result.fetchall()
+    ]
+
+    # Summary stats
+    total_citations_result = await db.execute(
+        select(func.count()).where(Citation.paper_id.in_(paper_ids))
+    )
+    total_citations = total_citations_result.scalar() or 0
+
+    unique_papers_result = await db.execute(
+        select(func.count(distinct(Citation.scholar_id)))
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.scholar_id.isnot(None))
+    )
+    unique_citing_papers = unique_papers_result.scalar() or 0
+
+    unique_authors_result = await db.execute(
+        select(func.count(distinct(Citation.authors)))
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.authors.isnot(None))
+    )
+    unique_citing_authors = unique_authors_result.scalar() or 0
+
+    unique_venues_result = await db.execute(
+        select(func.count(distinct(Citation.venue)))
+        .where(Citation.paper_id.in_(paper_ids))
+        .where(Citation.venue.isnot(None))
+        .where(Citation.venue != "")
+    )
+    unique_venues = unique_venues_result.scalar() or 0
+
+    return ThinkerAnalyticsResponse(
+        thinker_id=thinker_id,
+        thinker_name=thinker.canonical_name,
+        total_citations=total_citations,
+        total_works=len(paper_ids),
+        unique_citing_papers=unique_citing_papers,
+        unique_citing_authors=unique_citing_authors,
+        unique_venues=unique_venues,
+        top_citing_papers=top_citing_papers,
+        top_citing_authors=top_citing_authors,
+        most_cited_works=most_cited_works,
+        top_venues=top_venues,
+        citations_by_year=citations_by_year,
+    )
+
+
 @app.post("/api/thinkers/{thinker_id}/confirm")
 async def confirm_thinker_disambiguation(
     thinker_id: int,

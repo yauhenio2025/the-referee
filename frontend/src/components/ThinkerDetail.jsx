@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 function ThinkerDetail({ thinkerId, onBack }) {
   const [activeTab, setActiveTab] = useState('works')
@@ -23,6 +24,13 @@ function ThinkerDetail({ thinkerId, onBack }) {
     queryKey: ['thinker-works', thinkerId, workFilter],
     queryFn: () => api.getThinkerWorks(thinkerId, { decision: workFilter !== 'all' ? workFilter : undefined }),
     enabled: !!thinkerId,
+  })
+
+  // Fetch analytics (only when tab is active)
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ['thinker-analytics', thinkerId],
+    queryFn: () => api.getThinkerAnalytics(thinkerId),
+    enabled: !!thinkerId && activeTab === 'analytics',
   })
 
   // Confirm disambiguation
@@ -196,6 +204,12 @@ function ThinkerDetail({ thinkerId, onBack }) {
         >
           Notable Works ({notableWorks.length})
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'analytics' ? 'active' : ''}`}
+          onClick={() => setActiveTab('analytics')}
+        >
+          Analytics
+        </button>
       </div>
 
       {/* Tab Content */}
@@ -283,6 +297,150 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   <li key={i}>{work}</li>
                 ))}
               </ul>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'analytics' && (
+          <div className="analytics-tab">
+            {analyticsLoading ? (
+              <div className="loading">Loading analytics...</div>
+            ) : !analytics || analytics.total_citations === 0 ? (
+              <p className="empty">No citations harvested yet. Start harvesting to see analytics.</p>
+            ) : (
+              <div className="analytics-content">
+                {/* Summary Stats */}
+                <div className="analytics-summary">
+                  <div className="summary-stat">
+                    <span className="summary-value">{analytics.total_citations?.toLocaleString()}</span>
+                    <span className="summary-label">Total Citations</span>
+                  </div>
+                  <div className="summary-stat">
+                    <span className="summary-value">{analytics.unique_citing_papers?.toLocaleString()}</span>
+                    <span className="summary-label">Unique Citing Papers</span>
+                  </div>
+                  <div className="summary-stat">
+                    <span className="summary-value">{analytics.unique_citing_authors?.toLocaleString()}</span>
+                    <span className="summary-label">Unique Authors</span>
+                  </div>
+                  <div className="summary-stat">
+                    <span className="summary-value">{analytics.unique_venues?.toLocaleString()}</span>
+                    <span className="summary-label">Venues</span>
+                  </div>
+                </div>
+
+                {/* Citations Over Time */}
+                {analytics.citations_by_year?.length > 0 && (
+                  <div className="analytics-card">
+                    <h3>Citations Over Time</h3>
+                    <div className="chart-container">
+                      <ResponsiveContainer width="100%" height={250}>
+                        <LineChart data={analytics.citations_by_year}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                          <XAxis dataKey="year" stroke="var(--text-secondary)" fontSize={12} />
+                          <YAxis stroke="var(--text-secondary)" fontSize={12} />
+                          <Tooltip
+                            contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+                            labelStyle={{ color: 'var(--text-primary)' }}
+                          />
+                          <Line type="monotone" dataKey="count" stroke="var(--primary-color)" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                {/* Most Cited Works */}
+                {analytics.most_cited_works?.length > 0 && (
+                  <div className="analytics-card">
+                    <h3>Most Cited Works</h3>
+                    <div className="ranked-list">
+                      {analytics.most_cited_works.slice(0, 10).map((work, i) => (
+                        <div key={work.work_id} className="ranked-item">
+                          <span className="rank">#{i + 1}</span>
+                          <div className="item-content">
+                            <span className="item-title">{work.title}</span>
+                            <span className="item-meta">{work.year || 'n.d.'}</span>
+                          </div>
+                          <span className="item-count">{work.citations_received?.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top Citing Papers */}
+                {analytics.top_citing_papers?.length > 0 && (
+                  <div className="analytics-card">
+                    <h3>Top Citing Papers</h3>
+                    <p className="card-subtitle">Most influential papers citing this thinker's work</p>
+                    <div className="citing-papers-list">
+                      {analytics.top_citing_papers.slice(0, 10).map((paper, i) => (
+                        <div key={i} className="citing-paper">
+                          <div className="paper-main">
+                            <span className="paper-title">{paper.title || 'Untitled'}</span>
+                            <span className="paper-authors">{paper.authors || 'Unknown authors'}</span>
+                          </div>
+                          <div className="paper-meta">
+                            <span className="paper-venue">{paper.venue || ''}</span>
+                            <span className="paper-year">{paper.year || ''}</span>
+                            <span className="paper-citations">{paper.citation_count?.toLocaleString()} citations</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top Venues Chart */}
+                {analytics.top_venues?.length > 0 && (
+                  <div className="analytics-card">
+                    <h3>Top Venues</h3>
+                    <p className="card-subtitle">Where this thinker's work is cited</p>
+                    <div className="chart-container">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={analytics.top_venues.slice(0, 10)} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                          <XAxis type="number" stroke="var(--text-secondary)" fontSize={12} />
+                          <YAxis
+                            type="category"
+                            dataKey="venue"
+                            stroke="var(--text-secondary)"
+                            fontSize={11}
+                            width={200}
+                            tickFormatter={(val) => val.length > 30 ? val.substring(0, 30) + '...' : val}
+                          />
+                          <Tooltip
+                            contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+                            labelStyle={{ color: 'var(--text-primary)' }}
+                          />
+                          <Bar dataKey="citation_count" fill="var(--primary-color)" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                {/* Top Citing Authors */}
+                {analytics.top_citing_authors?.length > 0 && (
+                  <div className="analytics-card">
+                    <h3>Top Citing Authors</h3>
+                    <p className="card-subtitle">Scholars who cite this thinker most frequently</p>
+                    <div className="ranked-list">
+                      {analytics.top_citing_authors.slice(0, 15).map((author, i) => (
+                        <div key={i} className="ranked-item">
+                          <span className="rank">#{i + 1}</span>
+                          <div className="item-content">
+                            <span className="item-title">{author.author}</span>
+                            <span className="item-meta">{author.papers_count} paper{author.papers_count !== 1 ? 's' : ''}</span>
+                          </div>
+                          <span className="item-count">{author.citation_count?.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -573,6 +731,143 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .btn:disabled {
           opacity: 0.5;
           cursor: not-allowed;
+        }
+
+        /* Analytics Tab Styles */
+        .analytics-content {
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
+        }
+
+        .analytics-summary {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          gap: 16px;
+          padding: 20px;
+          background: var(--bg-secondary);
+          border-radius: 8px;
+        }
+
+        .summary-stat {
+          text-align: center;
+        }
+
+        .summary-value {
+          display: block;
+          font-size: 2em;
+          font-weight: bold;
+          color: var(--primary-color);
+        }
+
+        .summary-label {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+        }
+
+        .analytics-card {
+          background: var(--bg-secondary);
+          border-radius: 8px;
+          padding: 20px;
+        }
+
+        .analytics-card h3 {
+          margin: 0 0 8px 0;
+          font-size: 1.1em;
+        }
+
+        .card-subtitle {
+          margin: 0 0 16px 0;
+          font-size: 0.85em;
+          color: var(--text-secondary);
+        }
+
+        .chart-container {
+          margin-top: 16px;
+        }
+
+        .ranked-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .ranked-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px;
+          background: var(--bg-primary);
+          border-radius: 6px;
+        }
+
+        .rank {
+          font-weight: bold;
+          color: var(--text-secondary);
+          min-width: 30px;
+        }
+
+        .item-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .item-title {
+          display: block;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .item-meta {
+          font-size: 0.8em;
+          color: var(--text-secondary);
+        }
+
+        .item-count {
+          font-weight: bold;
+          font-family: var(--font-mono);
+          color: var(--primary-color);
+        }
+
+        .citing-papers-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .citing-paper {
+          padding: 12px;
+          background: var(--bg-primary);
+          border-radius: 6px;
+        }
+
+        .paper-main {
+          margin-bottom: 6px;
+        }
+
+        .paper-title {
+          display: block;
+          font-weight: 500;
+          margin-bottom: 4px;
+        }
+
+        .paper-authors {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+        }
+
+        .paper-meta {
+          display: flex;
+          gap: 12px;
+          font-size: 0.8em;
+          color: var(--text-secondary);
+        }
+
+        .paper-citations {
+          font-weight: bold;
+          color: var(--primary-color);
         }
       `}</style>
     </div>

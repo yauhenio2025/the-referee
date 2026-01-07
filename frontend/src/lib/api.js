@@ -872,6 +872,15 @@ class RefereeAPI {
   }
 
   /**
+   * Get citation analytics for a thinker
+   * @param {number} thinkerId - Thinker ID
+   * @returns {Promise<Object>} Analytics data including top citing papers, authors, venues, etc.
+   */
+  async getThinkerAnalytics(thinkerId) {
+    return this.request(`/api/thinkers/${thinkerId}/analytics`);
+  }
+
+  /**
    * Detect translations among works
    * @param {number} thinkerId - Thinker ID
    * @param {Object} options - { work_ids }

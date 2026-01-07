@@ -1077,6 +1077,63 @@ class ThinkerQuickAddResponse(BaseModel):
     message: str
 
 
+# ============== Thinker Analytics Schemas ==============
+
+class CitingPaper(BaseModel):
+    """A paper that cites one of the thinker's works"""
+    title: Optional[str] = None
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    citation_count: int = 0  # How cited is this paper itself
+    cites_works: int = 1  # How many of thinker's works it cites
+
+
+class CitingAuthor(BaseModel):
+    """An author who cites the thinker's work"""
+    author: str
+    citation_count: int  # Total citations from this author
+    papers_count: int  # Number of distinct papers
+
+
+class MostCitedWork(BaseModel):
+    """One of the thinker's most cited works"""
+    work_id: int
+    title: str
+    year: Optional[int] = None
+    citations_received: int = 0
+
+
+class TopVenue(BaseModel):
+    """A venue where the thinker's work is cited"""
+    venue: str
+    citation_count: int
+    papers_count: int
+
+
+class YearCitations(BaseModel):
+    """Citation count for a specific year"""
+    year: int
+    count: int
+
+
+class ThinkerAnalyticsResponse(BaseModel):
+    """Comprehensive analytics for a thinker's scholarly impact"""
+    thinker_id: int
+    thinker_name: str
+    total_citations: int
+    total_works: int
+    unique_citing_papers: int
+    unique_citing_authors: int
+    unique_venues: int
+
+    top_citing_papers: List[CitingPaper] = []
+    top_citing_authors: List[CitingAuthor] = []
+    most_cited_works: List[MostCitedWork] = []
+    top_venues: List[TopVenue] = []
+    citations_by_year: List[YearCitations] = []
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 PapersPaginatedResponse.model_rebuild()
