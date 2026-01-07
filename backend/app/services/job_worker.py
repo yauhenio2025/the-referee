@@ -2774,13 +2774,22 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
                     db.add(work)
 
                 # Commit after each page - saves progress incrementally
-                await db.commit()
+                try:
+                    await db.commit()
+                except Exception as commit_err:
+                    log_now(f"[ThinkerDiscover]   Page {page_num + 1}: commit error, rolling back: {commit_err}")
+                    await db.rollback()
+                    # Re-add the works that weren't committed
+                    raise
                 log_now(f"[ThinkerDiscover]   Page {page_num + 1}: saved {page_accepted} accepted, {var_accepted} total so far")
 
             # Update job progress after each page
             job.progress = int(((var_idx + (page_num / max_pages_per_variant)) / len(variants)) * 100)
             job.progress_message = f"Variant {var_idx+1}/{len(variants)}, page {page_num + 1}: {var_accepted} accepted"
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
 
         try:
             # Combine author variant with full name to reduce false positives
@@ -2826,11 +2835,33 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
             "uncertain": var_uncertain,
         })
 
-        await db.commit()
+        # Safe commit with rollback on error
+        try:
+            await db.commit()
+        except Exception as e:
+            log_now(f"[ThinkerDiscover] Commit error after variant, rolling back: {e}")
+            await db.rollback()
+            # Refresh objects from database
+            await db.refresh(harvest_run)
+            harvest_run.pages_fetched = pages_fetched
+            harvest_run.results_processed = var_accepted + var_rejected + var_uncertain
+            harvest_run.results_accepted = var_accepted
+            harvest_run.results_rejected = var_rejected
+            harvest_run.results_uncertain = var_uncertain
+            harvest_run.completed_at = datetime.utcnow()
+            harvest_run.status = "completed"
+            await db.commit()
 
     # Update thinker stats
     thinker.works_discovered = total_accepted + total_uncertain  # Include uncertain for review
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        log_now(f"[ThinkerDiscover] Commit error updating thinker stats, rolling back: {e}")
+        await db.rollback()
+        await db.refresh(thinker)
+        thinker.works_discovered = total_accepted + total_uncertain
+        await db.commit()
 
     log_now(f"[ThinkerDiscover] ═══════════════════════════════════════════════")
     log_now(f"[ThinkerDiscover] COMPLETE: {len(variants)} variants, {total_results} total results")
