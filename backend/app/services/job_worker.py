@@ -2995,9 +2995,11 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
             papers_created += 1
 
             # Create edition for the paper
+            # IMPORTANT: Must set scholar_id for harvesting - harvester checks e.scholar_id
             edition = Edition(
                 paper_id=paper.id,
                 title=work.title,
+                scholar_id=work.scholar_id,  # Required for harvest to process edition
                 cluster_id=work.scholar_id,
                 citation_count=work.citation_count or 0,
                 confidence="high",
