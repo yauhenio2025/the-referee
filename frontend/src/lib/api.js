@@ -881,6 +881,19 @@ class RefereeAPI {
   }
 
   /**
+   * Get papers by a specific citing author
+   * @param {number} thinkerId - Thinker ID
+   * @param {number[]} citationIds - List of citation IDs from the author
+   * @returns {Promise<Object[]>} List of papers by this author
+   */
+  async getAuthorPapers(thinkerId, citationIds) {
+    return this.request(`/api/thinkers/${thinkerId}/author-papers`, {
+      method: 'POST',
+      body: { citation_ids: citationIds },
+    });
+  }
+
+  /**
    * Detect translations among works
    * @param {number} thinkerId - Thinker ID
    * @param {Object} options - { work_ids }

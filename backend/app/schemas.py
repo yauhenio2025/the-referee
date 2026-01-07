@@ -1094,6 +1094,9 @@ class CitingAuthor(BaseModel):
     author: str
     citation_count: int  # Total citations from this author
     papers_count: int  # Number of distinct papers
+    is_self_citation: bool = False  # Is this author the thinker themselves?
+    confidence: float = 1.0  # LLM confidence in the is_self_citation determination
+    citation_ids: List[int] = []  # Citation IDs for fetching this author's papers
 
 
 class MostCitedWork(BaseModel):

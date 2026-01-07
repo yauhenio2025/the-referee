@@ -10,6 +10,9 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 function ThinkerDetail({ thinkerId, onBack }) {
   const [activeTab, setActiveTab] = useState('works')
   const [workFilter, setWorkFilter] = useState('accepted')
+  const [selectedAuthor, setSelectedAuthor] = useState(null)  // For author papers modal
+  const [authorPapers, setAuthorPapers] = useState([])
+  const [loadingAuthorPapers, setLoadingAuthorPapers] = useState(false)
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
@@ -80,6 +83,25 @@ function ThinkerDetail({ thinkerId, onBack }) {
     },
     onError: (err) => showToast(`Failed to start harvest: ${err.message}`, 'error'),
   })
+
+  // Fetch papers for a specific citing author
+  const fetchAuthorPapers = async (author) => {
+    if (!author.citation_ids?.length) {
+      showToast('No paper data available for this author', 'warning')
+      return
+    }
+    setSelectedAuthor(author)
+    setLoadingAuthorPapers(true)
+    try {
+      const papers = await api.getAuthorPapers(thinkerId, author.citation_ids)
+      setAuthorPapers(papers)
+    } catch (err) {
+      showToast(`Failed to load papers: ${err.message}`, 'error')
+      setAuthorPapers([])
+    } finally {
+      setLoadingAuthorPapers(false)
+    }
+  }
 
   if (isLoading) return <div className="loading">Loading thinker...</div>
   if (error) return <div className="error">Error: {error.message}</div>
@@ -425,18 +447,75 @@ function ThinkerDetail({ thinkerId, onBack }) {
                 {analytics.top_citing_authors?.length > 0 && (
                   <div className="analytics-card">
                     <h3>Top Citing Authors</h3>
-                    <p className="card-subtitle">Scholars who cite this thinker most frequently</p>
+                    <p className="card-subtitle">Scholars who cite this thinker most frequently (click to see papers)</p>
                     <div className="ranked-list">
                       {analytics.top_citing_authors.slice(0, 15).map((author, i) => (
-                        <div key={i} className="ranked-item">
+                        <div
+                          key={i}
+                          className={`ranked-item clickable ${author.is_self_citation ? 'self-citation' : ''}`}
+                          onClick={() => fetchAuthorPapers(author)}
+                          title={author.is_self_citation ? 'Self-citation (thinker citing own work)' : 'Click to see papers'}
+                        >
                           <span className="rank">#{i + 1}</span>
                           <div className="item-content">
-                            <span className="item-title">{author.author}</span>
+                            <span className="item-title">
+                              {author.author}
+                              {author.is_self_citation && <span className="self-citation-badge">self</span>}
+                            </span>
                             <span className="item-meta">{author.papers_count} paper{author.papers_count !== 1 ? 's' : ''}</span>
                           </div>
                           <span className="item-count">{author.citation_count?.toLocaleString()}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Author Papers Modal */}
+                {selectedAuthor && (
+                  <div className="modal-overlay" onClick={() => setSelectedAuthor(null)}>
+                    <div className="modal-content author-papers-modal" onClick={e => e.stopPropagation()}>
+                      <div className="modal-header">
+                        <h3>
+                          Papers by {selectedAuthor.author}
+                          {selectedAuthor.is_self_citation && <span className="self-citation-badge">self-citation</span>}
+                        </h3>
+                        <button className="close-btn" onClick={() => setSelectedAuthor(null)}>×</button>
+                      </div>
+                      <div className="modal-body">
+                        {loadingAuthorPapers ? (
+                          <div className="loading">Loading papers...</div>
+                        ) : authorPapers.length === 0 ? (
+                          <p className="no-data">No papers found</p>
+                        ) : (
+                          <div className="author-papers-list">
+                            {authorPapers.map((paper, i) => (
+                              <div key={paper.citation_id} className="author-paper-item">
+                                <div className="paper-rank">#{i + 1}</div>
+                                <div className="paper-info">
+                                  <div className="paper-title">
+                                    {paper.url ? (
+                                      <a href={paper.url} target="_blank" rel="noopener noreferrer">
+                                        {paper.title || 'Untitled'}
+                                      </a>
+                                    ) : (
+                                      paper.title || 'Untitled'
+                                    )}
+                                  </div>
+                                  <div className="paper-meta">
+                                    <span className="paper-authors">{paper.authors || 'Unknown authors'}</span>
+                                    {paper.venue && <span className="paper-venue">{paper.venue}</span>}
+                                    {paper.year && <span className="paper-year">{paper.year}</span>}
+                                  </div>
+                                </div>
+                                <div className="paper-citations">
+                                  {paper.citation_count?.toLocaleString() || 0}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -868,6 +947,164 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .paper-citations {
           font-weight: bold;
           color: var(--primary-color);
+        }
+
+        /* Clickable author items */
+        .ranked-item.clickable {
+          cursor: pointer;
+          transition: background-color 0.15s ease;
+        }
+
+        .ranked-item.clickable:hover {
+          background: var(--bg-secondary);
+        }
+
+        /* Self-citation styling */
+        .ranked-item.self-citation {
+          border-left: 3px solid var(--warning-color);
+          background: color-mix(in srgb, var(--warning-bg) 30%, var(--bg-primary));
+        }
+
+        .self-citation-badge {
+          display: inline-block;
+          margin-left: 8px;
+          padding: 2px 6px;
+          background: var(--warning-bg);
+          color: var(--warning-color);
+          font-size: 0.7em;
+          border-radius: 4px;
+          font-weight: normal;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        /* Modal styles */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+        }
+
+        .modal-content {
+          background: var(--bg-primary);
+          border-radius: 12px;
+          max-width: 700px;
+          width: 90%;
+          max-height: 80vh;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-header h3 {
+          margin: 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .close-btn {
+          background: none;
+          border: none;
+          font-size: 24px;
+          cursor: pointer;
+          color: var(--text-secondary);
+          padding: 4px 8px;
+          line-height: 1;
+        }
+
+        .close-btn:hover {
+          color: var(--text-primary);
+        }
+
+        .modal-body {
+          padding: 20px;
+          overflow-y: auto;
+        }
+
+        .author-papers-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .author-paper-item {
+          display: flex;
+          gap: 12px;
+          padding: 12px;
+          background: var(--bg-secondary);
+          border-radius: 8px;
+        }
+
+        .author-paper-item .paper-rank {
+          font-weight: bold;
+          color: var(--text-secondary);
+          min-width: 30px;
+        }
+
+        .author-paper-item .paper-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .author-paper-item .paper-title {
+          font-weight: 500;
+          margin-bottom: 4px;
+        }
+
+        .author-paper-item .paper-title a {
+          color: var(--primary-color);
+          text-decoration: none;
+        }
+
+        .author-paper-item .paper-title a:hover {
+          text-decoration: underline;
+        }
+
+        .author-paper-item .paper-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-size: 0.85em;
+          color: var(--text-secondary);
+        }
+
+        .author-paper-item .paper-meta span::after {
+          content: '·';
+          margin-left: 8px;
+        }
+
+        .author-paper-item .paper-meta span:last-child::after {
+          content: none;
+        }
+
+        .author-paper-item .paper-citations {
+          font-weight: bold;
+          color: var(--primary-color);
+          min-width: 50px;
+          text-align: right;
+        }
+
+        .no-data {
+          text-align: center;
+          color: var(--text-secondary);
+          padding: 24px;
         }
       `}</style>
     </div>

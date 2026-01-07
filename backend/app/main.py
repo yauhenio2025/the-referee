@@ -8850,52 +8850,94 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
             cites_works=r.cites_works
         ))
 
-    # 2. Top Citing Authors
+    # 2. Top Citing Authors (with LLM-powered disaggregation and self-citation detection)
+    from .services.author_analytics import process_citing_authors
+    from sqlalchemy.orm import aliased
+    from sqlalchemy import text
+
     # Parse author names from Google Scholar format: "Author Names - Venue, Year - source.com"
     def parse_author_name(raw_authors: str) -> str:
         if not raw_authors:
             return "Unknown"
-        # Split on " - " and take the first part (author names)
         parts = raw_authors.split(" - ")
         author_part = parts[0].strip()
-        # Also handle "..." at the end of truncated author lists
         if author_part.endswith("…"):
             author_part = author_part[:-1] + "et al."
         return author_part if author_part else "Unknown"
 
+    # Fetch citations grouped by parsed author name, including citation IDs for paper lookup
     top_authors_result = await db.execute(
         select(
             Citation.authors,
             func.count().label("citation_count"),
-            func.count(distinct(Citation.scholar_id)).label("papers_count")
+            func.count(distinct(Citation.scholar_id)).label("papers_count"),
+            func.array_agg(Citation.id).label("citation_ids")
         )
         .where(Citation.paper_id.in_(paper_ids))
         .where(Citation.authors.isnot(None))
         .where(Citation.authors != "")
         .group_by(Citation.authors)
         .order_by(func.count().desc())
-        .limit(100)  # Fetch more to aggregate after parsing
+        .limit(100)
     )
 
-    # Aggregate by parsed author name
-    author_aggregates = {}
+    # Pre-parse author names and collect data for LLM processing
+    raw_author_groups = []
     for r in top_authors_result.fetchall():
         parsed_name = parse_author_name(r.authors)
-        if parsed_name not in author_aggregates:
-            author_aggregates[parsed_name] = {"citation_count": 0, "papers_count": 0}
-        author_aggregates[parsed_name]["citation_count"] += r.citation_count
-        author_aggregates[parsed_name]["papers_count"] += r.papers_count
+        raw_author_groups.append({
+            "authors": parsed_name,
+            "citation_count": r.citation_count,
+            "papers_count": r.papers_count,
+            "citation_ids": list(r.citation_ids) if r.citation_ids else []
+        })
 
-    # Sort by citation count and take top 20
-    sorted_authors = sorted(author_aggregates.items(), key=lambda x: x[1]["citation_count"], reverse=True)[:20]
-    top_citing_authors = [
-        CitingAuthor(
-            author=name,
-            citation_count=data["citation_count"],
-            papers_count=data["papers_count"]
-        )
-        for name, data in sorted_authors
-    ]
+    # Use LLM to disaggregate multi-author entries and detect self-citations
+    llm_result = await process_citing_authors(
+        thinker_name=thinker.canonical_name,
+        raw_author_groups=raw_author_groups
+    )
+
+    # Build final author list from LLM results
+    if llm_result.get("llm_processed") and "individual_authors" in llm_result:
+        # LLM successfully processed - use disaggregated/normalized authors
+        sorted_authors = sorted(
+            llm_result["individual_authors"],
+            key=lambda x: x.get("total_citation_count", x.get("citation_count", 0)),
+            reverse=True
+        )[:20]
+        top_citing_authors = [
+            CitingAuthor(
+                author=a.get("normalized_name", a.get("authors", "Unknown")),
+                citation_count=a.get("total_citation_count", a.get("citation_count", 0)),
+                papers_count=a.get("total_papers_count", a.get("papers_count", 0)),
+                is_self_citation=a.get("is_self_citation", False),
+                confidence=a.get("confidence", 1.0),
+                citation_ids=a.get("citation_ids", [])[:100]  # Limit to prevent huge payloads
+            )
+            for a in sorted_authors
+        ]
+    else:
+        # Fallback: aggregate by parsed name without LLM
+        author_aggregates = {}
+        for g in raw_author_groups:
+            name = g["authors"]
+            if name not in author_aggregates:
+                author_aggregates[name] = {"citation_count": 0, "papers_count": 0, "citation_ids": []}
+            author_aggregates[name]["citation_count"] += g["citation_count"]
+            author_aggregates[name]["papers_count"] += g["papers_count"]
+            author_aggregates[name]["citation_ids"].extend(g["citation_ids"])
+
+        sorted_authors = sorted(author_aggregates.items(), key=lambda x: x[1]["citation_count"], reverse=True)[:20]
+        top_citing_authors = [
+            CitingAuthor(
+                author=name,
+                citation_count=data["citation_count"],
+                papers_count=data["papers_count"],
+                citation_ids=data["citation_ids"][:100]
+            )
+            for name, data in sorted_authors
+        ]
 
     # 3. Most Cited Works (this thinker's works ranked by citations received)
     most_cited_result = await db.execute(
@@ -9004,6 +9046,79 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         top_venues=top_venues,
         citations_by_year=citations_by_year,
     )
+
+
+class AuthorPapersRequest(BaseModel):
+    """Request to get papers by a citing author"""
+    citation_ids: List[int]
+
+
+class AuthorPaper(BaseModel):
+    """A paper written by a citing author"""
+    citation_id: int
+    title: Optional[str]
+    authors: Optional[str]
+    year: Optional[int]
+    venue: Optional[str]
+    citation_count: Optional[int]
+    scholar_id: Optional[str]
+    url: Optional[str]
+
+
+@app.post("/api/thinkers/{thinker_id}/author-papers")
+async def get_author_papers(
+    thinker_id: int,
+    request: AuthorPapersRequest,
+    db: AsyncSession = Depends(get_db)
+) -> List[AuthorPaper]:
+    """
+    Get papers for a specific citing author using citation IDs.
+
+    This endpoint takes citation IDs from the analytics response and returns
+    the actual paper details so users can see what specific papers an author
+    wrote that cite the thinker's work.
+    """
+    from sqlalchemy import select
+    from .models import Citation
+
+    if not request.citation_ids:
+        return []
+
+    # Limit to prevent abuse
+    citation_ids = request.citation_ids[:100]
+
+    result = await db.execute(
+        select(Citation)
+        .where(Citation.id.in_(citation_ids))
+        .order_by(Citation.citation_count.desc().nulls_last())
+    )
+
+    papers = []
+    seen_scholar_ids = set()
+    for citation in result.scalars().all():
+        # Dedupe by scholar_id if available
+        if citation.scholar_id and citation.scholar_id in seen_scholar_ids:
+            continue
+        if citation.scholar_id:
+            seen_scholar_ids.add(citation.scholar_id)
+
+        # Parse authors from raw string
+        authors = citation.authors
+        if authors and " - " in authors:
+            authors = authors.split(" - ")[0].strip()
+
+        papers.append(AuthorPaper(
+            citation_id=citation.id,
+            title=citation.title,
+            authors=authors,
+            year=citation.year,
+            venue=citation.venue,
+            citation_count=citation.citation_count,
+            scholar_id=citation.scholar_id,
+            url=citation.url
+        ))
+
+    return papers
 
 
 @app.post("/api/thinkers/{thinker_id}/confirm")
