@@ -343,7 +343,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
                             labelStyle={{ color: 'var(--text-primary)' }}
                           />
-                          <Line type="monotone" dataKey="count" stroke="var(--primary-color)" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="count" stroke="var(--primary-color)" strokeWidth={2} dot={{ fill: 'var(--primary-color)', r: 3 }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>

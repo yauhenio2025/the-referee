@@ -8825,19 +8825,44 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .order_by(Citation.citation_count.desc().nulls_last())
         .limit(20)
     )
-    top_citing_papers = [
-        CitingPaper(
+    # Parse author and venue from Google Scholar format: "Author Names - Venue, Year - source.com"
+    def parse_citation_parts(raw_authors: str) -> tuple:
+        """Returns (authors, venue) parsed from Google Scholar author string"""
+        if not raw_authors:
+            return ("Unknown", None)
+        parts = raw_authors.split(" - ")
+        authors = parts[0].strip() if parts else "Unknown"
+        venue = parts[1].strip() if len(parts) > 1 else None
+        # Clean up venue - remove year and trailing parts
+        if venue and ", " in venue:
+            venue = venue.split(", ")[0]  # Take first part before year
+        return (authors, venue)
+
+    top_citing_papers = []
+    for r in top_papers_result.fetchall():
+        parsed_authors, parsed_venue = parse_citation_parts(r.authors)
+        top_citing_papers.append(CitingPaper(
             title=r.title,
-            authors=r.authors,
+            authors=parsed_authors,
             year=r.year,
-            venue=r.venue,
+            venue=parsed_venue or r.venue,  # Use parsed venue or original
             citation_count=r.citation_count or 0,
             cites_works=r.cites_works
-        )
-        for r in top_papers_result.fetchall()
-    ]
+        ))
 
     # 2. Top Citing Authors
+    # Parse author names from Google Scholar format: "Author Names - Venue, Year - source.com"
+    def parse_author_name(raw_authors: str) -> str:
+        if not raw_authors:
+            return "Unknown"
+        # Split on " - " and take the first part (author names)
+        parts = raw_authors.split(" - ")
+        author_part = parts[0].strip()
+        # Also handle "..." at the end of truncated author lists
+        if author_part.endswith("…"):
+            author_part = author_part[:-1] + "et al."
+        return author_part if author_part else "Unknown"
+
     top_authors_result = await db.execute(
         select(
             Citation.authors,
@@ -8849,15 +8874,27 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .where(Citation.authors != "")
         .group_by(Citation.authors)
         .order_by(func.count().desc())
-        .limit(20)
+        .limit(100)  # Fetch more to aggregate after parsing
     )
+
+    # Aggregate by parsed author name
+    author_aggregates = {}
+    for r in top_authors_result.fetchall():
+        parsed_name = parse_author_name(r.authors)
+        if parsed_name not in author_aggregates:
+            author_aggregates[parsed_name] = {"citation_count": 0, "papers_count": 0}
+        author_aggregates[parsed_name]["citation_count"] += r.citation_count
+        author_aggregates[parsed_name]["papers_count"] += r.papers_count
+
+    # Sort by citation count and take top 20
+    sorted_authors = sorted(author_aggregates.items(), key=lambda x: x[1]["citation_count"], reverse=True)[:20]
     top_citing_authors = [
         CitingAuthor(
-            author=r.authors,
-            citation_count=r.citation_count,
-            papers_count=r.papers_count
+            author=name,
+            citation_count=data["citation_count"],
+            papers_count=data["papers_count"]
         )
-        for r in top_authors_result.fetchall()
+        for name, data in sorted_authors
     ]
 
     # 3. Most Cited Works (this thinker's works ranked by citations received)
