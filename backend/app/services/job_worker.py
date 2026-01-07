@@ -704,6 +704,41 @@ AUTO_RESUME_CHECK_INTERVAL = 15  # Seconds between auto-resume checks (lowered f
 AUTO_RESUME_MAX_STALL_COUNT = 20  # Stop auto-resume after this many consecutive zero-progress jobs (increased from 5 to 20)
 _last_auto_resume_check = None
 
+# Job creation rate monitoring - detect runaway job creation
+JOB_CREATION_WINDOW_SECONDS = 60  # Track jobs created in this window
+JOB_CREATION_ALERT_THRESHOLD = 50  # Alert if more than this many jobs created in window
+_job_creation_times: List[datetime] = []  # Track recent job creation times
+
+
+def monitor_job_creation_rate(paper_id: int, job_type: str) -> None:
+    """Monitor job creation rate and log warnings if abnormally high.
+
+    This helps detect bugs like the auto-resume duplicate issue early.
+    """
+    global _job_creation_times
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=JOB_CREATION_WINDOW_SECONDS)
+
+    # Clean up old entries
+    _job_creation_times = [t for t in _job_creation_times if t > cutoff]
+
+    # Add this job
+    _job_creation_times.append(now)
+
+    # Check if rate is abnormal
+    job_count = len(_job_creation_times)
+    if job_count > JOB_CREATION_ALERT_THRESHOLD:
+        logger.warning(
+            f"⚠️ HIGH JOB CREATION RATE: {job_count} jobs created in last "
+            f"{JOB_CREATION_WINDOW_SECONDS}s! Latest: {job_type} for paper {paper_id}. "
+            f"This may indicate a bug causing duplicate job creation."
+        )
+        log_now(
+            f"⚠️ ALERT: High job creation rate detected - {job_count} jobs in {JOB_CREATION_WINDOW_SECONDS}s",
+            "WARNING"
+        )
+
 
 async def find_incomplete_harvests(db: AsyncSession) -> List[Edition]:
     """Find editions with incomplete harvests that should be resumed.
@@ -2996,19 +3031,22 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
             # Link work to paper
             work.paper_id = paper.id
 
-            # Queue citation extraction job
-            extract_job = Job(
-                job_type="extract_citations",
+            # Queue citation extraction job (with duplicate prevention)
+            before_create = datetime.utcnow()
+            extract_job = await create_extract_citations_job(
+                db=db,
                 paper_id=paper.id,
-                status="pending",
-                created_at=datetime.utcnow(),
+                resume_message=f"Thinker harvest: {work.title[:50]}...",
             )
-            db.add(extract_job)
-            await db.flush()
 
+            # Check if new job was created or existing returned
+            is_new = extract_job.created_at and extract_job.created_at >= before_create
             work.citations_harvested = True
             work.harvest_job_id = extract_job.id
-            jobs_queued += 1
+            if is_new:
+                jobs_queued += 1
+            else:
+                log_now(f"[ThinkerHarvest] Existing job {extract_job.id} found for paper {paper.id}")
 
             # Update progress
             job.progress = int(((idx + 1) / len(works)) * 100)
@@ -3494,4 +3532,8 @@ async def create_extract_citations_job(
     db.add(job)
     await db.flush()
     await db.refresh(job)
+
+    # Monitor job creation rate to detect runaway bugs
+    monitor_job_creation_rate(paper_id, "extract_citations")
+
     return job

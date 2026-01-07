@@ -7408,6 +7408,23 @@ async def reharvest_overflow_years(
             "editions_checked": len(editions)
         }
 
+    # Check for existing pending/running job (duplicate prevention)
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.paper_id == paper_id,
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    existing_job = existing_result.scalar_one_or_none()
+    if existing_job:
+        return {
+            "status": "already_running",
+            "job_id": existing_job.id,
+            "paper_id": paper_id,
+            "message": f"Existing job {existing_job.id} already running for this paper"
+        }
+
     # Create a harvest job to process these editions
     job = Job(
         paper_id=paper_id,
@@ -7513,8 +7530,11 @@ async def queue_all_incomplete_harvests(
 
     Creates one job per paper with incomplete editions. This is useful when
     auto-resume isn't picking things up due to timing or other issues.
+
+    Uses duplicate prevention - won't create jobs for papers that already have
+    pending/running jobs.
     """
-    from app.services.job_worker import find_incomplete_harvests
+    from app.services.job_worker import find_incomplete_harvests, create_extract_citations_job
 
     incomplete = await find_incomplete_harvests(db)
 
@@ -7532,32 +7552,47 @@ async def queue_all_incomplete_harvests(
             editions_by_paper[e.paper_id] = []
         editions_by_paper[e.paper_id].append(e)
 
-    # Create jobs
+    # Create jobs using create_extract_citations_job (with duplicate prevention)
     jobs_created = []
+    jobs_skipped = []
     for paper_id, editions in editions_by_paper.items():
         total_missing = sum((e.citation_count or 0) - (e.harvested_citation_count or 0) for e in editions)
+        edition_ids = [e.id for e in editions]
 
-        job = Job(
-            job_type="extract_citations",
-            status="pending",
+        before_create = datetime.utcnow()
+        job = await create_extract_citations_job(
+            db=db,
             paper_id=paper_id,
-            progress=0,
-            progress_message=f"Queued: {len(editions)} editions, {total_missing:,} citations remaining",
+            edition_ids=edition_ids,
+            is_resume=True,
+            resume_message=f"Manual queue: {len(editions)} editions, {total_missing:,} citations remaining",
         )
-        db.add(job)
-        jobs_created.append({
-            "paper_id": paper_id,
-            "editions_count": len(editions),
-            "missing_citations": total_missing
-        })
+
+        # Check if job was newly created or existing
+        is_new = job.created_at and job.created_at >= before_create
+        if is_new:
+            jobs_created.append({
+                "paper_id": paper_id,
+                "job_id": job.id,
+                "editions_count": len(editions),
+                "missing_citations": total_missing
+            })
+        else:
+            jobs_skipped.append({
+                "paper_id": paper_id,
+                "existing_job_id": job.id,
+                "reason": f"Job {job.id} already {job.status}"
+            })
 
     await db.commit()
 
     return {
         "status": "ok",
-        "message": f"Queued {len(jobs_created)} jobs for incomplete harvests",
+        "message": f"Queued {len(jobs_created)} jobs, skipped {len(jobs_skipped)} (already have pending/running jobs)",
         "jobs_queued": len(jobs_created),
-        "jobs": jobs_created
+        "jobs_skipped": len(jobs_skipped),
+        "jobs": jobs_created,
+        "skipped": jobs_skipped
     }
 
 
@@ -7625,6 +7660,25 @@ async def harvest_specific_years(
             "title": edition.title,
             "will_harvest_years": list(range(request.year_start, request.year_end + 1))
         })
+
+    # Check for existing pending/running job (duplicate prevention)
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.paper_id == paper_id,
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
+    )
+    existing_job = existing_result.scalar_one_or_none()
+    if existing_job:
+        await db.commit()  # Commit the resume_state updates
+        return {
+            "status": "already_running",
+            "message": f"Existing job {existing_job.id} already running for this paper. Resume state updated.",
+            "paper_id": paper_id,
+            "existing_job_id": existing_job.id,
+            "editions_updated": editions_updated
+        }
 
     # Queue harvest job
     job = Job(
