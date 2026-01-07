@@ -869,6 +869,7 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
     log_now(f"[AutoResume] Found {len(actually_incomplete)} incomplete editions across {len(editions_by_paper)} papers")
 
     jobs_queued = 0
+    jobs_skipped_existing = 0
     for paper_id, paper_editions in editions_by_paper.items():
         # Log all editions for this paper
         total_missing = sum(e.citation_count - e.harvested_citation_count for e in paper_editions)
@@ -878,27 +879,32 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
             missing = e.citation_count - e.harvested_citation_count
             log_now(f"[AutoResume]   - Edition {e.id}: {e.harvested_citation_count}/{e.citation_count} harvested ({missing} missing)")
 
-        # Create ONE job for ALL editions of this paper
-        job = Job(
+        # Use create_extract_citations_job with duplicate prevention
+        # This returns existing job if one exists, preventing duplicates
+        before_create = datetime.utcnow()
+        job = await create_extract_citations_job(
+            db=db,
             paper_id=paper_id,
-            job_type="extract_citations",
-            status="pending",
-            params=json.dumps({
-                "edition_ids": edition_ids,  # ALL editions for this paper
-                "max_citations_per_edition": 1000,
-                "skip_threshold": 50000,
-                "is_resume": True,
-            }),
-            progress=0,
-            progress_message=f"Auto-resume: {len(paper_editions)} editions, {total_missing:,} citations remaining",
+            edition_ids=edition_ids,
+            max_citations_per_edition=1000,
+            skip_threshold=50000,
+            is_resume=True,
+            resume_message=f"Auto-resume: {len(paper_editions)} editions, {total_missing:,} citations remaining",
         )
-        db.add(job)
-        jobs_queued += 1
-        log_now(f"[AutoResume] Queued 1 job for paper {paper_id} covering {len(paper_editions)} editions")
 
-    if jobs_queued > 0:
+        # Check if this was an existing job (created before our call) or a new one
+        # Job is new if created_at >= before_create (job was created during our call)
+        is_new_job = job.created_at and job.created_at >= before_create
+        if is_new_job:
+            jobs_queued += 1
+            log_now(f"[AutoResume] Queued job {job.id} for paper {paper_id} covering {len(paper_editions)} editions")
+        else:
+            jobs_skipped_existing += 1
+            log_now(f"[AutoResume] Paper {paper_id}: existing job {job.id} found (status={job.status}), skipping duplicate")
+
+    if jobs_queued > 0 or jobs_skipped_existing > 0:
         await db.commit()
-        log_now(f"[AutoResume] Queued {jobs_queued} auto-resume jobs (1 per paper)")
+        log_now(f"[AutoResume] Queued {jobs_queued} new jobs, skipped {jobs_skipped_existing} (existing jobs found)")
 
     return jobs_queued
 
@@ -3416,6 +3422,9 @@ async def create_extract_citations_job(
     year_low: int = None,
     batch_id: str = None,
     force_create: bool = False,
+    # Resume mode params
+    is_resume: bool = False,
+    resume_message: str = None,
 ) -> Job:
     """Create an extract_citations job
 
@@ -3428,6 +3437,8 @@ async def create_extract_citations_job(
         year_low: Only fetch citations from this year onwards (for incremental refresh)
         batch_id: UUID to track collection/global refresh batches
         force_create: If True, skip duplicate check (for special cases)
+        is_resume: If True, this is an auto-resume job
+        resume_message: Custom message for resume jobs
     """
     # DUPLICATE PREVENTION: Check for existing pending/running job for same paper
     if not force_create:
@@ -3458,7 +3469,19 @@ async def create_extract_citations_job(
         if batch_id:
             params["batch_id"] = batch_id
 
-    message = "Queued: Refresh citations" if is_refresh else "Queued: Extract citations"
+    # Add resume params if this is an auto-resume job
+    if is_resume:
+        params["is_resume"] = True
+
+    # Set appropriate message
+    if resume_message:
+        message = resume_message
+    elif is_refresh:
+        message = "Queued: Refresh citations"
+    elif is_resume:
+        message = "Queued: Auto-resume harvest"
+    else:
+        message = "Queued: Extract citations"
 
     job = Job(
         paper_id=paper_id,
