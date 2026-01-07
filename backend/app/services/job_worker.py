@@ -2852,8 +2852,10 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
             harvest_run.status = "completed"
             await db.commit()
 
-    # Update thinker stats
+    # Update thinker stats and status
     thinker.works_discovered = total_accepted + total_uncertain  # Include uncertain for review
+    thinker.status = "complete"
+    thinker.harvest_completed_at = datetime.utcnow()
     try:
         await db.commit()
     except Exception as e:
@@ -2861,6 +2863,8 @@ async def process_thinker_discover_works(job: Job, db: AsyncSession) -> Dict[str
         await db.rollback()
         await db.refresh(thinker)
         thinker.works_discovered = total_accepted + total_uncertain
+        thinker.status = "complete"
+        thinker.harvest_completed_at = datetime.utcnow()
         await db.commit()
 
     log_now(f"[ThinkerDiscover] ═══════════════════════════════════════════════")
