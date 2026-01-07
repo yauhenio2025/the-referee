@@ -269,6 +269,45 @@ async def update_paper_harvest_stats(db: AsyncSession, paper_id: int):
     await db.commit()
     log_now(f"[Harvest] Updated paper {paper_id}: any_harvested_at={any_harvested_at}, total={total_harvested}")
 
+    # Update thinker total_citations if this paper belongs to a thinker
+    await update_thinker_citation_stats(db, paper_id)
+
+
+async def update_thinker_citation_stats(db: AsyncSession, paper_id: int):
+    """Update thinker's total_citations if this paper belongs to a thinker work."""
+    from sqlalchemy import func
+
+    # Find if this paper is linked to a thinker work
+    result = await db.execute(
+        select(ThinkerWork.thinker_id)
+        .where(ThinkerWork.paper_id == paper_id)
+        .where(ThinkerWork.decision == "accepted")
+    )
+    thinker_id = result.scalar()
+
+    if not thinker_id:
+        return  # Not a thinker paper
+
+    # Calculate total citations for this thinker
+    citation_result = await db.execute(
+        select(func.count(Citation.id.distinct()))
+        .select_from(ThinkerWork)
+        .join(Paper, ThinkerWork.paper_id == Paper.id)
+        .join(Citation, Citation.paper_id == Paper.id)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+    )
+    total_citations = citation_result.scalar() or 0
+
+    # Update thinker
+    await db.execute(
+        update(Thinker)
+        .where(Thinker.id == thinker_id)
+        .values(total_citations=total_citations)
+    )
+    await db.commit()
+    log_now(f"[Harvest] Updated thinker {thinker_id} total_citations: {total_citations}")
+
 
 async def create_or_update_harvest_target(
     db: AsyncSession,
