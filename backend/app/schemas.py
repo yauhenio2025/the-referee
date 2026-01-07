@@ -1037,14 +1037,14 @@ class HarvestCitationsRequest(BaseModel):
     """Request to harvest citations for all discovered works"""
     work_ids: Optional[List[int]] = None  # If None, harvest all accepted works
     skip_existing: bool = True  # Skip works already converted to Papers
+    max_works: Optional[int] = None  # Maximum number of works to process per batch
 
 
 class HarvestCitationsResponse(BaseModel):
-    """Response from harvesting citations"""
+    """Response from starting citation harvest job"""
+    job_id: int
     thinker_id: int
-    jobs_created: int
-    works_queued: int
-    works_skipped: int
+    works_pending: int  # Number of accepted works pending harvest
     message: str
 
 
