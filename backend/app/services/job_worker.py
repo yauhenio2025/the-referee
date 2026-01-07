@@ -2978,62 +2978,37 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
 
     for idx, work in enumerate(works):
         try:
-            paper = None
+            # Always create a new paper for each thinker work
+            # Thinker works are discovered via author name search - they belong to this thinker
+            # No fuzzy matching - that leads to linking "Human Action" by Gasparski to Mises' book
+            paper = Paper(
+                title=work.title,
+                authors=work.authors_raw,
+                year=work.year,
+                citation_count=work.citation_count or 0,
+                status="resolved",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(paper)
+            await db.flush()
+            papers_created += 1
 
-            # Try to find existing paper by scholar_id
-            if work.scholar_id:
-                # Check citations table for existing paper with this scholar_id
-                citation_result = await db.execute(
-                    select(Citation.paper_id)
-                    .where(Citation.scholar_id == work.scholar_id)
-                    .limit(1)
-                )
-                existing = citation_result.scalars().first()
-                if existing:
-                    paper = await db.get(Paper, existing)
-
-            # Try to find existing paper by title
-            if not paper and work.title:
-                paper_result = await db.execute(
-                    select(Paper)
-                    .where(Paper.title.ilike(f"%{work.title[:50]}%"))
-                    .where(Paper.deleted_at.is_(None))
-                    .limit(1)
-                )
-                paper = paper_result.scalars().first()
-
-            # Create new paper if not found
-            if not paper:
-                paper = Paper(
-                    title=work.title,
-                    authors=work.authors_raw,
-                    year=work.year,
-                    citation_count=work.citation_count or 0,
-                    status="resolved",
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
-                )
-                db.add(paper)
-                await db.flush()
-                papers_created += 1
-
-                # Create edition for the paper
-                edition = Edition(
-                    paper_id=paper.id,
-                    title=work.title,
-                    cluster_id=work.scholar_id,
-                    citation_count=work.citation_count or 0,
-                    confidence="high",
-                    auto_selected=True,
-                    selected=True,
-                    created_at=datetime.utcnow(),
-                    redirected_harvest_count=0,
-                    harvest_reset_count=0,
-                )
-                db.add(edition)
-                await db.flush()
-            else:
-                papers_linked += 1
+            # Create edition for the paper
+            edition = Edition(
+                paper_id=paper.id,
+                title=work.title,
+                cluster_id=work.scholar_id,
+                citation_count=work.citation_count or 0,
+                confidence="high",
+                auto_selected=True,
+                selected=True,
+                created_at=datetime.utcnow(),
+                redirected_harvest_count=0,
+                harvest_reset_count=0,
+            )
+            db.add(edition)
+            await db.flush()
 
             # Link work to paper
             work.paper_id = paper.id
