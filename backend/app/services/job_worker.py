@@ -3006,9 +3006,12 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
             if not paper:
                 paper = Paper(
                     title=work.title,
-                    primary_author=work.authors_raw,
+                    authors=work.authors_raw,
                     year=work.year,
+                    citation_count=work.citation_count or 0,
+                    status="resolved",
                     created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
                 )
                 db.add(paper)
                 await db.flush()
@@ -3018,10 +3021,14 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
                 edition = Edition(
                     paper_id=paper.id,
                     title=work.title,
-                    gs_cluster_id=work.scholar_id,
-                    citation_count=work.citation_count,
-                    confidence_score=0.9,
+                    cluster_id=work.scholar_id,
+                    citation_count=work.citation_count or 0,
+                    confidence="high",
+                    auto_selected=True,
+                    selected=True,
                     created_at=datetime.utcnow(),
+                    redirected_harvest_count=0,
+                    harvest_reset_count=0,
                 )
                 db.add(edition)
                 await db.flush()
