@@ -191,6 +191,10 @@ ONLY return the JSON object, no other text."""
         """
         Generate search query variants for a thinker's name.
 
+        Uses a simple, reliable programmatic approach:
+        1. author:"X* LastName" - wildcard covers initials, middle names, full first names
+        2. "Full Name" - catches title/content mentions (combined with variant 1)
+
         Args:
             thinker: The Thinker model instance
 
@@ -199,156 +203,59 @@ ONLY return the JSON object, no other text."""
         """
         logger.info(f"[Thinker] Generating name variants for: {thinker.canonical_name}")
 
-        # Create LLM call record
-        llm_call = ThinkerLLMCall(
-            thinker_id=thinker.id,
-            workflow="variant_generation",
-            model=self.model_sonnet,
-            prompt=f"Generate variants for: {thinker.canonical_name}",
-            status="running",
-            started_at=datetime.utcnow(),
-        )
-        self.db.add(llm_call)
-        await self.db.flush()
-
-        # Parse domains if stored as JSON
-        domains = []
-        if thinker.domains:
-            try:
-                domains = json.loads(thinker.domains)
-            except json.JSONDecodeError:
-                domains = [thinker.domains]
-
         # Parse the name into parts
         name_parts = thinker.canonical_name.split()
+
         if len(name_parts) >= 2:
             first_name = name_parts[0]
             last_name = name_parts[-1]
             first_initial = first_name[0]
+
+            # Strategy: wildcard initial is more capacious than plain initial
+            # author:"C* Durand" matches: C Durand, Cedric Durand, C J Durand, etc.
+            variants = [
+                {
+                    "query": f'author:"{first_initial}* {last_name}"',
+                    "type": "wildcard_initial",
+                    "priority": 1,
+                    "description": f"Wildcard search: matches {first_initial}, {first_name}, {first_initial} J, etc."
+                },
+                {
+                    "query": f'"{thinker.canonical_name}"',
+                    "type": "full_name",
+                    "priority": 2,
+                    "description": "Full name in quotes for title/content matching"
+                },
+            ]
         else:
-            first_name = thinker.canonical_name
-            last_name = thinker.canonical_name
-            first_initial = first_name[0] if first_name else "X"
+            # Single name (like "Plato" or mononymous person)
+            variants = [
+                {
+                    "query": f'author:"{thinker.canonical_name}"',
+                    "type": "single_name",
+                    "priority": 1,
+                    "description": "Single name author search"
+                },
+            ]
 
-        prompt = f"""Generate Google Scholar author search queries for this thinker.
+        # Extract just the query strings for storage on thinker
+        query_strings = [v["query"] for v in variants]
 
-THINKER: {thinker.canonical_name}
-
-CRITICAL: Google Scholar author: search ONLY works with this format:
-  author:"X Surname" where X is first initial (one letter)
-
-GS DOES NOT ACCEPT full first names! These will NOT work:
-  ❌ author:"Cedric Durand" - WRONG, full name doesn't work
-  ❌ author:"Cédric Durand" - WRONG, full name doesn't work
-
-GS ONLY accepts initial + surname:
-  ✓ author:"C Durand" - CORRECT
-  ✓ author:"C* Durand" - CORRECT (wildcard for middle initial)
-
-GENERATE ONLY THESE VARIANTS:
-
-1. PRIMARY (always generate these two):
-   - author:"{first_initial} {last_name}"
-   - author:"{first_initial}* {last_name}"
-
-2. TRANSLITERATIONS (ONLY for very famous scholars like Marx, Habermas, Foucault):
-   - Chinese surname: author:"杜兰德"
-   - Russian surname: author:"Дюран"
-   - Skip for less famous scholars!
-
-NEVER GENERATE:
-❌ Full first names (author:"Cedric Durand")
-❌ Names without diacritics as full names (author:"Cedric Durand")
-❌ Domain keywords (author:"Durand economics")
-
-Return JSON array with 2-4 variants ONLY:
-[
-  {{"query": "author:\\"C Durand\\"", "type": "initial_surname", "priority": 1}},
-  {{"query": "author:\\"C* Durand\\"", "type": "wildcard", "priority": 1}}
-]
-
-Return ONLY the JSON array, nothing else."""
-
-        start_time = datetime.utcnow()
-
-        try:
-            response = self.client.messages.create(
-                model=self.model_sonnet,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            text = response.content[0].text
-            llm_call.raw_response = text
-            llm_call.input_tokens = response.usage.input_tokens
-            llm_call.output_tokens = response.usage.output_tokens
-
-            json_match = re.search(r"\[[\s\S]*\]", text)
-            if json_match:
-                variants = json.loads(json_match.group())
-                llm_call.parsed_result = json.dumps(variants)
-                llm_call.status = "completed"
-                llm_call.completed_at = datetime.utcnow()
-                llm_call.latency_ms = int((llm_call.completed_at - start_time).total_seconds() * 1000)
-
-                # Extract just the query strings for storage on thinker
-                query_strings = [v.get("query", "") for v in variants if v.get("query")]
-
-                # Update thinker with variants
-                thinker.name_variants = json.dumps(query_strings)
-                await self.db.commit()
-
-                logger.info(f"[Thinker] Generated {len(variants)} name variants")
-                for v in variants[:5]:
-                    logger.info(f"  - {v.get('query')} ({v.get('type', v.get('variant_type', 'unknown'))})")
-                if len(variants) > 5:
-                    logger.info(f"  ... and {len(variants) - 5} more")
-
-                return {
-                    "success": True,
-                    "llm_call_id": llm_call.id,
-                    "thinker_id": thinker.id,
-                    "canonical_name": thinker.canonical_name,
-                    "variants": variants,
-                    "variant_count": len(variants),
-                }
-
-        except json.JSONDecodeError as e:
-            logger.error(f"[Thinker] JSON parse error: {e}")
-            llm_call.status = "failed"
-            llm_call.parsed_result = json.dumps({"error": f"JSON parse error: {str(e)}"})
-
-        except Exception as e:
-            logger.error(f"[Thinker] Variant generation error: {e}")
-            llm_call.status = "failed"
-            llm_call.parsed_result = json.dumps({"error": str(e)})
-
-        llm_call.completed_at = datetime.utcnow()
-        llm_call.latency_ms = int((llm_call.completed_at - start_time).total_seconds() * 1000)
+        # Update thinker with variants
+        thinker.name_variants = json.dumps(query_strings)
         await self.db.commit()
 
-        # Fallback: basic variants using correct GS format (initial + surname)
-        name_parts = thinker.canonical_name.split()
-        if len(name_parts) >= 2:
-            first_initial = name_parts[0][0]
-            last_name = name_parts[-1]
-            fallback_variants = [
-                {"query": f'author:"{first_initial} {last_name}"', "type": "initial_surname", "priority": 1},
-                {"query": f'author:"{first_initial}* {last_name}"', "type": "wildcard", "priority": 1},
-            ]
-        else:
-            fallback_variants = [
-                {"query": f'author:"{thinker.canonical_name}"', "type": "single_name", "priority": 1},
-            ]
+        logger.info(f"[Thinker] Generated {len(variants)} name variants (programmatic)")
+        for v in variants:
+            logger.info(f"  - {v['query']} ({v['type']})")
 
         return {
-            "success": False,
-            "llm_call_id": llm_call.id,
+            "success": True,
+            "llm_call_id": None,  # No LLM call needed
             "thinker_id": thinker.id,
             "canonical_name": thinker.canonical_name,
-            "variants": fallback_variants,
-            "variant_count": len(fallback_variants),
-            "error": "LLM call failed - using fallback variants",
+            "variants": variants,
+            "variant_count": len(variants),
         }
 
     # ============== Workflow 3: Page Filtering ==============
