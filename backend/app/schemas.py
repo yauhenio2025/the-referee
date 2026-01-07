@@ -855,6 +855,14 @@ class ThinkerCreate(BaseModel):
     name: str  # User input like "Marcuse" or "Herbert Marcuse"
 
 
+class ThinkerUpdate(BaseModel):
+    """Update thinker fields"""
+    status: Optional[str] = None  # pending, disambiguated, harvesting, complete
+    canonical_name: Optional[str] = None
+    bio: Optional[str] = None
+    domains: Optional[List[str]] = None
+
+
 class ThinkerCandidate(BaseModel):
     """A candidate thinker from disambiguation"""
     canonical_name: str

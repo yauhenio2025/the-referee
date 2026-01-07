@@ -51,7 +51,7 @@ from .schemas import (
     HarvestDashboardResponse, JobHistoryResponse, JobHistoryItem,
     SystemHealthStats, ActiveHarvestInfo, RecentlyCompletedPaper, DashboardAlert, JobHistorySummary,
     # Thinker Bibliographies schemas
-    ThinkerCreate, ThinkerResponse, ThinkerDetail, ThinkerConfirmRequest,
+    ThinkerCreate, ThinkerUpdate, ThinkerResponse, ThinkerDetail, ThinkerConfirmRequest,
     ThinkerWorkResponse, ThinkerHarvestRunResponse, ThinkerLLMCallResponse,
     DisambiguationResponse, NameVariantsResponse, ThinkerQuickAddRequest, ThinkerQuickAddResponse,
     StartWorkDiscoveryRequest, StartWorkDiscoveryResponse,
@@ -8592,6 +8592,66 @@ async def delete_thinker(thinker_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=result.get("error", "Thinker not found"))
 
     return result
+
+
+@app.patch("/api/thinkers/{thinker_id}", response_model=ThinkerResponse)
+async def update_thinker(
+    thinker_id: int,
+    request: ThinkerUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update thinker fields (status, name, bio, domains)"""
+    from sqlalchemy import select
+    from .models import Thinker
+    from datetime import datetime
+    import json
+
+    result = await db.execute(select(Thinker).where(Thinker.id == thinker_id))
+    thinker = result.scalar_one_or_none()
+
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Update fields if provided
+    if request.status is not None:
+        valid_statuses = ["pending", "disambiguated", "harvesting", "complete"]
+        if request.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        thinker.status = request.status
+        # Set timestamp for complete status
+        if request.status == "complete" and not thinker.harvest_completed_at:
+            thinker.harvest_completed_at = datetime.utcnow()
+
+    if request.canonical_name is not None:
+        thinker.canonical_name = request.canonical_name
+
+    if request.bio is not None:
+        thinker.bio = request.bio
+
+    if request.domains is not None:
+        thinker.domains = json.dumps(request.domains)
+
+    await db.commit()
+    await db.refresh(thinker)
+
+    # Format response
+    return ThinkerResponse(
+        id=thinker.id,
+        canonical_name=thinker.canonical_name,
+        birth_death=thinker.birth_death,
+        bio=thinker.bio,
+        domains=json.loads(thinker.domains) if thinker.domains else [],
+        notable_works=json.loads(thinker.notable_works) if thinker.notable_works else [],
+        name_variants=json.loads(thinker.name_variants) if thinker.name_variants else [],
+        status=thinker.status,
+        works_discovered=thinker.works_discovered or 0,
+        works_harvested=thinker.works_harvested or 0,
+        total_citations=thinker.total_citations or 0,
+        created_at=thinker.created_at,
+        disambiguated_at=thinker.disambiguated_at,
+        harvest_started_at=thinker.harvest_started_at,
+        harvest_completed_at=thinker.harvest_completed_at,
+    )
 
 
 @app.post("/api/thinkers/{thinker_id}/refresh-stats")
