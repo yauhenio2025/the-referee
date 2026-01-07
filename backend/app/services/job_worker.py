@@ -3415,6 +3415,7 @@ async def create_extract_citations_job(
     is_refresh: bool = False,
     year_low: int = None,
     batch_id: str = None,
+    force_create: bool = False,
 ) -> Job:
     """Create an extract_citations job
 
@@ -3426,7 +3427,23 @@ async def create_extract_citations_job(
         is_refresh: If True, this is a refresh job (updates harvest timestamps)
         year_low: Only fetch citations from this year onwards (for incremental refresh)
         batch_id: UUID to track collection/global refresh batches
+        force_create: If True, skip duplicate check (for special cases)
     """
+    # DUPLICATE PREVENTION: Check for existing pending/running job for same paper
+    if not force_create:
+        from sqlalchemy import select
+        existing_result = await db.execute(
+            select(Job).where(
+                Job.paper_id == paper_id,
+                Job.job_type == "extract_citations",
+                Job.status.in_(["pending", "running"])
+            )
+        )
+        existing_job = existing_result.scalar_one_or_none()
+        if existing_job:
+            logger.info(f"Duplicate prevention: returning existing job {existing_job.id} for paper {paper_id} (status: {existing_job.status})")
+            return existing_job
+
     params = {
         "edition_ids": edition_ids or [],
         "max_citations_per_edition": max_citations_per_edition,

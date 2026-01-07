@@ -8992,6 +8992,26 @@ async def start_work_discovery(
         await service.generate_name_variants(thinker)
         await db.refresh(thinker)
 
+    # DUPLICATE PREVENTION: Check for existing pending/running discovery job for this thinker
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.job_type == "thinker_discover_works",
+            Job.status.in_(["pending", "running"]),
+            Job.params.contains(f'"thinker_id": {thinker_id}')
+        )
+    )
+    existing_job = existing_result.scalar_one_or_none()
+
+    if existing_job:
+        variants = json.loads(thinker.name_variants) if thinker.name_variants else []
+        return StartWorkDiscoveryResponse(
+            job_id=existing_job.id,
+            thinker_id=thinker_id,
+            variants_to_search=len(variants),
+            status=existing_job.status,
+            message=f"Work discovery already in progress (job {existing_job.id})",
+        )
+
     # Create job
     job = Job(
         job_type="thinker_discover_works",
@@ -9051,6 +9071,24 @@ async def start_harvest_citations(
         raise HTTPException(
             status_code=400,
             detail="No accepted works pending harvest. Run work discovery first."
+        )
+
+    # DUPLICATE PREVENTION: Check for existing pending/running harvest job for this thinker
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.job_type == "thinker_harvest_citations",
+            Job.status.in_(["pending", "running"]),
+            Job.params.contains(f'"thinker_id": {thinker_id}')
+        )
+    )
+    existing_job = existing_result.scalar_one_or_none()
+
+    if existing_job:
+        return HarvestCitationsResponse(
+            job_id=existing_job.id,
+            thinker_id=thinker_id,
+            works_pending=pending_works,
+            message=f"Citation harvest already in progress (job {existing_job.id})",
         )
 
     # Create job
