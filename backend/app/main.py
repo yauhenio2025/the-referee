@@ -8905,7 +8905,8 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
             Citation.authors,
             func.coalesce(func.sum(Citation.citation_count), 0).label("citation_count"),  # Sum of influence
             func.count(distinct(Citation.scholar_id)).label("papers_count"),
-            func.array_agg(Citation.id).label("citation_ids")
+            func.array_agg(Citation.id).label("citation_ids"),
+            func.array_agg(Citation.author_profiles).label("author_profiles_list")  # Collect all profile JSONs
         )
         .where(Citation.paper_id.in_(paper_ids))
         .where(Citation.authors.isnot(None))
@@ -8914,6 +8915,18 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .order_by(func.coalesce(func.sum(Citation.citation_count), 0).desc())
         .limit(100)  # Back to 100 now that we use heuristics instead of LLM
     )
+
+    # Build a global lookup of author profiles from all citations
+    # Maps normalized author name -> profile URL
+    author_profile_lookup = {}
+
+    def normalize_for_matching(name: str) -> str:
+        """Normalize name for fuzzy matching: lowercase, remove punctuation, collapse spaces"""
+        import re
+        name = name.lower().strip()
+        name = re.sub(r'[^\w\s]', '', name)  # Remove punctuation
+        name = re.sub(r'\s+', ' ', name)  # Collapse whitespace
+        return name
 
     # Pre-parse author names and collect data for LLM processing
     raw_author_groups = []
@@ -8925,6 +8938,36 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
             "papers_count": r.papers_count,
             "citation_ids": list(r.citation_ids) if r.citation_ids else []
         })
+
+        # Extract profiles from author_profiles_list and add to lookup
+        if r.author_profiles_list:
+            for profiles_json in r.author_profiles_list:
+                if profiles_json:
+                    try:
+                        profiles = json.loads(profiles_json)
+                        for p in profiles:
+                            if p.get("name") and p.get("profile_url"):
+                                norm_name = normalize_for_matching(p["name"])
+                                author_profile_lookup[norm_name] = p["profile_url"]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+    def find_profile_url(author_name: str) -> Optional[str]:
+        """Try to find a profile URL for the given author name using fuzzy matching"""
+        if not author_name or author_name == "Unknown":
+            return None
+        norm_name = normalize_for_matching(author_name)
+        # Exact match
+        if norm_name in author_profile_lookup:
+            return author_profile_lookup[norm_name]
+        # Try matching just the surname (last word)
+        parts = norm_name.split()
+        if len(parts) >= 1:
+            surname = parts[-1]
+            for stored_name, url in author_profile_lookup.items():
+                if stored_name.endswith(surname) or surname in stored_name.split():
+                    return url
+        return None
 
     # Use LLM to disaggregate multi-author entries and detect self-citations
     import logging
@@ -8953,7 +8996,8 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
                 papers_count=a.get("total_papers_count", a.get("papers_count", 0)),
                 is_self_citation=a.get("is_self_citation", False),
                 confidence=a.get("confidence", 1.0),
-                citation_ids=a.get("citation_ids", [])[:100]  # Limit to prevent huge payloads
+                citation_ids=a.get("citation_ids", [])[:100],  # Limit to prevent huge payloads
+                profile_url=find_profile_url(a.get("normalized_name", a.get("authors", "")))
             )
             for a in sorted_authors
         ]
@@ -8974,7 +9018,8 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
                 author=name,
                 citation_count=data["citation_count"],
                 papers_count=data["papers_count"],
-                citation_ids=data["citation_ids"][:100]
+                citation_ids=data["citation_ids"][:100],
+                profile_url=find_profile_url(name)
             )
             for name, data in sorted_authors
         ]

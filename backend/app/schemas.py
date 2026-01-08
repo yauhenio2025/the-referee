@@ -1102,6 +1102,7 @@ class CitingAuthor(BaseModel):
     is_self_citation: bool = False  # Is this author the thinker themselves?
     confidence: float = 1.0  # LLM confidence in the is_self_citation determination
     citation_ids: List[int] = []  # Citation IDs for fetching this author's papers
+    profile_url: Optional[str] = None  # Google Scholar profile URL if known
 
 
 class MostCitedWork(BaseModel):

@@ -782,6 +782,16 @@ function ThinkerDetail({ thinkerId, onBack }) {
                           <div className="author-name-cell">
                             <span className="author-name">
                               {author.author}
+                              {author.profile_url && (
+                                <a
+                                  href={author.profile_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="scholar-profile-link"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="View Google Scholar profile"
+                                >🎓</a>
+                              )}
                               {author.is_self_citation && <span className="self-citation-badge">self</span>}
                             </span>
                           </div>
