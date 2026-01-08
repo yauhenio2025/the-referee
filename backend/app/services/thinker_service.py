@@ -1051,22 +1051,27 @@ ONLY return the JSON array, no other text."""
         self,
         thinker_id: int,
         profile_url: str,
+        verify_authorship: bool = True,
     ) -> Dict[str, Any]:
         """
         Fetch all publications from a Google Scholar profile and create ThinkerWorks.
 
-        Publications from the author's profile are auto-accepted since they are
-        definitively by this author. This seeds the bibliography before running
-        author: search discovery (which will then find any works NOT on the profile).
+        NOTE: Scholar profiles for deceased academics are often created by third
+        parties and may contain works by DIFFERENT people with the same name,
+        or works ABOUT/TO the person rather than BY them.
+
+        By default, uses LLM verification to filter out misattributed works.
 
         Args:
             thinker_id: The thinker to seed works for
-            profile_url: Google Scholar profile URL (e.g., https://scholar.google.com/citations?user=zKHBVTkAAAAJ)
+            profile_url: Google Scholar profile URL
+            verify_authorship: If True, use LLM to verify each work belongs to this thinker
 
         Returns:
             Dict with seeding results including count of works created
         """
         from .scholar_search import get_scholar_service
+        from .authorship_verifier import get_authorship_verifier
 
         logger.info(f"[Thinker] Seeding works from Scholar profile: {profile_url}")
 
@@ -1098,16 +1103,68 @@ ONLY return the JSON array, no other text."""
         )
         existing_scholar_ids = set(row[0] for row in result.fetchall())
 
+        # Verify authorship using LLM (catches name collisions, works ABOUT person, etc.)
+        verification_results = {}
+        works_rejected = 0
+
+        if verify_authorship and publications:
+            logger.info(f"[Thinker] Verifying authorship of {len(publications)} profile works...")
+
+            verifier = get_authorship_verifier()
+            domains = self._parse_json_list(thinker.domains)
+            notable_works = self._parse_json_list(thinker.notable_works)
+
+            # Verify in batches of 20
+            batch_size = 20
+            for i in range(0, len(publications), batch_size):
+                batch = publications[i:i + batch_size]
+                result = await verifier.verify_works(
+                    thinker_name=thinker.canonical_name,
+                    thinker_birth_death=thinker.birth_death,
+                    thinker_domains=domains,
+                    thinker_notable_works=notable_works,
+                    thinker_bio=thinker.bio,
+                    works=batch,
+                    source_context="scholar_profile",
+                )
+
+                # Map decisions by work index
+                for decision in result.get("decisions", []):
+                    idx = i + decision.get("work_index", 1) - 1
+                    verification_results[idx] = decision
+
+                logger.info(
+                    f"[Thinker] Batch {i//batch_size + 1}: "
+                    f"{result.get('accepted', 0)} accepted, "
+                    f"{result.get('rejected', 0)} rejected, "
+                    f"{result.get('uncertain', 0)} uncertain"
+                )
+
         # Create ThinkerWorks for each publication
         works_created = 0
         works_skipped = 0
 
-        for pub in publications:
+        for idx, pub in enumerate(publications):
             scholar_id = pub.get("scholar_id")
 
             # Skip if already exists (by scholar_id)
             if scholar_id and scholar_id in existing_scholar_ids:
                 works_skipped += 1
+                continue
+
+            # Get verification decision (if we ran verification)
+            verification = verification_results.get(idx, {})
+            llm_decision = verification.get("decision", "accept")  # Default accept if no verification
+            llm_confidence = verification.get("confidence", 1.0)
+            llm_reason = verification.get("reason", "From author's Google Scholar profile")
+
+            # Skip rejected works entirely
+            if llm_decision == "reject":
+                works_rejected += 1
+                logger.info(
+                    f"[Thinker] Rejected: {pub.get('title', 'Unknown')[:50]}... "
+                    f"({llm_reason})"
+                )
                 continue
 
             # Parse year safely
@@ -1126,6 +1183,9 @@ ONLY return the JSON array, no other text."""
                 except (ValueError, TypeError):
                     pass
 
+            # Map LLM decision to our decision field
+            decision = "accepted" if llm_decision == "accept" else "uncertain"
+
             work = ThinkerWork(
                 thinker_id=thinker_id,
                 scholar_id=scholar_id,
@@ -1136,9 +1196,9 @@ ONLY return the JSON array, no other text."""
                 venue=pub.get("venue"),
                 citation_count=citation_count,
                 link=pub.get("link"),
-                decision="accepted",  # Profile works are auto-accepted
-                confidence=1.0,  # Maximum confidence - from author's own profile
-                reason="From author's Google Scholar profile",
+                decision=decision,
+                confidence=llm_confidence,
+                reason=f"Profile: {llm_reason}" if verify_authorship else "From author's Google Scholar profile",
                 found_by_variant="scholar_profile",
                 created_at=datetime.utcnow(),
             )
@@ -1154,13 +1214,14 @@ ONLY return the JSON array, no other text."""
 
         logger.info(
             f"[Thinker] Seeded {works_created} works from profile "
-            f"(skipped {works_skipped} duplicates)"
+            f"(skipped {works_skipped} duplicates, rejected {works_rejected} misattributed)"
         )
 
         return {
             "success": True,
             "works_seeded": works_created,
             "works_skipped": works_skipped,
+            "works_rejected": works_rejected,
             "profile_name": profile_data.get("full_name"),
             "affiliation": profile_data.get("affiliation"),
             "total_in_profile": len(publications),
