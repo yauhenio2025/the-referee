@@ -3639,7 +3639,7 @@ def start_worker():
     global _worker_task
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(worker_loop())
-        log_now("[Worker] Background worker started")
+        log_now("[Worker] Background worker started (v2)")
 
 
 def stop_worker():
