@@ -52,7 +52,8 @@ async def process_citing_authors(
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         logger.info("Anthropic client created, calling API...")
 
-        # Format the author groups for the prompt
+        # Format the author groups for the prompt (WITHOUT citation_ids to keep prompt small)
+        # citation_ids are only used after LLM processing to map back to papers
         author_entries = []
         for i, group in enumerate(raw_author_groups):
             author_entries.append({
@@ -60,7 +61,7 @@ async def process_citing_authors(
                 "raw_authors": group.get("authors", "Unknown"),
                 "citation_count": group.get("citation_count", 0),
                 "papers_count": group.get("papers_count", 0),
-                "citation_ids": group.get("citation_ids", [])
+                # NOT including citation_ids - they bloat the prompt massively
             })
 
         prompt = f"""Analyze citing authors for thinker: "{thinker_name}"
@@ -134,12 +135,12 @@ Rules:
 
         result = json.loads(response_text)
 
-        # Map source_entry_ids to actual citation_ids
+        # Map source_entry_ids to actual citation_ids from original data
         for author in result.get("individual_authors", []):
             all_citation_ids = []
             for entry_id in author.get("source_entry_ids", []):
-                if entry_id < len(author_entries):
-                    all_citation_ids.extend(author_entries[entry_id].get("citation_ids", []))
+                if entry_id < len(raw_author_groups):
+                    all_citation_ids.extend(raw_author_groups[entry_id].get("citation_ids", []))
             author["citation_ids"] = list(set(all_citation_ids))  # dedupe
 
         result["llm_processed"] = True
