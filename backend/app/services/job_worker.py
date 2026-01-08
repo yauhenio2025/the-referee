@@ -950,13 +950,26 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
 
     log_now(f"[AutoResume] Found {len(actually_incomplete)} incomplete editions across {len(editions_by_paper)} papers")
 
+    # Pre-fetch which papers belong to thinkers (for priority boost)
+    paper_ids = list(editions_by_paper.keys())
+    thinker_paper_result = await db.execute(
+        select(ThinkerWork.paper_id)
+        .where(ThinkerWork.paper_id.in_(paper_ids))
+        .where(ThinkerWork.decision == "accepted")
+    )
+    thinker_papers = set(row[0] for row in thinker_paper_result.fetchall())
+    if thinker_papers:
+        log_now(f"[AutoResume] {len(thinker_papers)} papers belong to thinkers - will get priority 100")
+
     jobs_queued = 0
     jobs_skipped_existing = 0
     for paper_id, paper_editions in editions_by_paper.items():
         # Log all editions for this paper
         total_missing = sum(e.citation_count - e.harvested_citation_count for e in paper_editions)
         edition_ids = [e.id for e in paper_editions]
-        log_now(f"[AutoResume] Paper {paper_id}: {len(paper_editions)} editions with {total_missing:,} total missing citations")
+        is_thinker_paper = paper_id in thinker_papers
+        priority = 100 if is_thinker_paper else 0
+        log_now(f"[AutoResume] Paper {paper_id}: {len(paper_editions)} editions with {total_missing:,} total missing citations (priority={priority})")
         for e in paper_editions:
             missing = e.citation_count - e.harvested_citation_count
             log_now(f"[AutoResume]   - Edition {e.id}: {e.harvested_citation_count}/{e.citation_count} harvested ({missing} missing)")
@@ -972,6 +985,7 @@ async def auto_resume_incomplete_harvests(db: AsyncSession) -> int:
             skip_threshold=50000,
             is_resume=True,
             resume_message=f"Auto-resume: {len(paper_editions)} editions, {total_missing:,} citations remaining",
+            priority=priority,
         )
 
         # Check if this was an existing job (created before our call) or a new one
@@ -3765,6 +3779,8 @@ async def create_extract_citations_job(
     # Callback params for completion notification
     callback_url: str = None,
     callback_secret: str = None,
+    # Priority (0 = default, 100 = high for thinker jobs)
+    priority: int = 0,
 ) -> Job:
     """Create an extract_citations job
 
@@ -3831,6 +3847,7 @@ async def create_extract_citations_job(
         status="pending",
         params=json.dumps(params),
         progress=0,
+        priority=priority,
         progress_message=message,
         callback_url=callback_url,
         callback_secret=callback_secret,
