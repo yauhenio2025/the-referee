@@ -261,6 +261,27 @@ class Citation(Base):
     )
 
 
+class ScholarAuthorProfile(Base):
+    """Cached Google Scholar author profile data"""
+    __tablename__ = "scholar_author_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # The user ID from Google Scholar URL (e.g., "1X4qGg4AAAAJ" from citations?user=1X4qGg4AAAAJ)
+    scholar_user_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    profile_url: Mapped[str] = mapped_column(Text)
+
+    # Profile data
+    full_name: Mapped[Optional[str]] = mapped_column(String(255))
+    affiliation: Mapped[Optional[str]] = mapped_column(String(500))
+    homepage_url: Mapped[Optional[str]] = mapped_column(Text)
+    # JSON array of topics: ["Business Ethics", "Corporate Social Responsibility", ...]
+    topics: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timestamps
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Job(Base):
     """Background processing job"""
     __tablename__ = "jobs"

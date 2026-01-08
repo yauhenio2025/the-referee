@@ -1103,6 +1103,22 @@ class CitingAuthor(BaseModel):
     confidence: float = 1.0  # LLM confidence in the is_self_citation determination
     citation_ids: List[int] = []  # Citation IDs for fetching this author's papers
     profile_url: Optional[str] = None  # Google Scholar profile URL if known
+    # Enriched profile data (fetched from Scholar profile page)
+    full_name: Optional[str] = None  # Full name from Scholar profile
+    affiliation: Optional[str] = None  # Institution/university
+    homepage_url: Optional[str] = None  # Personal homepage
+    topics: Optional[List[str]] = None  # Research interests
+
+
+class ScholarAuthorProfileResponse(BaseModel):
+    """Google Scholar author profile data"""
+    scholar_user_id: str
+    profile_url: str
+    full_name: Optional[str] = None
+    affiliation: Optional[str] = None
+    homepage_url: Optional[str] = None
+    topics: List[str] = []
+    fetched_at: Optional[datetime] = None
 
 
 class MostCitedWork(BaseModel):

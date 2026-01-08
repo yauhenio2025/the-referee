@@ -161,6 +161,21 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_thinker_llm_calls_workflow ON thinker_llm_calls(workflow)",
         # Make thinker_id nullable in thinker_llm_calls to allow disambiguation before thinker exists
         "ALTER TABLE thinker_llm_calls ALTER COLUMN thinker_id DROP NOT NULL",
+        # Scholar Author Profiles cache table
+        """CREATE TABLE IF NOT EXISTS scholar_author_profiles (
+            id SERIAL PRIMARY KEY,
+            scholar_user_id VARCHAR(50) NOT NULL UNIQUE,
+            profile_url TEXT NOT NULL,
+            full_name VARCHAR(255),
+            affiliation VARCHAR(500),
+            homepage_url TEXT,
+            topics TEXT,
+            fetched_at TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_scholar_author_profiles_user_id ON scholar_author_profiles(scholar_user_id)",
+        # Author profiles in citations (JSON array of author profile data)
+        "ALTER TABLE citations ADD COLUMN IF NOT EXISTS author_profiles TEXT",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

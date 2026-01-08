@@ -1013,6 +1013,15 @@ class RefereeAPI {
     }
     return this.request(`/api/search/papers-by-author?${params.toString()}`);
   }
+
+  /**
+   * Get Google Scholar author profile data
+   * @param {string} userId - Scholar user ID (e.g., "1X4qGg4AAAAJ" from citations?user=...)
+   * @returns {Promise<Object>} Profile data: { full_name, affiliation, homepage_url, topics }
+   */
+  async getScholarProfile(userId) {
+    return this.request(`/api/scholar-profiles/${userId}`);
+  }
 }
 
 export const api = new RefereeAPI();

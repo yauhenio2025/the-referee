@@ -20,7 +20,7 @@ import json
 
 from .config import get_settings
 from .database import init_db, get_db
-from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun, ThinkerLLMCall
+from .models import Paper, Edition, Citation, Job, RawSearchResult, Collection, Dossier, PaperAdditionalDossier, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun, ThinkerLLMCall, ScholarAuthorProfile
 from .schemas import (
     PaperCreate, PaperResponse, PaperDetail, PaperSubmitBatch, PapersPaginatedResponse,
     EditionResponse, EditionDiscoveryRequest, EditionDiscoveryResponse, EditionSelectRequest,
@@ -62,6 +62,8 @@ from .schemas import (
     CitationMakeSeedRequest, CitationMakeSeedResponse,
     # Author Search schemas
     AuthorPaperResult, AuthorSearchResponse,
+    # Scholar Profile schemas
+    ScholarAuthorProfileResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -9125,6 +9127,41 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     )
     unique_venues = unique_venues_result.scalar() or 0
 
+    # Enrich authors with cached profile data (full_name, affiliation, topics)
+    # Extract user IDs from profile URLs
+    user_ids_to_fetch = []
+    for author in top_citing_authors:
+        if author.profile_url:
+            import re
+            user_match = re.search(r"user=([A-Za-z0-9_-]+)", author.profile_url)
+            if user_match:
+                user_ids_to_fetch.append(user_match.group(1))
+
+    if user_ids_to_fetch:
+        # Query cached profiles
+        cached_profiles_result = await db.execute(
+            select(ScholarAuthorProfile)
+            .where(ScholarAuthorProfile.scholar_user_id.in_(user_ids_to_fetch))
+        )
+        cached_profiles = {p.scholar_user_id: p for p in cached_profiles_result.scalars().all()}
+
+        # Enrich authors with cached data
+        for author in top_citing_authors:
+            if author.profile_url:
+                user_match = re.search(r"user=([A-Za-z0-9_-]+)", author.profile_url)
+                if user_match:
+                    user_id = user_match.group(1)
+                    profile = cached_profiles.get(user_id)
+                    if profile:
+                        author.full_name = profile.full_name
+                        author.affiliation = profile.affiliation
+                        author.homepage_url = profile.homepage_url
+                        if profile.topics:
+                            try:
+                                author.topics = json.loads(profile.topics)
+                            except json.JSONDecodeError:
+                                pass
+
     return ThinkerAnalyticsResponse(
         thinker_id=thinker_id,
         thinker_name=thinker.canonical_name,
@@ -9214,6 +9251,96 @@ async def get_author_papers(
         ))
 
     return papers
+
+
+@app.get("/api/scholar-profiles/{user_id}")
+async def get_scholar_author_profile(
+    user_id: str,
+    db: AsyncSession = Depends(get_db)
+) -> ScholarAuthorProfileResponse:
+    """
+    Get a Google Scholar author profile by user ID.
+
+    Fetches profile data (name, affiliation, homepage, topics) from Scholar
+    and caches it in the database for future requests.
+
+    Args:
+        user_id: The Scholar user ID (e.g., "1X4qGg4AAAAJ" from citations?user=...)
+
+    Returns:
+        Scholar author profile data
+    """
+    from .services.scholar_search import get_scholar_service
+    from datetime import timedelta
+
+    # Check cache first
+    result = await db.execute(
+        select(ScholarAuthorProfile).where(ScholarAuthorProfile.scholar_user_id == user_id)
+    )
+    cached_profile = result.scalar_one_or_none()
+
+    # Return cached if fresh (less than 7 days old)
+    if cached_profile:
+        age = datetime.utcnow() - cached_profile.fetched_at
+        if age < timedelta(days=7):
+            topics = []
+            if cached_profile.topics:
+                try:
+                    topics = json.loads(cached_profile.topics)
+                except json.JSONDecodeError:
+                    pass
+            return ScholarAuthorProfileResponse(
+                scholar_user_id=cached_profile.scholar_user_id,
+                profile_url=cached_profile.profile_url,
+                full_name=cached_profile.full_name,
+                affiliation=cached_profile.affiliation,
+                homepage_url=cached_profile.homepage_url,
+                topics=topics,
+                fetched_at=cached_profile.fetched_at,
+            )
+
+    # Fetch fresh from Scholar
+    scholar_service = get_scholar_service()
+    profile_url = f"https://scholar.google.com/citations?user={user_id}&hl=en"
+    profile_data = await scholar_service.fetch_author_profile(profile_url)
+
+    if not profile_data:
+        raise HTTPException(status_code=404, detail=f"Could not fetch Scholar profile for user {user_id}")
+
+    # Upsert to database
+    topics_json = json.dumps(profile_data.get("topics", []))
+
+    if cached_profile:
+        # Update existing
+        cached_profile.full_name = profile_data.get("full_name")
+        cached_profile.affiliation = profile_data.get("affiliation")
+        cached_profile.homepage_url = profile_data.get("homepage_url")
+        cached_profile.topics = topics_json
+        cached_profile.fetched_at = datetime.utcnow()
+    else:
+        # Insert new
+        new_profile = ScholarAuthorProfile(
+            scholar_user_id=user_id,
+            profile_url=profile_url,
+            full_name=profile_data.get("full_name"),
+            affiliation=profile_data.get("affiliation"),
+            homepage_url=profile_data.get("homepage_url"),
+            topics=topics_json,
+            fetched_at=datetime.utcnow(),
+        )
+        db.add(new_profile)
+
+    await db.commit()
+
+    return ScholarAuthorProfileResponse(
+        scholar_user_id=user_id,
+        profile_url=profile_url,
+        full_name=profile_data.get("full_name"),
+        affiliation=profile_data.get("affiliation"),
+        homepage_url=profile_data.get("homepage_url"),
+        topics=profile_data.get("topics", []),
+        fetched_at=datetime.utcnow(),
+    )
 
 
 @app.post("/api/thinkers/{thinker_id}/confirm")

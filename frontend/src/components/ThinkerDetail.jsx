@@ -22,6 +22,9 @@ function ThinkerDetail({ thinkerId, onBack }) {
   const [showDossierModal, setShowDossierModal] = useState(false)
   const [pendingSeedCitation, setPendingSeedCitation] = useState(null)
   const [makingSeed, setMakingSeed] = useState({})  // Track which citations are being made into seeds
+  // Scholar profile loading
+  const [loadingProfiles, setLoadingProfiles] = useState(false)
+  const [loadedProfiles, setLoadedProfiles] = useState({})  // userId -> profile data
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
@@ -110,6 +113,68 @@ function ThinkerDetail({ thinkerId, onBack }) {
     } finally {
       setLoadingAuthorPapers(false)
     }
+  }
+
+  // Load Scholar profiles for authors with profile_url but no cached affiliation
+  const loadAuthorProfiles = async () => {
+    if (!analytics?.top_citing_authors) return
+
+    // Find authors with profile_url but no affiliation (not yet cached)
+    const authorsToLoad = analytics.top_citing_authors.filter(
+      a => a.profile_url && !a.affiliation && !loadedProfiles[a.profile_url]
+    )
+
+    if (authorsToLoad.length === 0) {
+      showToast('All profiles already loaded', 'info')
+      return
+    }
+
+    setLoadingProfiles(true)
+    let loaded = 0
+    let failed = 0
+
+    for (const author of authorsToLoad) {
+      // Extract user ID from profile URL
+      const match = author.profile_url.match(/user=([A-Za-z0-9_-]+)/)
+      if (!match) continue
+
+      const userId = match[1]
+      try {
+        const profile = await api.getScholarProfile(userId)
+        setLoadedProfiles(prev => ({ ...prev, [author.profile_url]: profile }))
+        loaded++
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 1000))
+      } catch (err) {
+        console.error(`Failed to load profile for ${userId}:`, err)
+        failed++
+      }
+    }
+
+    setLoadingProfiles(false)
+    // Refresh analytics to get newly cached data
+    queryClient.invalidateQueries({ queryKey: ['thinker-analytics', thinkerId] })
+    showToast(`Loaded ${loaded} profiles${failed > 0 ? `, ${failed} failed` : ''}`, loaded > 0 ? 'success' : 'warning')
+  }
+
+  // Get merged profile data (from analytics or locally loaded)
+  const getAuthorProfile = (author) => {
+    // First check if analytics already has the data
+    if (author.affiliation || author.topics?.length) {
+      return author
+    }
+    // Then check locally loaded profiles
+    if (author.profile_url && loadedProfiles[author.profile_url]) {
+      const p = loadedProfiles[author.profile_url]
+      return {
+        ...author,
+        full_name: p.full_name,
+        affiliation: p.affiliation,
+        homepage_url: p.homepage_url,
+        topics: p.topics,
+      }
+    }
+    return author
   }
 
   // Search ALL papers by author (from Top Citing Papers clickable author names)
@@ -760,7 +825,18 @@ function ThinkerDetail({ thinkerId, onBack }) {
                 {/* Top Citing Authors */}
                 {analytics.top_citing_authors?.length > 0 && (
                   <div className="analytics-card">
-                    <h3>Top Citing Authors</h3>
+                    <div className="card-header-with-action">
+                      <h3>Top Citing Authors</h3>
+                      {analytics.top_citing_authors.some(a => a.profile_url && !a.affiliation) && (
+                        <button
+                          className="load-profiles-btn"
+                          onClick={loadAuthorProfiles}
+                          disabled={loadingProfiles}
+                        >
+                          {loadingProfiles ? '⏳ Loading...' : '🎓 Load Profiles'}
+                        </button>
+                      )}
+                    </div>
                     <p className="card-subtitle">
                       Scholars whose papers cite this thinker's work. Click any author to see their citing papers.
                     </p>
@@ -771,36 +847,49 @@ function ThinkerDetail({ thinkerId, onBack }) {
                       <span className="header-influence" title="Total citations received by their citing papers (higher = more influential)">Influence</span>
                     </div>
                     <div className="citing-authors-list">
-                      {analytics.top_citing_authors.slice(0, 15).map((author, i) => (
-                        <div
-                          key={i}
-                          className={`citing-author-row clickable ${author.is_self_citation ? 'self-citation' : ''}`}
-                          onClick={() => fetchAuthorPapers(author)}
-                          title={author.is_self_citation ? 'Self-citation (thinker citing own work)' : 'Click to see papers'}
-                        >
-                          <span className="author-rank">#{i + 1}</span>
-                          <div className="author-name-cell">
-                            <span className="author-name">
-                              {author.author}
-                              {author.profile_url && (
-                                <a
-                                  href={author.profile_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="scholar-profile-link"
-                                  onClick={(e) => e.stopPropagation()}
-                                  title="View Google Scholar profile"
-                                >🎓</a>
+                      {analytics.top_citing_authors.slice(0, 15).map((rawAuthor, i) => {
+                        const author = getAuthorProfile(rawAuthor)
+                        return (
+                          <div
+                            key={i}
+                            className={`citing-author-row clickable ${author.is_self_citation ? 'self-citation' : ''}`}
+                            onClick={() => fetchAuthorPapers(rawAuthor)}
+                            title={author.is_self_citation ? 'Self-citation (thinker citing own work)' : 'Click to see papers'}
+                          >
+                            <span className="author-rank">#{i + 1}</span>
+                            <div className="author-name-cell">
+                              <span className="author-name">
+                                {author.full_name || author.author}
+                                {author.profile_url && (
+                                  <a
+                                    href={author.profile_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="scholar-profile-link"
+                                    onClick={(e) => e.stopPropagation()}
+                                    title="View Google Scholar profile"
+                                  >🎓</a>
+                                )}
+                                {author.is_self_citation && <span className="self-citation-badge">self</span>}
+                              </span>
+                              {author.affiliation && (
+                                <span className="author-affiliation">{author.affiliation}</span>
                               )}
-                              {author.is_self_citation && <span className="self-citation-badge">self</span>}
+                              {author.topics && author.topics.length > 0 && (
+                                <div className="author-topics">
+                                  {author.topics.slice(0, 3).map((topic, ti) => (
+                                    <span key={ti} className="topic-tag">{topic}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <span className="author-papers">{author.papers_count}</span>
+                            <span className="author-influence" title={`${author.citation_count} total citations on their ${author.papers_count} citing paper${author.papers_count !== 1 ? 's' : ''}`}>
+                              {author.citation_count?.toLocaleString()}
                             </span>
                           </div>
-                          <span className="author-papers">{author.papers_count}</span>
-                          <span className="author-influence" title={`${author.citation_count} total citations on their ${author.papers_count} citing paper${author.papers_count !== 1 ? 's' : ''}`}>
-                            {author.citation_count?.toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                     <p className="citing-authors-footnote">
                       <strong>Influence</strong> = total citations received by the author's citing papers.
@@ -1538,6 +1627,40 @@ function ThinkerDetail({ thinkerId, onBack }) {
           letter-spacing: 0.5px;
         }
 
+        /* Card header with action button */
+        .card-header-with-action {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .card-header-with-action h3 {
+          margin: 0;
+        }
+
+        .load-profiles-btn {
+          padding: 6px 12px;
+          background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+          color: var(--accent-color);
+          border: 1px solid var(--accent-color);
+          border-radius: 4px;
+          font-size: 0.8em;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .load-profiles-btn:hover:not(:disabled) {
+          background: var(--accent-color);
+          color: white;
+        }
+
+        .load-profiles-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
         /* Top Citing Authors - Table Style */
         .citing-authors-header {
           display: grid;
@@ -1607,6 +1730,30 @@ function ThinkerDetail({ thinkerId, onBack }) {
           display: flex;
           align-items: center;
           gap: 8px;
+          font-weight: 500;
+        }
+
+        .author-affiliation {
+          display: block;
+          font-size: 0.8em;
+          color: var(--text-secondary);
+          margin-top: 2px;
+        }
+
+        .author-topics {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+          margin-top: 4px;
+        }
+
+        .topic-tag {
+          display: inline-block;
+          padding: 2px 6px;
+          background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+          color: var(--accent-color);
+          border-radius: 3px;
+          font-size: 0.7em;
           font-weight: 500;
         }
 

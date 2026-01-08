@@ -1375,6 +1375,97 @@ class ScholarSearchService:
             "last_page": current_page,
         }
 
+    async def fetch_author_profile(self, profile_url: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch and parse a Google Scholar author profile page.
+
+        Extracts: full name, affiliation, homepage URL, and research topics.
+
+        Args:
+            profile_url: Full URL like https://scholar.google.com/citations?user=1X4qGg4AAAAJ
+
+        Returns:
+            Dict with profile data:
+            {
+                "scholar_user_id": "1X4qGg4AAAAJ",
+                "full_name": "Gregory Jackson",
+                "affiliation": "King's College London",
+                "homepage_url": "https://example.com",
+                "topics": ["Corporate governance", "Corporate social responsibility", ...]
+            }
+            or None if fetch fails
+        """
+        log_now(f"[AUTHOR PROFILE] Fetching: {profile_url[:60]}...")
+
+        # Extract user ID from URL
+        user_id_match = re.search(r"user=([A-Za-z0-9_-]+)", profile_url)
+        if not user_id_match:
+            log_now(f"[AUTHOR PROFILE] Could not extract user ID from: {profile_url}")
+            return None
+
+        scholar_user_id = user_id_match.group(1)
+
+        try:
+            html = await self._fetch_with_retry(profile_url)
+            if not html:
+                log_now(f"[AUTHOR PROFILE] No HTML returned for {profile_url}")
+                return None
+
+            return self._parse_author_profile(html, scholar_user_id, profile_url)
+
+        except Exception as e:
+            log_now(f"[AUTHOR PROFILE] Error fetching {profile_url}: {e}")
+            return None
+
+    def _parse_author_profile(self, html: str, scholar_user_id: str, profile_url: str) -> Dict[str, Any]:
+        """Parse Google Scholar author profile HTML"""
+        soup = BeautifulSoup(html, "html.parser")
+
+        result = {
+            "scholar_user_id": scholar_user_id,
+            "profile_url": profile_url,
+            "full_name": None,
+            "affiliation": None,
+            "homepage_url": None,
+            "topics": [],
+        }
+
+        # Full name - in div#gsc_prf_in
+        name_el = soup.select_one("#gsc_prf_in")
+        if name_el:
+            result["full_name"] = name_el.get_text(strip=True)
+            log_now(f"[AUTHOR PROFILE] Name: {result['full_name']}")
+
+        # Affiliation - first link with class gsc_prf_ila (institution link)
+        affiliation_el = soup.select_one("a.gsc_prf_ila")
+        if affiliation_el:
+            result["affiliation"] = affiliation_el.get_text(strip=True)
+            log_now(f"[AUTHOR PROFILE] Affiliation: {result['affiliation']}")
+
+        # Homepage URL - look for "Homepage" link in the profile info section
+        # It's typically in the div.gsc_prf_il containing "Verified email at..."
+        # The homepage link says "Homepage" and links externally
+        for link in soup.select("a"):
+            text = link.get_text(strip=True)
+            href = link.get("href", "")
+            if text.lower() == "homepage" and href.startswith("http"):
+                result["homepage_url"] = href
+                log_now(f"[AUTHOR PROFILE] Homepage: {href}")
+                break
+
+        # Topics/Research interests - links with class gsc_prf_inta (interest tag)
+        # These are the blue tags like "Corporate governance", "Industrial relations"
+        topic_els = soup.select("a.gsc_prf_inta")
+        for topic_el in topic_els:
+            topic = topic_el.get_text(strip=True)
+            if topic:
+                result["topics"].append(topic)
+
+        if result["topics"]:
+            log_now(f"[AUTHOR PROFILE] Topics: {', '.join(result['topics'][:3])}...")
+
+        return result
+
 
 # Singleton instance
 _scholar_service: Optional[ScholarSearchService] = None
