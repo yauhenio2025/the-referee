@@ -875,9 +875,9 @@ class ScholarSearchService:
                 # Links to Scholar profiles have href like "/citations?user=ABC123&..."
                 author_profiles = []
                 if authors_el:
-                    for link in authors_el.find_all("a"):
-                        href = link.get("href", "")
-                        name = link.get_text(strip=True)
+                    for author_link in authors_el.find_all("a"):
+                        href = author_link.get("href", "")
+                        name = author_link.get_text(strip=True)
                         if name and "citations?user=" in href:
                             # Convert relative URL to absolute
                             if href.startswith("/"):
