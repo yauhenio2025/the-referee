@@ -3018,13 +3018,104 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
     works = list(result.scalars().all())
 
     if not works:
-        log_now(f"[ThinkerHarvest] No works to harvest for {thinker.canonical_name}")
+        log_now(f"[ThinkerHarvest] No works pending initial harvest for {thinker.canonical_name}")
+
+        # Check if any editions for this thinker are still incomplete (need more year-by-year harvesting)
+        # This enables auto-continuation of harvests that didn't complete in one job run
+        incomplete_result = await db.execute(
+            select(Edition)
+            .join(Paper, Paper.id == Edition.paper_id)
+            .join(ThinkerWork, ThinkerWork.paper_id == Paper.id)
+            .where(
+                ThinkerWork.thinker_id == thinker_id,
+                ThinkerWork.decision == "accepted",
+                Edition.selected == True,
+                Edition.scholar_id.isnot(None),
+                Edition.citation_count > 0,
+                Edition.harvested_citation_count < Edition.citation_count,
+                # Not already marked as complete (gap is GS's fault)
+                or_(Edition.harvest_complete.is_(None), Edition.harvest_complete == False),
+                # Not stalled
+                or_(Edition.harvest_stall_count.is_(None), Edition.harvest_stall_count < AUTO_RESUME_MAX_STALL_COUNT)
+            )
+            .order_by((Edition.citation_count - Edition.harvested_citation_count).desc())
+            .limit(5)  # Process up to 5 editions per job
+        )
+        incomplete_editions = list(incomplete_result.scalars().all())
+
+        if incomplete_editions:
+            log_now(f"[ThinkerHarvest] Found {len(incomplete_editions)} incomplete editions - queueing continuation jobs")
+
+            # Group by paper_id to avoid duplicate jobs
+            editions_by_paper: Dict[int, List[Edition]] = {}
+            for edition in incomplete_editions:
+                if edition.paper_id not in editions_by_paper:
+                    editions_by_paper[edition.paper_id] = []
+                editions_by_paper[edition.paper_id].append(edition)
+
+            continuation_jobs = 0
+            for paper_id, paper_editions in editions_by_paper.items():
+                # Check if there's already a pending/running job for this paper
+                existing_job_result = await db.execute(
+                    select(Job).where(
+                        Job.paper_id == paper_id,
+                        Job.job_type == "extract_citations",
+                        Job.status.in_(["pending", "running"])
+                    ).limit(1)
+                )
+                if existing_job_result.scalar_one_or_none():
+                    log_now(f"[ThinkerHarvest] Skipping paper {paper_id} - already has active job")
+                    continue
+
+                edition_ids = [e.id for e in paper_editions]
+                total_missing = sum((e.citation_count or 0) - (e.harvested_citation_count or 0) for e in paper_editions)
+
+                # Create continuation job
+                continuation_job = await create_extract_citations_job(
+                    db=db,
+                    paper_id=paper_id,
+                    edition_ids=edition_ids,
+                    is_resume=True,
+                    resume_message=f"Thinker continuation: {thinker.canonical_name}, {total_missing} citations remaining",
+                )
+                continuation_jobs += 1
+
+                for e in paper_editions:
+                    missing = (e.citation_count or 0) - (e.harvested_citation_count or 0)
+                    log_now(f"[ThinkerHarvest]   - Edition {e.id}: {e.harvested_citation_count}/{e.citation_count} ({missing} remaining)")
+
+            await db.commit()
+
+            # Queue another thinker_harvest_citations job to continue after these complete
+            if continuation_jobs > 0:
+                next_job = Job(
+                    job_type="thinker_harvest_citations",
+                    status="pending",
+                    priority=100,
+                    progress=0,
+                    params=json.dumps({"thinker_id": thinker_id}),
+                    created_at=datetime.utcnow(),
+                )
+                db.add(next_job)
+                await db.commit()
+                log_now(f"[ThinkerHarvest] Queued continuation job {next_job.id} to check progress later")
+
+            return {
+                "thinker_id": thinker_id,
+                "thinker_name": thinker.canonical_name,
+                "works_processed": 0,
+                "jobs_queued": continuation_jobs,
+                "message": f"Continuation: {continuation_jobs} jobs queued for incomplete editions",
+                "continuation": True,
+            }
+
+        log_now(f"[ThinkerHarvest] All editions complete for {thinker.canonical_name}")
         return {
             "thinker_id": thinker_id,
             "thinker_name": thinker.canonical_name,
             "works_processed": 0,
             "jobs_queued": 0,
-            "message": "No accepted works pending harvest",
+            "message": "All harvests complete",
         }
 
     log_now(f"[ThinkerHarvest] Processing {len(works)} works")
