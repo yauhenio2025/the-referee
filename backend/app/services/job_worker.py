@@ -3061,9 +3061,10 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
                     query=f'"{work.title}"',
                     max_results=5,
                 )
-                if search_results:
+                papers = search_results.get('papers', []) if search_results else []
+                if papers:
                     # Find best match by title similarity
-                    for result in search_results:
+                    for result in papers:
                         result_title = result.get('title', '').lower().strip()
                         work_title = work.title.lower().strip()
                         # Check for exact or close match
@@ -3073,7 +3074,7 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
                             break
                     else:
                         # No exact match, use first result if reasonable
-                        cluster_id = search_results[0].get('scholar_id')
+                        cluster_id = papers[0].get('scholar_id')
                         log_now(f"[ThinkerHarvest] Using first result cluster ID: {cluster_id} for '{work.title[:40]}'")
                 else:
                     log_now(f"[ThinkerHarvest] WARNING: No cluster ID found for '{work.title[:40]}', harvest may fail")
