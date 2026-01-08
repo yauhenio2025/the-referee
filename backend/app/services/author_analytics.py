@@ -88,27 +88,34 @@ YOUR TASKS:
    - Consider Polish naming conventions if applicable
    - Be conservative: only mark as self-citation if confident
 
-OUTPUT JSON (no markdown, just pure JSON):
+OUTPUT REQUIREMENTS:
+- Return ONLY valid JSON, no markdown code blocks, no comments
+- Use double quotes for all strings and property names
+- No trailing commas
+- Boolean values must be lowercase: true or false (not True/False)
+
+JSON SCHEMA:
 {{
   "individual_authors": [
     {{
       "normalized_name": "Full Author Name",
-      "is_self_citation": true/false,
-      "confidence": 0.0-1.0,
+      "is_self_citation": true,
+      "confidence": 0.85,
       "merged_from": ["variant1", "variant2"],
       "total_citation_count": 123,
       "total_papers_count": 45,
       "source_entry_ids": [0, 3, 5]
     }}
   ],
-  "reasoning": "Brief explanation of key decisions"
+  "reasoning": "Brief explanation"
 }}
 
 Rules:
 - Merge variants of the same person
 - Sum citation counts when merging
 - Use union of papers when merging (don't double count)
-- source_entry_ids links back to input entry IDs for fetching papers later"""
+- source_entry_ids links back to input entry IDs for fetching papers later
+- CRITICAL: Return valid JSON only, nothing else"""
 
         response = client.messages.create(
             model="claude-sonnet-4-5-20250929",  # Using Sonnet as Haiku may not be available
@@ -162,7 +169,11 @@ Rules:
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM response as JSON: {e}")
-        logger.error(f"Raw response (first 500 chars): {response_text[:500] if response_text else 'empty'}")
+        # Log more context around the error position
+        error_pos = e.pos if hasattr(e, 'pos') else 0
+        context_start = max(0, error_pos - 100)
+        context_end = min(len(response_text), error_pos + 100)
+        logger.error(f"Context around error: ...{response_text[context_start:context_end]}...")
         return {"individual_authors": raw_author_groups, "llm_processed": False, "error": str(e)}
     except Exception as e:
         logger.error(f"Error in author analytics LLM call: {type(e).__name__}: {e}")
