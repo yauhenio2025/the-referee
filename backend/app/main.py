@@ -8,7 +8,7 @@ Fixed greenlet context issues in harvest callbacks (2025-12-30).
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
