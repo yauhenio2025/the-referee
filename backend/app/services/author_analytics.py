@@ -1,20 +1,136 @@
 """
 Author Analytics Service
 
-Uses Claude Haiku to:
+Uses heuristics to:
 - Detect self-citations (comparing citing authors with thinker name)
 - Disaggregate multi-author strings into individual authors
 - Normalize author name variants (WW Gasparski = W Gasparski)
 """
 import logging
-import json
-from typing import Dict, Any, List, Optional
-import anthropic
-
-from ..config import get_settings
+import re
+from typing import Dict, Any, List, Set, Tuple
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+
+def normalize_name(name: str) -> str:
+    """Normalize an author name for comparison."""
+    # Remove extra whitespace
+    name = " ".join(name.split())
+    # Remove periods after initials
+    name = re.sub(r'\.(?=\s|$)', '', name)
+    # Remove 'et al' variations
+    name = re.sub(r'\s*et\s*al\.?\s*$', '', name, flags=re.IGNORECASE)
+    return name.strip()
+
+
+def expand_initials(name: str) -> List[str]:
+    """Extract possible surname and initials from a name."""
+    parts = name.split()
+    if not parts:
+        return []
+
+    # Last part is usually surname
+    surname = parts[-1] if parts else ""
+    initials = [p[0].upper() for p in parts[:-1] if p]
+
+    return [surname.lower()] + initials
+
+
+def names_match(name1: str, name2: str, threshold: float = 0.7) -> bool:
+    """Check if two author names likely refer to the same person."""
+    n1 = normalize_name(name1).lower()
+    n2 = normalize_name(name2).lower()
+
+    # Exact match
+    if n1 == n2:
+        return True
+
+    # Extract surname and initials
+    parts1 = expand_initials(name1)
+    parts2 = expand_initials(name2)
+
+    if not parts1 or not parts2:
+        return False
+
+    # Same surname
+    if parts1[0] != parts2[0]:
+        # Check if surnames are similar (typos, transliteration)
+        if SequenceMatcher(None, parts1[0], parts2[0]).ratio() < 0.8:
+            return False
+
+    # Check initials - one should be subset of other or match
+    initials1 = set(parts1[1:])
+    initials2 = set(parts2[1:])
+
+    # If both have initials, check they don't conflict
+    if initials1 and initials2:
+        # At least one initial should match
+        if not initials1 & initials2:
+            return False
+
+    return True
+
+
+def is_self_citation(author_name: str, thinker_name: str) -> Tuple[bool, float]:
+    """Check if an author name is likely the thinker (self-citation)."""
+    author_norm = normalize_name(author_name).lower()
+    thinker_norm = normalize_name(thinker_name).lower()
+
+    # Direct match
+    if author_norm == thinker_norm:
+        return True, 1.0
+
+    # Extract parts
+    author_parts = expand_initials(author_name)
+    thinker_parts = thinker_name.lower().split()
+
+    if not author_parts or not thinker_parts:
+        return False, 0.0
+
+    # Get thinker's surname (last part)
+    thinker_surname = thinker_parts[-1]
+    author_surname = author_parts[0]
+
+    # Surname must match
+    if thinker_surname != author_surname:
+        if SequenceMatcher(None, thinker_surname, author_surname).ratio() < 0.85:
+            return False, 0.0
+
+    # Check if initials match thinker's first names
+    author_initials = set(author_parts[1:])
+    thinker_initials = set(p[0].upper() for p in thinker_parts[:-1] if p)
+
+    if author_initials and thinker_initials:
+        # Initials should be subset or match
+        if author_initials <= thinker_initials or thinker_initials <= author_initials:
+            return True, 0.9
+        # At least some overlap
+        if author_initials & thinker_initials:
+            return True, 0.7
+    elif not author_initials:
+        # Just surname match
+        return True, 0.6
+
+    return False, 0.0
+
+
+def split_authors(author_string: str) -> List[str]:
+    """Split a multi-author string into individual authors."""
+    # Common separators: comma, semicolon, " and ", " & "
+    # But be careful with "J Smith, Jr" patterns
+
+    # First split by common separators
+    authors = re.split(r'\s*[,;]\s*|\s+and\s+|\s*&\s*', author_string)
+
+    # Filter out empty strings and trim
+    authors = [a.strip() for a in authors if a.strip()]
+
+    # Filter out things that look like suffixes (Jr, III, etc)
+    authors = [a for a in authors if not re.match(r'^(Jr\.?|Sr\.?|I{1,3}|IV|V)$', a, re.IGNORECASE)]
+
+    return authors if authors else [author_string]
 
 
 async def process_citing_authors(
@@ -22,7 +138,7 @@ async def process_citing_authors(
     raw_author_groups: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Process raw author groups using Claude Haiku to:
+    Process raw author groups using heuristics to:
     1. Disaggregate multi-author entries into individual authors
     2. Normalize author name variants
     3. Detect which authors are likely the thinker themselves (self-citations)
@@ -39,144 +155,90 @@ async def process_citing_authors(
         - papers_count: int
         - citation_ids: list of citation IDs for fetching papers
     """
-    if not settings.anthropic_api_key:
-        logger.warning("No Anthropic API key - returning raw author groups without LLM processing")
-        return {"individual_authors": raw_author_groups, "llm_processed": False}
-
     if not raw_author_groups:
         return {"individual_authors": [], "llm_processed": True}
 
     logger.info(f"Processing {len(raw_author_groups)} author groups for thinker: {thinker_name}")
 
-    try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        logger.info("Anthropic client created, calling API...")
+    # Step 1: Disaggregate multi-author entries
+    individual_entries = []  # (name, citation_count, papers_count, citation_ids, original_idx)
 
-        # Format the author groups for the prompt (WITHOUT citation_ids to keep prompt small)
-        # citation_ids are only used after LLM processing to map back to papers
-        author_entries = []
-        for i, group in enumerate(raw_author_groups):
-            author_entries.append({
-                "id": i,
-                "raw_authors": group.get("authors", "Unknown"),
-                "citation_count": group.get("citation_count", 0),
-                "papers_count": group.get("papers_count", 0),
-                # NOT including citation_ids - they bloat the prompt massively
+    for idx, group in enumerate(raw_author_groups):
+        author_string = group.get("authors", "Unknown")
+        citation_count = group.get("citation_count", 0)
+        papers_count = group.get("papers_count", 0)
+        citation_ids = group.get("citation_ids", [])
+
+        # Split into individual authors
+        authors = split_authors(author_string)
+
+        for author in authors:
+            individual_entries.append({
+                "name": normalize_name(author),
+                "citation_count": citation_count,
+                "papers_count": papers_count,
+                "citation_ids": citation_ids,
+                "original_idx": idx
             })
 
-        prompt = f"""Analyze citing authors for thinker: "{thinker_name}"
+    # Step 2: Merge variants of the same person
+    merged_authors = {}  # normalized_key -> merged data
 
-You have raw author strings from Google Scholar citations. Each entry may contain:
-- Multiple authors (e.g., "MW Bukała , WW Gasparski")
-- Name variants of the same person (e.g., "WW Gasparski" and "W Gasparski")
-- Self-citations (the thinker citing their own work)
+    for entry in individual_entries:
+        name = entry["name"]
 
-INPUT DATA:
-{json.dumps(author_entries, indent=2)}
+        # Find if this matches an existing author
+        matched_key = None
+        for existing_key in merged_authors:
+            if names_match(name, existing_key):
+                matched_key = existing_key
+                break
 
-YOUR TASKS:
-1. DISAGGREGATE: Split multi-author entries into individual authors
-   - "MW Bukała , WW Gasparski" → two separate authors
-   - When disaggregating, allocate the full citation_count and papers_count to EACH author
+        if matched_key:
+            # Merge with existing
+            merged = merged_authors[matched_key]
+            merged["citation_count"] += entry["citation_count"]
+            merged["papers_count"] += entry["papers_count"]
+            merged["citation_ids"].extend(entry["citation_ids"])
+            merged["variants"].add(name)
+            merged["source_indices"].add(entry["original_idx"])
+            # Keep longer name as normalized
+            if len(name) > len(merged["normalized_name"]):
+                merged["normalized_name"] = name
+        else:
+            # New author
+            merged_authors[name] = {
+                "normalized_name": name,
+                "citation_count": entry["citation_count"],
+                "papers_count": entry["papers_count"],
+                "citation_ids": list(entry["citation_ids"]),
+                "variants": {name},
+                "source_indices": {entry["original_idx"]}
+            }
 
-2. NORMALIZE: Identify name variants that are the same person
-   - "WW Gasparski", "W Gasparski", "W. W. Gasparski" → all same person
-   - Use the most complete/formal version as the normalized name
+    # Step 3: Detect self-citations and build final list
+    individual_authors = []
 
-3. DETECT SELF-CITATIONS: Identify authors who are likely the thinker "{thinker_name}"
-   - Match initials to full name (WW Gasparski = Wojciech W. Gasparski)
-   - Consider Polish naming conventions if applicable
-   - Be conservative: only mark as self-citation if confident
+    for key, data in merged_authors.items():
+        is_self, confidence = is_self_citation(data["normalized_name"], thinker_name)
 
-OUTPUT REQUIREMENTS:
-- Return ONLY valid JSON, no markdown code blocks, no comments
-- Use double quotes for all strings and property names
-- No trailing commas
-- Boolean values must be lowercase: true or false (not True/False)
+        individual_authors.append({
+            "normalized_name": data["normalized_name"],
+            "is_self_citation": is_self,
+            "confidence": confidence,
+            "total_citation_count": data["citation_count"],
+            "total_papers_count": data["papers_count"],
+            "citation_ids": list(set(data["citation_ids"])),  # dedupe
+            "merged_from": list(data["variants"]),
+            "source_entry_ids": list(data["source_indices"])
+        })
 
-JSON SCHEMA:
-{{
-  "individual_authors": [
-    {{
-      "normalized_name": "Full Author Name",
-      "is_self_citation": true,
-      "confidence": 0.85,
-      "merged_from": ["variant1", "variant2"],
-      "total_citation_count": 123,
-      "total_papers_count": 45,
-      "source_entry_ids": [0, 3, 5]
-    }}
-  ],
-  "reasoning": "Brief explanation"
-}}
+    # Sort by citation count
+    individual_authors.sort(key=lambda x: x["total_citation_count"], reverse=True)
 
-Rules:
-- Merge variants of the same person
-- Sum citation counts when merging
-- Use union of papers when merging (don't double count)
-- source_entry_ids links back to input entry IDs for fetching papers later
-- CRITICAL: Return valid JSON only, nothing else"""
+    logger.info(f"Processed {len(raw_author_groups)} groups into {len(individual_authors)} individual authors")
 
-        response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",  # Using Sonnet as Haiku may not be available
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        response_text = response.content[0].text.strip()
-        logger.info(f"Got LLM response, length: {len(response_text)} chars")
-
-        # Parse JSON from response
-        # Handle potential markdown code blocks
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            json_lines = []
-            in_json = False
-            for line in lines:
-                if line.startswith("```json") or line.startswith("```"):
-                    in_json = not in_json
-                    continue
-                if in_json:
-                    json_lines.append(line)
-            response_text = "\n".join(json_lines)
-
-        # Clean up common JSON issues from LLM output
-        import re
-        # Remove trailing commas before } or ]
-        response_text = re.sub(r',\s*([}\]])', r'\1', response_text)
-        # Remove any comments (// style)
-        response_text = re.sub(r'//[^\n]*', '', response_text)
-
-        try:
-            result = json.loads(response_text)
-        except json.JSONDecodeError:
-            # Try with more aggressive cleanup - sometimes LLM uses single quotes
-            response_text = response_text.replace("'", '"')
-            result = json.loads(response_text)
-
-        # Map source_entry_ids to actual citation_ids from original data
-        for author in result.get("individual_authors", []):
-            all_citation_ids = []
-            for entry_id in author.get("source_entry_ids", []):
-                if entry_id < len(raw_author_groups):
-                    all_citation_ids.extend(raw_author_groups[entry_id].get("citation_ids", []))
-            author["citation_ids"] = list(set(all_citation_ids))  # dedupe
-
-        result["llm_processed"] = True
-        logger.info(f"Processed {len(raw_author_groups)} author groups into {len(result.get('individual_authors', []))} individual authors")
-
-        return result
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM response as JSON: {e}")
-        # Log more context around the error position
-        error_pos = e.pos if hasattr(e, 'pos') else 0
-        context_start = max(0, error_pos - 100)
-        context_end = min(len(response_text), error_pos + 100)
-        logger.error(f"Context around error: ...{response_text[context_start:context_end]}...")
-        return {"individual_authors": raw_author_groups, "llm_processed": False, "error": str(e)}
-    except Exception as e:
-        logger.error(f"Error in author analytics LLM call: {type(e).__name__}: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return {"individual_authors": raw_author_groups, "llm_processed": False, "error": str(e)}
+    return {
+        "individual_authors": individual_authors,
+        "llm_processed": True  # Using heuristics, but compatible with existing code
+    }
