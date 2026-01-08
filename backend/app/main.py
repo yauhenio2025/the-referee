@@ -8672,6 +8672,45 @@ async def delete_thinker(thinker_id: int, db: AsyncSession = Depends(get_db)):
     return result
 
 
+@app.post("/api/thinkers/{thinker_id}/reset-harvest")
+async def reset_thinker_harvest(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Reset harvest status for all of a thinker's works.
+
+    This clears citations_harvested, paper_id, and harvest_job_id from all ThinkerWorks,
+    allowing the harvest to be re-run. Use after fixing issues or when papers were deleted.
+    """
+    from sqlalchemy import select, update
+
+    # Check thinker exists
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        raise HTTPException(status_code=404, detail="Thinker not found")
+
+    # Reset all works
+    result = await db.execute(
+        update(ThinkerWork)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .values(
+            citations_harvested=False,
+            paper_id=None,
+            harvest_job_id=None,
+        )
+    )
+
+    # Also update thinker stats
+    thinker.works_harvested = 0
+    await db.commit()
+
+    return {
+        "success": True,
+        "thinker_id": thinker_id,
+        "thinker_name": thinker.canonical_name,
+        "works_reset": result.rowcount,
+        "message": f"Reset harvest status for {result.rowcount} works. You can now re-run 'Harvest Citations'.",
+    }
+
+
 @app.patch("/api/thinkers/{thinker_id}", response_model=ThinkerResponse)
 async def update_thinker(
     thinker_id: int,
