@@ -10037,10 +10037,11 @@ async def start_harvest_citations(
             message=f"Citation harvest already in progress (job {existing_job.id})",
         )
 
-    # Create job
+    # Create job with high priority to run before extract_citations
     job = Job(
         job_type="thinker_harvest_citations",
         status="pending",
+        priority=100,  # High priority - run before auto-resumed extract_citations
         params=json.dumps({
             "thinker_id": thinker_id,
             "max_works": request.max_works or 100,
