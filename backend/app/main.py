@@ -8878,7 +8878,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .where(Citation.authors != "")
         .group_by(Citation.authors)
         .order_by(func.count().desc())
-        .limit(30)  # Reduced from 100 to get more reliable LLM JSON output
+        .limit(100)  # Back to 100 now that we use heuristics instead of LLM
     )
 
     # Pre-parse author names and collect data for LLM processing
