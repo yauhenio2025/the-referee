@@ -333,21 +333,25 @@ function ThinkerDetail({ thinkerId, onBack }) {
               <div className="analytics-content">
                 {/* Summary Stats */}
                 <div className="analytics-summary">
-                  <div className="summary-stat">
+                  <div className="summary-stat" title="Total number of times this thinker's works have been cited">
                     <span className="summary-value">{analytics.total_citations?.toLocaleString()}</span>
                     <span className="summary-label">Total Citations</span>
+                    <span className="summary-hint">All citations to this thinker's works</span>
                   </div>
-                  <div className="summary-stat">
+                  <div className="summary-stat" title="Number of unique papers that cite this thinker">
                     <span className="summary-value">{analytics.unique_citing_papers?.toLocaleString()}</span>
-                    <span className="summary-label">Unique Citing Papers</span>
+                    <span className="summary-label">Citing Papers</span>
+                    <span className="summary-hint">Distinct papers referencing this thinker</span>
                   </div>
-                  <div className="summary-stat">
+                  <div className="summary-stat" title="Number of unique scholars who have cited this thinker">
                     <span className="summary-value">{analytics.unique_citing_authors?.toLocaleString()}</span>
-                    <span className="summary-label">Unique Authors</span>
+                    <span className="summary-label">Citing Authors</span>
+                    <span className="summary-hint">Scholars who cite this thinker</span>
                   </div>
-                  <div className="summary-stat">
+                  <div className="summary-stat" title="Number of journals, conferences, and publications where citations appear">
                     <span className="summary-value">{analytics.unique_venues?.toLocaleString()}</span>
                     <span className="summary-label">Venues</span>
+                    <span className="summary-hint">Where citations appear</span>
                   </div>
                 </div>
 
@@ -376,15 +380,25 @@ function ThinkerDetail({ thinkerId, onBack }) {
                 {analytics.most_cited_works?.length > 0 && (
                   <div className="analytics-card">
                     <h3>Most Cited Works</h3>
-                    <div className="ranked-list">
+                    <p className="card-subtitle">
+                      This thinker's works ranked by how many papers cite them
+                    </p>
+                    <div className="works-list-header">
+                      <span className="header-rank">#</span>
+                      <span className="header-work">Work</span>
+                      <span className="header-citations" title="Number of papers that cite this work">Citations</span>
+                    </div>
+                    <div className="works-list">
                       {analytics.most_cited_works.slice(0, 10).map((work, i) => (
-                        <div key={work.work_id} className="ranked-item">
-                          <span className="rank">#{i + 1}</span>
-                          <div className="item-content">
-                            <span className="item-title">{work.title}</span>
-                            <span className="item-meta">{work.year || 'n.d.'}</span>
+                        <div key={work.work_id} className="work-list-item">
+                          <span className="work-rank">#{i + 1}</span>
+                          <div className="work-info">
+                            <span className="work-title-text">{work.title}</span>
+                            <span className="work-year">{work.year || 'n.d.'}</span>
                           </div>
-                          <span className="item-count">{work.citations_received?.toLocaleString()}</span>
+                          <span className="work-citations" title={`${work.citations_received} papers cite this work`}>
+                            {work.citations_received?.toLocaleString()}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -395,18 +409,28 @@ function ThinkerDetail({ thinkerId, onBack }) {
                 {analytics.top_citing_papers?.length > 0 && (
                   <div className="analytics-card">
                     <h3>Top Citing Papers</h3>
-                    <p className="card-subtitle">Most influential papers citing this thinker's work</p>
-                    <div className="citing-papers-list">
+                    <p className="card-subtitle">
+                      Papers by other scholars that cite this thinker's work, ranked by their own influence (citation count)
+                    </p>
+                    <div className="top-citing-papers-list">
                       {analytics.top_citing_papers.slice(0, 10).map((paper, i) => (
-                        <div key={i} className="citing-paper">
-                          <div className="paper-main">
-                            <span className="paper-title">{paper.title || 'Untitled'}</span>
-                            <span className="paper-authors">{paper.authors || 'Unknown authors'}</span>
+                        <div key={i} className="top-citing-paper">
+                          <div className="paper-rank-badge">#{i + 1}</div>
+                          <div className="paper-content">
+                            <div className="paper-title-row">
+                              <span className="paper-title">{paper.title || 'Untitled'}</span>
+                            </div>
+                            <div className="paper-byline">
+                              <span className="paper-authors">{paper.authors || 'Unknown authors'}</span>
+                            </div>
+                            <div className="paper-details">
+                              {paper.venue && <span className="paper-venue">{paper.venue}</span>}
+                              {paper.year && <span className="paper-year">{paper.year}</span>}
+                            </div>
                           </div>
-                          <div className="paper-meta">
-                            <span className="paper-venue">{paper.venue || ''}</span>
-                            <span className="paper-year">{paper.year || ''}</span>
-                            <span className="paper-citations">{paper.citation_count?.toLocaleString()} citations</span>
+                          <div className="paper-influence-badge" title="How many papers cite this citing paper">
+                            <span className="influence-number">{paper.citation_count?.toLocaleString()}</span>
+                            <span className="influence-label">citations</span>
                           </div>
                         </div>
                       ))}
@@ -447,27 +471,41 @@ function ThinkerDetail({ thinkerId, onBack }) {
                 {analytics.top_citing_authors?.length > 0 && (
                   <div className="analytics-card">
                     <h3>Top Citing Authors</h3>
-                    <p className="card-subtitle">Scholars who cite this thinker most frequently (click to see papers)</p>
-                    <div className="ranked-list">
+                    <p className="card-subtitle">
+                      Scholars whose papers cite this thinker's work. Click any author to see their citing papers.
+                    </p>
+                    <div className="citing-authors-header">
+                      <span className="header-rank">#</span>
+                      <span className="header-author">Author</span>
+                      <span className="header-papers" title="Number of papers by this author that cite the thinker">Papers</span>
+                      <span className="header-influence" title="Total citations received by their citing papers (higher = more influential)">Influence</span>
+                    </div>
+                    <div className="citing-authors-list">
                       {analytics.top_citing_authors.slice(0, 15).map((author, i) => (
                         <div
                           key={i}
-                          className={`ranked-item clickable ${author.is_self_citation ? 'self-citation' : ''}`}
+                          className={`citing-author-row clickable ${author.is_self_citation ? 'self-citation' : ''}`}
                           onClick={() => fetchAuthorPapers(author)}
                           title={author.is_self_citation ? 'Self-citation (thinker citing own work)' : 'Click to see papers'}
                         >
-                          <span className="rank">#{i + 1}</span>
-                          <div className="item-content">
-                            <span className="item-title">
+                          <span className="author-rank">#{i + 1}</span>
+                          <div className="author-name-cell">
+                            <span className="author-name">
                               {author.author}
                               {author.is_self_citation && <span className="self-citation-badge">self</span>}
                             </span>
-                            <span className="item-meta">{author.papers_count} paper{author.papers_count !== 1 ? 's' : ''}</span>
                           </div>
-                          <span className="item-count">{author.citation_count?.toLocaleString()}</span>
+                          <span className="author-papers">{author.papers_count}</span>
+                          <span className="author-influence" title={`${author.citation_count} total citations on their ${author.papers_count} citing paper${author.papers_count !== 1 ? 's' : ''}`}>
+                            {author.citation_count?.toLocaleString()}
+                          </span>
                         </div>
                       ))}
                     </div>
+                    <p className="citing-authors-footnote">
+                      <strong>Influence</strong> = total citations received by the author's citing papers.
+                      Higher numbers indicate the citing papers are themselves more widely read and influential.
+                    </p>
                   </div>
                 )}
 
@@ -830,18 +868,37 @@ function ThinkerDetail({ thinkerId, onBack }) {
 
         .summary-stat {
           text-align: center;
+          cursor: help;
+          padding: 12px 8px;
+          border-radius: 8px;
+          transition: background-color 0.15s;
+        }
+
+        .summary-stat:hover {
+          background: color-mix(in srgb, var(--primary-color) 8%, transparent);
         }
 
         .summary-value {
           display: block;
-          font-size: 2em;
-          font-weight: bold;
+          font-size: 2.2em;
+          font-weight: 700;
           color: var(--primary-color);
+          font-family: var(--font-mono);
         }
 
         .summary-label {
-          font-size: 0.85em;
-          color: var(--text-secondary);
+          display: block;
+          font-size: 0.9em;
+          font-weight: 600;
+          color: var(--text-primary);
+          margin-top: 4px;
+        }
+
+        .summary-hint {
+          display: block;
+          font-size: 0.75em;
+          color: var(--text-muted);
+          margin-top: 4px;
         }
 
         .analytics-card {
@@ -949,6 +1006,165 @@ function ThinkerDetail({ thinkerId, onBack }) {
           color: var(--primary-color);
         }
 
+        /* Most Cited Works - Table Style */
+        .works-list-header {
+          display: grid;
+          grid-template-columns: 50px 1fr 100px;
+          gap: 12px;
+          padding: 10px 12px;
+          border-bottom: 2px solid var(--border-color);
+          font-size: 0.75em;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-secondary);
+        }
+
+        .header-citations {
+          text-align: right;
+          cursor: help;
+        }
+
+        .works-list {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .work-list-item {
+          display: grid;
+          grid-template-columns: 50px 1fr 100px;
+          gap: 12px;
+          padding: 14px 12px;
+          border-bottom: 1px solid var(--border-color);
+          align-items: center;
+        }
+
+        .work-list-item:last-child {
+          border-bottom: none;
+        }
+
+        .work-rank {
+          font-weight: 600;
+          color: var(--text-secondary);
+          font-size: 0.9em;
+        }
+
+        .work-info {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .work-title-text {
+          font-weight: 500;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+
+        .work-year {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+        }
+
+        .work-citations {
+          text-align: right;
+          font-weight: 600;
+          font-family: var(--font-mono);
+          font-size: 1.1em;
+          color: var(--primary-color);
+          cursor: help;
+        }
+
+        /* Top Citing Papers - Card Style */
+        .top-citing-papers-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .top-citing-paper {
+          display: grid;
+          grid-template-columns: 45px 1fr 80px;
+          gap: 16px;
+          padding: 16px;
+          background: var(--bg-primary);
+          border-radius: 8px;
+          border: 1px solid var(--border-color);
+          align-items: start;
+        }
+
+        .paper-rank-badge {
+          font-weight: 700;
+          color: var(--text-secondary);
+          font-size: 0.95em;
+          padding-top: 2px;
+        }
+
+        .paper-content {
+          min-width: 0;
+        }
+
+        .paper-title-row .paper-title {
+          font-weight: 600;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          line-height: 1.4;
+        }
+
+        .paper-byline {
+          margin-top: 6px;
+        }
+
+        .paper-byline .paper-authors {
+          font-size: 0.9em;
+          color: var(--text-secondary);
+        }
+
+        .paper-details {
+          display: flex;
+          gap: 12px;
+          margin-top: 6px;
+          font-size: 0.8em;
+          color: var(--text-muted);
+        }
+
+        .paper-details .paper-venue {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 250px;
+        }
+
+        .paper-influence-badge {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 8px;
+          background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+          border-radius: 8px;
+          cursor: help;
+        }
+
+        .influence-number {
+          font-weight: 700;
+          font-size: 1.15em;
+          color: var(--primary-color);
+          font-family: var(--font-mono);
+        }
+
+        .influence-label {
+          font-size: 0.65em;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
         /* Clickable author items */
         .ranked-item.clickable {
           cursor: pointer;
@@ -976,6 +1192,108 @@ function ThinkerDetail({ thinkerId, onBack }) {
           font-weight: normal;
           text-transform: uppercase;
           letter-spacing: 0.5px;
+        }
+
+        /* Top Citing Authors - Table Style */
+        .citing-authors-header {
+          display: grid;
+          grid-template-columns: 50px 1fr 80px 100px;
+          gap: 12px;
+          padding: 10px 12px;
+          border-bottom: 2px solid var(--border-color);
+          font-size: 0.75em;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-secondary);
+        }
+
+        .header-papers,
+        .header-influence {
+          text-align: right;
+          cursor: help;
+        }
+
+        .citing-authors-list {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .citing-author-row {
+          display: grid;
+          grid-template-columns: 50px 1fr 80px 100px;
+          gap: 12px;
+          padding: 12px;
+          border-bottom: 1px solid var(--border-color);
+          align-items: center;
+          cursor: pointer;
+          transition: background-color 0.15s ease;
+        }
+
+        .citing-author-row:hover {
+          background: var(--bg-primary);
+        }
+
+        .citing-author-row:last-child {
+          border-bottom: none;
+        }
+
+        .citing-author-row.self-citation {
+          background: color-mix(in srgb, var(--warning-bg) 20%, transparent);
+          border-left: 3px solid var(--warning-color);
+          margin-left: -3px;
+          padding-left: 15px;
+        }
+
+        .citing-author-row.self-citation:hover {
+          background: color-mix(in srgb, var(--warning-bg) 35%, transparent);
+        }
+
+        .author-rank {
+          font-weight: 600;
+          color: var(--text-secondary);
+          font-size: 0.9em;
+        }
+
+        .author-name-cell {
+          min-width: 0;
+        }
+
+        .author-name {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 500;
+        }
+
+        .author-papers {
+          text-align: right;
+          font-family: var(--font-mono);
+          font-size: 0.95em;
+          color: var(--text-secondary);
+        }
+
+        .author-influence {
+          text-align: right;
+          font-weight: 600;
+          font-family: var(--font-mono);
+          font-size: 1.05em;
+          color: var(--primary-color);
+          cursor: help;
+        }
+
+        .citing-authors-footnote {
+          margin-top: 16px;
+          padding: 12px 16px;
+          background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+          border-radius: 6px;
+          font-size: 0.8em;
+          color: var(--text-secondary);
+          border-left: 3px solid var(--primary-color);
+        }
+
+        .citing-authors-footnote strong {
+          color: var(--text-primary);
         }
 
         /* Modal styles */
