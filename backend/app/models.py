@@ -230,6 +230,8 @@ class Citation(Base):
 
     title: Mapped[str] = mapped_column(Text)
     authors: Mapped[Optional[str]] = mapped_column(Text)
+    # JSON array of author profiles: [{"name": "S Brammer", "profile_url": "https://scholar..."}]
+    author_profiles: Mapped[Optional[str]] = mapped_column(Text)
     year: Mapped[Optional[int]] = mapped_column(Integer)
     venue: Mapped[Optional[str]] = mapped_column(String(500))
     abstract: Mapped[Optional[str]] = mapped_column(Text)

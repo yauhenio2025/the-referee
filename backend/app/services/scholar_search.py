@@ -871,6 +871,22 @@ class ScholarSearchService:
                 authors_raw = authors_el.get_text(separator=' ', strip=True) if authors_el else ""
                 authors_raw = re.sub(r'\s+', ' ', authors_raw).strip()
 
+                # Extract author profile URLs from .gs_a links
+                # Links to Scholar profiles have href like "/citations?user=ABC123&..."
+                author_profiles = []
+                if authors_el:
+                    for link in authors_el.find_all("a"):
+                        href = link.get("href", "")
+                        name = link.get_text(strip=True)
+                        if name and "citations?user=" in href:
+                            # Convert relative URL to absolute
+                            if href.startswith("/"):
+                                href = f"https://scholar.google.com{href}"
+                            author_profiles.append({"name": name, "profile_url": href})
+                        elif name and not href.startswith("http"):
+                            # Author without Scholar profile
+                            author_profiles.append({"name": name, "profile_url": None})
+
                 # Parse authors: "Author1, Author2 - Publication, Year - Publisher"
                 parts = authors_raw.split(" - ")
                 authors_part = parts[0] if parts else ""
@@ -923,6 +939,7 @@ class ScholarSearchService:
                     "title": title,
                     "authors": authors,
                     "authorsRaw": authors_raw,
+                    "authorProfiles": author_profiles,  # [{name, profile_url}, ...]
                     "year": year,
                     "abstract": abstract,
                     "citationCount": citation_count,

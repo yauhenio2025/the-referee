@@ -631,12 +631,18 @@ async def process_retry_failed_fetches_job(job: Job, db: AsyncSession) -> Dict[s
                     if not scholar_id or scholar_id in existing_ids:
                         continue
 
+                    # Serialize author_profiles to JSON string
+                    author_profiles_json = None
+                    if paper_data.get("authorProfiles"):
+                        author_profiles_json = json.dumps(paper_data["authorProfiles"])
+
                     citation = Citation(
                         paper_id=edition.paper_id,
                         edition_id=edition.id,
                         scholar_id=scholar_id,
                         title=paper_data.get("title", "Unknown"),
                         authors=paper_data.get("authorsRaw"),
+                        author_profiles=author_profiles_json,
                         year=paper_data.get("year"),
                         venue=paper_data.get("venue"),
                         abstract=paper_data.get("abstract"),
@@ -2369,6 +2375,11 @@ async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str
             if not scholar_id or scholar_id in existing_scholar_ids:
                 continue
 
+            # Serialize author_profiles to JSON string
+            author_profiles_json = None
+            if paper.get("authorProfiles"):
+                author_profiles_json = json.dumps(paper["authorProfiles"])
+
             # Create citation
             citation = Citation(
                 edition_id=edition_id,
@@ -2376,6 +2387,7 @@ async def process_partition_harvest_test(job: Job, db: AsyncSession) -> Dict[str
                 scholar_id=scholar_id,
                 title=paper.get("title", ""),
                 authors=paper.get("authorsRaw") or ", ".join(paper.get("authors", [])),
+                author_profiles=author_profiles_json,
                 year=paper.get("year"),
                 venue=paper.get("venue", ""),
                 abstract=paper.get("abstract", ""),
@@ -2593,12 +2605,18 @@ async def process_verify_and_repair_job(job: Job, db: AsyncSession) -> Dict[str,
                                 if not cit_scholar_id or cit_scholar_id in existing_scholar_ids:
                                     continue
 
+                                # Serialize author_profiles to JSON string
+                                author_profiles_json = None
+                                if paper_data.get("authorProfiles"):
+                                    author_profiles_json = json.dumps(paper_data["authorProfiles"])
+
                                 citation = Citation(
                                     paper_id=paper_id,
                                     edition_id=edition.id,
                                     scholar_id=cit_scholar_id,
                                     title=paper_data.get("title", "Unknown"),
                                     authors=paper_data.get("authorsRaw"),
+                                    author_profiles=author_profiles_json,
                                     year=paper_data.get("year"),
                                     venue=paper_data.get("venue"),
                                     abstract=paper_data.get("abstract"),
