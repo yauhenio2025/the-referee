@@ -1108,6 +1108,18 @@ class CitingAuthor(BaseModel):
     affiliation: Optional[str] = None  # Institution/university
     homepage_url: Optional[str] = None  # Personal homepage
     topics: Optional[List[str]] = None  # Research interests
+    publications_count: int = 0  # Number of publications on their profile
+
+
+class AuthorPublication(BaseModel):
+    """A publication from an author's Google Scholar profile"""
+    title: str
+    authors: Optional[str] = None
+    venue: Optional[str] = None
+    year: Optional[int] = None
+    citations: int = 0
+    link: Optional[str] = None
+    scholar_id: Optional[str] = None  # Citation ID within Scholar
 
 
 class ScholarAuthorProfileResponse(BaseModel):
@@ -1118,6 +1130,8 @@ class ScholarAuthorProfileResponse(BaseModel):
     affiliation: Optional[str] = None
     homepage_url: Optional[str] = None
     topics: List[str] = []
+    publications: List[AuthorPublication] = []  # Author's publications
+    publications_count: int = 0  # Total publications found
     fetched_at: Optional[datetime] = None
 
 

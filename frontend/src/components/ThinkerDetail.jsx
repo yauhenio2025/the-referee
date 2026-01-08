@@ -25,6 +25,10 @@ function ThinkerDetail({ thinkerId, onBack }) {
   // Scholar profile loading
   const [loadingProfiles, setLoadingProfiles] = useState(false)
   const [loadedProfiles, setLoadedProfiles] = useState({})  // userId -> profile data
+  // Publications modal
+  const [showPublicationsModal, setShowPublicationsModal] = useState(false)
+  const [publicationsAuthor, setPublicationsAuthor] = useState(null)  // Author whose publications to show
+  const [loadingPublications, setLoadingPublications] = useState(false)
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
@@ -190,9 +194,40 @@ function ThinkerDetail({ thinkerId, onBack }) {
         affiliation: p.affiliation,
         homepage_url: p.homepage_url,
         topics: p.topics,
+        publications_count: p.publications_count || 0,
       }
     }
     return author
+  }
+
+  // Show publications modal for an author
+  const showAuthorPublications = async (author) => {
+    // Extract user ID from profile URL
+    const match = author.profile_url?.match(/user=([A-Za-z0-9_-]+)/)
+    if (!match) {
+      showToast('No Scholar profile available for this author', 'warning')
+      return
+    }
+
+    setPublicationsAuthor(author)
+    setShowPublicationsModal(true)
+    setLoadingPublications(true)
+
+    try {
+      // Fetch profile with publications (cached on backend)
+      const profile = await api.getScholarProfile(match[1])
+      // Update the author with publications data
+      setPublicationsAuthor(prev => ({
+        ...prev,
+        publications: profile.publications || [],
+        full_name: profile.full_name || prev.full_name,
+        affiliation: profile.affiliation || prev.affiliation,
+      }))
+    } catch (err) {
+      showToast(`Failed to load publications: ${err.message}`, 'error')
+    } finally {
+      setLoadingPublications(false)
+    }
   }
 
   // Search ALL papers by author (from Top Citing Papers clickable author names)
@@ -882,6 +917,15 @@ function ThinkerDetail({ thinkerId, onBack }) {
                                     title="View Google Scholar profile"
                                   >🎓</a>
                                 )}
+                                {(author.publications_count > 0 || loadedProfiles[author.profile_url]?.publications_count > 0) && (
+                                  <button
+                                    className="publications-btn"
+                                    onClick={(e) => { e.stopPropagation(); showAuthorPublications(author); }}
+                                    title={`View ${author.publications_count || loadedProfiles[author.profile_url]?.publications_count || ''} publications`}
+                                  >
+                                    📚
+                                  </button>
+                                )}
                                 {author.is_self_citation && <span className="self-citation-badge">self</span>}
                               </span>
                               {author.affiliation && (
@@ -1058,6 +1102,59 @@ function ThinkerDetail({ thinkerId, onBack }) {
                                 </div>
                               </div>
                             )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Publications Modal */}
+                {showPublicationsModal && publicationsAuthor && (
+                  <div className="modal-overlay" onClick={() => setShowPublicationsModal(false)}>
+                    <div className="modal-content publications-modal" onClick={e => e.stopPropagation()}>
+                      <div className="modal-header">
+                        <div className="publications-modal-title">
+                          <h3>📚 Publications by {publicationsAuthor.full_name || publicationsAuthor.author}</h3>
+                          {publicationsAuthor.affiliation && (
+                            <span className="publications-affiliation">{publicationsAuthor.affiliation}</span>
+                          )}
+                        </div>
+                        <button className="close-btn" onClick={() => setShowPublicationsModal(false)}>×</button>
+                      </div>
+                      <div className="modal-body">
+                        {loadingPublications ? (
+                          <div className="loading">Loading publications...</div>
+                        ) : !publicationsAuthor.publications?.length ? (
+                          <p className="no-data">No publications found</p>
+                        ) : (
+                          <div className="publications-list">
+                            <p className="publications-count">{publicationsAuthor.publications.length} publications</p>
+                            {publicationsAuthor.publications.map((pub, i) => (
+                              <div key={pub.scholar_id || i} className="publication-item">
+                                <div className="publication-rank">#{i + 1}</div>
+                                <div className="publication-info">
+                                  <div className="publication-title">
+                                    {pub.link ? (
+                                      <a href={pub.link} target="_blank" rel="noopener noreferrer">
+                                        {pub.title}
+                                        <span className="external-link-icon">↗</span>
+                                      </a>
+                                    ) : (
+                                      pub.title
+                                    )}
+                                  </div>
+                                  <div className="publication-meta">
+                                    {pub.authors && <span className="pub-authors">{pub.authors}</span>}
+                                    {pub.venue && <span className="pub-venue">{pub.venue}</span>}
+                                    {pub.year && <span className="pub-year">{pub.year}</span>}
+                                  </div>
+                                </div>
+                                <div className="publication-citations" title="Citation count">
+                                  {pub.citations?.toLocaleString() || 0}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -2267,6 +2364,143 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .create-seed-no-dossier {
           width: 100%;
           margin-top: 8px;
+        }
+
+        /* Publications button */
+        .publications-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: none;
+          border: none;
+          font-size: 0.85em;
+          cursor: pointer;
+          padding: 2px 4px;
+          margin-left: 4px;
+          opacity: 0.7;
+          transition: opacity 0.15s, transform 0.15s;
+        }
+
+        .publications-btn:hover {
+          opacity: 1;
+          transform: scale(1.15);
+        }
+
+        /* Publications Modal */
+        .publications-modal {
+          max-width: 800px;
+          width: 95%;
+          max-height: 85vh;
+        }
+
+        .publications-modal-title {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .publications-modal-title h3 {
+          margin: 0;
+        }
+
+        .publications-affiliation {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+          font-weight: normal;
+        }
+
+        .publications-count {
+          font-size: 0.9em;
+          color: var(--text-secondary);
+          margin-bottom: 16px;
+          padding: 8px 12px;
+          background: #252525;
+          border-radius: 4px;
+        }
+
+        .publications-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .publication-item {
+          display: flex;
+          gap: 12px;
+          padding: 12px;
+          background: #252525;
+          border-radius: 8px;
+          align-items: flex-start;
+        }
+
+        .publication-rank {
+          font-weight: bold;
+          color: var(--text-secondary);
+          min-width: 35px;
+          font-size: 0.9em;
+        }
+
+        .publication-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .publication-title {
+          font-weight: 500;
+          margin-bottom: 4px;
+          line-height: 1.4;
+        }
+
+        .publication-title a {
+          color: var(--primary-color);
+          text-decoration: none;
+          display: inline-flex;
+          align-items: baseline;
+          gap: 4px;
+        }
+
+        .publication-title a:hover {
+          text-decoration: underline;
+        }
+
+        .publication-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-size: 0.8em;
+          color: var(--text-secondary);
+        }
+
+        .publication-meta span::after {
+          content: '·';
+          margin-left: 8px;
+        }
+
+        .publication-meta span:last-child::after {
+          content: none;
+        }
+
+        .pub-authors {
+          max-width: 300px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .pub-venue {
+          font-style: italic;
+          max-width: 200px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .publication-citations {
+          font-weight: 700;
+          color: var(--primary-color);
+          min-width: 50px;
+          text-align: right;
+          font-family: var(--font-mono);
         }
       `}</style>
     </div>

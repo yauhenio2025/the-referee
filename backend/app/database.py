@@ -176,6 +176,9 @@ async def run_migrations():
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_scholar_author_profiles_user_id ON scholar_author_profiles(scholar_user_id)",
         # Author profiles in citations (JSON array of author profile data)
         "ALTER TABLE citations ADD COLUMN IF NOT EXISTS author_profiles TEXT",
+        # Publications cache for scholar author profiles
+        "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications TEXT",
+        "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications_count INTEGER DEFAULT 0",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

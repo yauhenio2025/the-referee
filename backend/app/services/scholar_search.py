@@ -1428,6 +1428,7 @@ class ScholarSearchService:
             "affiliation": None,
             "homepage_url": None,
             "topics": [],
+            "publications": [],
         }
 
         # Full name - in div#gsc_prf_in
@@ -1464,7 +1465,108 @@ class ScholarSearchService:
         if result["topics"]:
             log_now(f"[AUTHOR PROFILE] Topics: {', '.join(result['topics'][:3])}...")
 
+        # Publications - parse the articles table
+        # Each row has class gsc_a_tr with title, authors, venue, citations, year
+        pub_rows = soup.select("tr.gsc_a_tr")
+        for row in pub_rows:
+            try:
+                pub = {}
+
+                # Title and link - in td.gsc_a_t > a.gsc_a_at
+                title_el = row.select_one("a.gsc_a_at")
+                if title_el:
+                    pub["title"] = title_el.get_text(strip=True)
+                    href = title_el.get("href", "")
+                    if href:
+                        # Convert relative URL to absolute
+                        if href.startswith("/"):
+                            pub["link"] = f"https://scholar.google.com{href}"
+                        else:
+                            pub["link"] = href
+                        # Extract citation ID from URL (e.g., citation_for_view=USER:CITATION_ID)
+                        cid_match = re.search(r"citation_for_view=([^&]+)", href)
+                        if cid_match:
+                            pub["scholar_id"] = cid_match.group(1)
+
+                if not pub.get("title"):
+                    continue
+
+                # Authors and venue - in div.gs_gray elements
+                gray_divs = row.select("td.gsc_a_t div.gs_gray")
+                if len(gray_divs) >= 1:
+                    pub["authors"] = gray_divs[0].get_text(strip=True)
+                if len(gray_divs) >= 2:
+                    pub["venue"] = gray_divs[1].get_text(strip=True)
+
+                # Citations - in td.gsc_a_c > a
+                cite_el = row.select_one("td.gsc_a_c a")
+                if cite_el:
+                    cite_text = cite_el.get_text(strip=True)
+                    if cite_text.isdigit():
+                        pub["citations"] = int(cite_text)
+                    else:
+                        pub["citations"] = 0
+                else:
+                    pub["citations"] = 0
+
+                # Year - in td.gsc_a_y > span
+                year_el = row.select_one("td.gsc_a_y span")
+                if year_el:
+                    year_text = year_el.get_text(strip=True)
+                    if year_text.isdigit():
+                        pub["year"] = int(year_text)
+
+                result["publications"].append(pub)
+            except Exception as e:
+                log_now(f"[AUTHOR PROFILE] Error parsing publication row: {e}")
+                continue
+
+        if result["publications"]:
+            log_now(f"[AUTHOR PROFILE] Publications: {len(result['publications'])} found")
+
         return result
+
+    async def fetch_author_profile_with_publications(
+        self, profile_url: str, max_publications: int = 100
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch author profile with more publications (uses pagesize parameter).
+
+        By default, profile pages show 20 articles. This fetches up to max_publications
+        by using the cstart and pagesize URL parameters.
+
+        Args:
+            profile_url: Base profile URL
+            max_publications: Maximum publications to fetch (default 100)
+
+        Returns:
+            Profile data with publications
+        """
+        log_now(f"[AUTHOR PROFILE] Fetching with up to {max_publications} publications: {profile_url[:60]}...")
+
+        # Extract user ID from URL
+        user_id_match = re.search(r"user=([A-Za-z0-9_-]+)", profile_url)
+        if not user_id_match:
+            log_now(f"[AUTHOR PROFILE] Could not extract user ID from: {profile_url}")
+            return None
+
+        scholar_user_id = user_id_match.group(1)
+
+        # Build URL with larger pagesize to get more publications
+        # cstart=0 means start from first article, pagesize controls how many to load
+        enhanced_url = f"https://scholar.google.com/citations?user={scholar_user_id}&hl=en&cstart=0&pagesize={max_publications}"
+
+        try:
+            html = await self._fetch_with_retry(enhanced_url)
+            if not html:
+                log_now(f"[AUTHOR PROFILE] No HTML returned for {enhanced_url}")
+                return None
+
+            return self._parse_author_profile(html, scholar_user_id, profile_url)
+
+        except Exception as e:
+            log_now(f"[AUTHOR PROFILE] Error fetching {enhanced_url}: {e}")
+            return None
 
 
 # Singleton instance

@@ -276,6 +276,9 @@ class ScholarAuthorProfile(Base):
     homepage_url: Mapped[Optional[str]] = mapped_column(Text)
     # JSON array of topics: ["Business Ethics", "Corporate Social Responsibility", ...]
     topics: Mapped[Optional[str]] = mapped_column(Text)
+    # JSON array of publications: [{title, authors, venue, year, citations, scholar_id, link}, ...]
+    publications: Mapped[Optional[str]] = mapped_column(Text)
+    publications_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Timestamps
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

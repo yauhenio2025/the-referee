@@ -9156,6 +9156,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
                         author.full_name = profile.full_name
                         author.affiliation = profile.affiliation
                         author.homepage_url = profile.homepage_url
+                        author.publications_count = profile.publications_count or 0
                         if profile.topics:
                             try:
                                 author.topics = json.loads(profile.topics)
@@ -9261,14 +9262,14 @@ async def get_scholar_author_profile(
     """
     Get a Google Scholar author profile by user ID.
 
-    Fetches profile data (name, affiliation, homepage, topics) from Scholar
+    Fetches profile data (name, affiliation, homepage, topics, publications) from Scholar
     and caches it in the database for future requests.
 
     Args:
         user_id: The Scholar user ID (e.g., "1X4qGg4AAAAJ" from citations?user=...)
 
     Returns:
-        Scholar author profile data
+        Scholar author profile data with publications
     """
     from .services.scholar_search import get_scholar_service
     from datetime import timedelta
@@ -9284,9 +9285,15 @@ async def get_scholar_author_profile(
         age = datetime.utcnow() - cached_profile.fetched_at
         if age < timedelta(days=7):
             topics = []
+            publications = []
             if cached_profile.topics:
                 try:
                     topics = json.loads(cached_profile.topics)
+                except json.JSONDecodeError:
+                    pass
+            if cached_profile.publications:
+                try:
+                    publications = json.loads(cached_profile.publications)
                 except json.JSONDecodeError:
                     pass
             return ScholarAuthorProfileResponse(
@@ -9296,19 +9303,25 @@ async def get_scholar_author_profile(
                 affiliation=cached_profile.affiliation,
                 homepage_url=cached_profile.homepage_url,
                 topics=topics,
+                publications=publications,
+                publications_count=cached_profile.publications_count or len(publications),
                 fetched_at=cached_profile.fetched_at,
             )
 
-    # Fetch fresh from Scholar
+    # Fetch fresh from Scholar (with publications)
     scholar_service = get_scholar_service()
     profile_url = f"https://scholar.google.com/citations?user={user_id}&hl=en"
-    profile_data = await scholar_service.fetch_author_profile(profile_url)
+    # Use the enhanced method that fetches up to 100 publications
+    profile_data = await scholar_service.fetch_author_profile_with_publications(profile_url)
 
     if not profile_data:
         raise HTTPException(status_code=404, detail=f"Could not fetch Scholar profile for user {user_id}")
 
-    # Upsert to database
+    # Prepare JSON for storage
     topics_json = json.dumps(profile_data.get("topics", []))
+    publications = profile_data.get("publications", [])
+    publications_json = json.dumps(publications)
+    publications_count = len(publications)
 
     if cached_profile:
         # Update existing
@@ -9316,6 +9329,8 @@ async def get_scholar_author_profile(
         cached_profile.affiliation = profile_data.get("affiliation")
         cached_profile.homepage_url = profile_data.get("homepage_url")
         cached_profile.topics = topics_json
+        cached_profile.publications = publications_json
+        cached_profile.publications_count = publications_count
         cached_profile.fetched_at = datetime.utcnow()
     else:
         # Insert new
@@ -9326,6 +9341,8 @@ async def get_scholar_author_profile(
             affiliation=profile_data.get("affiliation"),
             homepage_url=profile_data.get("homepage_url"),
             topics=topics_json,
+            publications=publications_json,
+            publications_count=publications_count,
             fetched_at=datetime.utcnow(),
         )
         db.add(new_profile)
@@ -9339,6 +9356,8 @@ async def get_scholar_author_profile(
         affiliation=profile_data.get("affiliation"),
         homepage_url=profile_data.get("homepage_url"),
         topics=profile_data.get("topics", []),
+        publications=publications,
+        publications_count=publications_count,
         fetched_at=datetime.utcnow(),
     )
 
