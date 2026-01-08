@@ -12,7 +12,7 @@ import traceback
 import sys
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from sqlalchemy import select, update, func, and_, or_
+from sqlalchemy import select, update, func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun
@@ -1499,6 +1499,29 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         )
                     )
                     await callback_db.commit()
+
+                    # REAL-TIME STATS UPDATE: Every 10 pages, update edition and thinker totals
+                    # This keeps the UI in sync without excessive DB writes
+                    if (page_num + 1) % 10 == 0 or new_count >= 5:
+                        try:
+                            # Update edition's harvested_citation_count
+                            actual_count_result = await callback_db.execute(
+                                text("SELECT COUNT(*) FROM citations WHERE edition_id = :ed_id"),
+                                {"ed_id": target_edition_id}
+                            )
+                            actual_count = actual_count_result.scalar() or 0
+                            await callback_db.execute(
+                                update(Edition)
+                                .where(Edition.id == target_edition_id)
+                                .values(harvested_citation_count=actual_count)
+                            )
+
+                            # Update thinker total if this is a thinker paper
+                            await update_thinker_citation_stats(callback_db, paper_id)
+                            await callback_db.commit()
+                            log_now(f"[CALLBACK] ✓ Real-time stats updated: edition {target_edition_id} = {actual_count}")
+                        except Exception as stats_err:
+                            log_now(f"[CALLBACK] Stats update failed (non-fatal): {stats_err}")
 
                     # Save resume state (update params dict and serialize to job)
                     # MUST be inside fresh session block to avoid greenlet issues
