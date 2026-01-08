@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response
 """
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, Field
 
 
@@ -1085,6 +1085,7 @@ class CitingPaper(BaseModel):
     scholar_id: Optional[str] = None  # Scholar ID for matching
     title: Optional[str] = None
     authors: Optional[str] = None
+    author_profiles: Optional[List[Dict[str, Any]]] = None  # [{name, profile_url}, ...]
     year: Optional[int] = None
     venue: Optional[str] = None
     link: Optional[str] = None  # URL to the paper

@@ -8820,6 +8820,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
             Citation.scholar_id,
             Citation.title,
             Citation.authors,
+            Citation.author_profiles,
             Citation.year,
             Citation.venue,
             Citation.link,
@@ -8828,7 +8829,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         )
         .where(Citation.paper_id.in_(paper_ids))
         .where(Citation.scholar_id.isnot(None))
-        .group_by(Citation.id, Citation.scholar_id, Citation.title, Citation.authors, Citation.year, Citation.venue, Citation.link, Citation.citation_count)
+        .group_by(Citation.id, Citation.scholar_id, Citation.title, Citation.authors, Citation.author_profiles, Citation.year, Citation.venue, Citation.link, Citation.citation_count)
         .order_by(Citation.citation_count.desc().nulls_last())
         .limit(20)
     )
@@ -8861,11 +8862,19 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     top_citing_papers = []
     for r in top_papers_rows:
         parsed_authors, parsed_venue = parse_citation_parts(r.authors)
+        # Parse author_profiles from JSON string
+        author_profiles = None
+        if r.author_profiles:
+            try:
+                author_profiles = json.loads(r.author_profiles)
+            except (json.JSONDecodeError, TypeError):
+                pass
         top_citing_papers.append(CitingPaper(
             citation_id=r.id,
             scholar_id=r.scholar_id,
             title=r.title,
             authors=parsed_authors,
+            author_profiles=author_profiles,
             year=r.year,
             venue=parsed_venue or r.venue,  # Use parsed venue or original
             link=r.link,

@@ -630,7 +630,45 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             </div>
                             <div className="paper-byline">
                               <span className="paper-authors">
-                                {paper.authors ? (
+                                {paper.author_profiles && paper.author_profiles.length > 0 ? (
+                                  // Use structured author_profiles with Scholar links
+                                  <>
+                                    {paper.author_profiles.map((profile, authorIdx) => (
+                                      <span key={authorIdx}>
+                                        <span
+                                          className="clickable-author"
+                                          onClick={() => searchAuthorPapers(profile.name)}
+                                          title={`Search papers by ${profile.name}`}
+                                        >
+                                          {profile.name}
+                                        </span>
+                                        {profile.profile_url && (
+                                          <a
+                                            href={profile.profile_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="scholar-profile-link"
+                                            title={`View ${profile.name}'s Google Scholar profile`}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            🎓
+                                          </a>
+                                        )}
+                                        {authorIdx < paper.author_profiles.length - 1 && ', '}
+                                      </span>
+                                    ))}
+                                    {paper.author_profiles.length > 1 && (
+                                      <button
+                                        className="all-authors-btn"
+                                        onClick={() => searchAuthorPapers(paper.author_profiles.map(p => p.name).join(', '))}
+                                        title="Search using all authors"
+                                      >
+                                        [All]
+                                      </button>
+                                    )}
+                                  </>
+                                ) : paper.authors ? (
+                                  // Fallback to raw authors string
                                   <>
                                     {paper.authors.split(',').map((author, authorIdx, arr) => (
                                       <span key={authorIdx}>
@@ -1769,6 +1807,21 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .all-authors-btn:hover {
           color: var(--primary-color);
           text-decoration: underline;
+        }
+
+        /* Scholar profile link */
+        .scholar-profile-link {
+          display: inline-block;
+          margin-left: 2px;
+          font-size: 0.85em;
+          text-decoration: none;
+          opacity: 0.7;
+          transition: opacity 0.15s, transform 0.15s;
+        }
+
+        .scholar-profile-link:hover {
+          opacity: 1;
+          transform: scale(1.1);
         }
 
         /* Work status badge in paper details */
