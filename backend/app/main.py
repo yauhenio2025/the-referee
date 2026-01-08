@@ -8817,6 +8817,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     top_papers_result = await db.execute(
         select(
             Citation.id,
+            Citation.scholar_id,
             Citation.title,
             Citation.authors,
             Citation.year,
@@ -8831,6 +8832,19 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .order_by(Citation.citation_count.desc().nulls_last())
         .limit(20)
     )
+    top_papers_rows = top_papers_result.fetchall()
+
+    # Check which citations already exist as Papers (by scholar_id)
+    citation_scholar_ids = [r.scholar_id for r in top_papers_rows if r.scholar_id]
+    existing_papers_map = {}
+    if citation_scholar_ids:
+        existing_papers_result = await db.execute(
+            select(Paper.id, Paper.scholar_id)
+            .where(Paper.scholar_id.in_(citation_scholar_ids))
+        )
+        for p in existing_papers_result.fetchall():
+            existing_papers_map[p.scholar_id] = p.id
+
     # Parse author and venue from Google Scholar format: "Author Names - Venue, Year - source.com"
     def parse_citation_parts(raw_authors: str) -> tuple:
         """Returns (authors, venue) parsed from Google Scholar author string"""
@@ -8845,17 +8859,19 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         return (authors, venue)
 
     top_citing_papers = []
-    for r in top_papers_result.fetchall():
+    for r in top_papers_rows:
         parsed_authors, parsed_venue = parse_citation_parts(r.authors)
         top_citing_papers.append(CitingPaper(
             citation_id=r.id,
+            scholar_id=r.scholar_id,
             title=r.title,
             authors=parsed_authors,
             year=r.year,
             venue=parsed_venue or r.venue,  # Use parsed venue or original
             link=r.link,
             citation_count=r.citation_count or 0,
-            cites_works=r.cites_works
+            cites_works=r.cites_works,
+            existing_paper_id=existing_papers_map.get(r.scholar_id)
         ))
 
     # 2. Top Citing Authors (with LLM-powered disaggregation and self-citation detection)

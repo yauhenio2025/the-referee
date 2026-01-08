@@ -1082,6 +1082,7 @@ class ThinkerQuickAddResponse(BaseModel):
 class CitingPaper(BaseModel):
     """A paper that cites one of the thinker's works"""
     citation_id: int  # ID in citations table
+    scholar_id: Optional[str] = None  # Scholar ID for matching
     title: Optional[str] = None
     authors: Optional[str] = None
     year: Optional[int] = None
@@ -1089,6 +1090,7 @@ class CitingPaper(BaseModel):
     link: Optional[str] = None  # URL to the paper
     citation_count: int = 0  # How cited is this paper itself
     cites_works: int = 1  # How many of thinker's works it cites
+    existing_paper_id: Optional[int] = None  # Paper ID if already seeded
 
 
 class CitingAuthor(BaseModel):

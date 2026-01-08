@@ -664,14 +664,20 @@ function ThinkerDetail({ thinkerId, onBack }) {
                               {paper.year && <span className="paper-year">{paper.year}</span>}
                             </div>
                             <div className="paper-actions">
-                              <button
-                                className="action-btn seed-btn"
-                                onClick={() => handleMakeSeed(paper)}
-                                disabled={makingSeed[paper.citation_id]}
-                                title="Convert to seed paper for harvesting (choose dossier)"
-                              >
-                                {makingSeed[paper.citation_id] ? 'Creating...' : '🌱 Make Seed'}
-                              </button>
+                              {paper.existing_paper_id ? (
+                                <span className="already-seeded-badge" title={`Already exists as Paper #${paper.existing_paper_id}`}>
+                                  ✓ Seeded (#{paper.existing_paper_id})
+                                </span>
+                              ) : (
+                                <button
+                                  className="action-btn seed-btn"
+                                  onClick={() => handleMakeSeed(paper)}
+                                  disabled={makingSeed[paper.citation_id]}
+                                  title="Convert to seed paper for harvesting (choose dossier)"
+                                >
+                                  {makingSeed[paper.citation_id] ? 'Creating...' : '🌱 Make Seed'}
+                                </button>
+                              )}
                             </div>
                           </div>
                           <div className="paper-influence-badge" title="How many papers cite this citing paper">
@@ -1818,6 +1824,19 @@ function ThinkerDetail({ thinkerId, onBack }) {
 
         .dossier-btn:hover:not(:disabled) {
           background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-secondary));
+        }
+
+        .already-seeded-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 0.85em;
+          font-weight: 500;
+          background: var(--success-bg);
+          color: var(--success-color);
+          border: 1px solid var(--success-color);
         }
 
         /* Author Search Modal */
