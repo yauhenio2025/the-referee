@@ -9958,10 +9958,11 @@ async def start_work_discovery(
             message=f"Work discovery already in progress (job {existing_job.id})",
         )
 
-    # Create job
+    # Create job with high priority (thinker jobs run before auto-resumed extract_citations)
     job = Job(
         job_type="thinker_discover_works",
         status="pending",
+        priority=100,  # High priority - run before auto-resumed extract_citations
         params=json.dumps({
             "thinker_id": thinker_id,
             "max_pages": request.max_pages_per_variant or 50,

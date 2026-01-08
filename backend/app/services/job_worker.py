@@ -3458,17 +3458,27 @@ async def worker_loop():
 
                         await asyncio.sleep(2)  # Brief pause before checking for more
 
-                    # ALWAYS check for incomplete harvests if we have spare capacity
-                    # This runs even when there are some pending jobs, ensuring we don't miss orphaned work
+                    # Check for incomplete harvests if we have spare capacity
+                    # BUT skip if there are high-priority jobs pending (like thinker_harvest_citations)
                     remaining_slots = MAX_CONCURRENT_JOBS - len(_running_jobs) - len(pending_jobs)
                     if remaining_slots > 0:
-                        try:
-                            resumed = await auto_resume_incomplete_harvests(db)
-                            if resumed > 0:
-                                log_now(f"[Worker] Auto-resumed {resumed} incomplete harvests with {remaining_slots} spare slots")
-                                continue  # Immediately process the new jobs
-                        except Exception as e:
-                            log_now(f"[Worker] Auto-resume check failed: {e}")
+                        # Check for high-priority pending jobs - let them run first
+                        high_priority_pending = await db.execute(
+                            select(Job).where(
+                                Job.status == "pending",
+                                Job.priority > 0
+                            ).limit(1)
+                        )
+                        if high_priority_pending.scalar_one_or_none():
+                            log_now(f"[Worker] Skipping auto-resume: high-priority job pending")
+                        else:
+                            try:
+                                resumed = await auto_resume_incomplete_harvests(db)
+                                if resumed > 0:
+                                    log_now(f"[Worker] Auto-resumed {resumed} incomplete harvests with {remaining_slots} spare slots")
+                                    continue  # Immediately process the new jobs
+                            except Exception as e:
+                                log_now(f"[Worker] Auto-resume check failed: {e}")
 
                         # Check for failed fetches that need retry
                         try:

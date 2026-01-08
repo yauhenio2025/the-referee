@@ -393,6 +393,7 @@ class JobResponse(BaseModel):
     paper_id: Optional[int] = None
     job_type: str
     status: str
+    priority: int = 0  # Higher = runs first (thinker_harvest uses 100)
     progress: float
     progress_message: Optional[str] = None
     params: Optional[dict] = None
