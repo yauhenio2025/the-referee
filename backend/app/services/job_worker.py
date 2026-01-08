@@ -3641,3 +3641,4 @@ async def create_extract_citations_job(
     monitor_job_creation_rate(paper_id, "extract_citations")
 
     return job
+# Worker restart trigger Thu Jan  8 06:37:53 PM CST 2026
