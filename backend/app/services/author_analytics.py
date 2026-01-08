@@ -46,8 +46,11 @@ async def process_citing_authors(
     if not raw_author_groups:
         return {"individual_authors": [], "llm_processed": True}
 
+    logger.info(f"Processing {len(raw_author_groups)} author groups for thinker: {thinker_name}")
+
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        logger.info("Anthropic client created, calling API...")
 
         # Format the author groups for the prompt
         author_entries = []
@@ -113,6 +116,7 @@ Rules:
         )
 
         response_text = response.content[0].text.strip()
+        logger.info(f"Got LLM response, length: {len(response_text)} chars")
 
         # Parse JSON from response
         # Handle potential markdown code blocks
@@ -145,8 +149,10 @@ Rules:
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM response as JSON: {e}")
-        logger.debug(f"Raw response: {response_text}")
+        logger.error(f"Raw response (first 500 chars): {response_text[:500] if response_text else 'empty'}")
         return {"individual_authors": raw_author_groups, "llm_processed": False, "error": str(e)}
     except Exception as e:
-        logger.error(f"Error in author analytics: {e}")
+        logger.error(f"Error in author analytics LLM call: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {"individual_authors": raw_author_groups, "llm_processed": False, "error": str(e)}
