@@ -3493,6 +3493,21 @@ async def worker_loop():
                 # All slots full, wait for one to free up
                 await asyncio.sleep(3)
 
+            # Sync _running_jobs with database - remove jobs that were cancelled externally
+            if _running_jobs:
+                async with async_session() as sync_db:
+                    actually_running = await sync_db.execute(
+                        select(Job.id).where(
+                            Job.id.in_(list(_running_jobs)),
+                            Job.status == "running"
+                        )
+                    )
+                    actually_running_ids = set(row[0] for row in actually_running.fetchall())
+                    stale_ids = _running_jobs - actually_running_ids
+                    if stale_ids:
+                        log_now(f"[Worker] Cleaning {len(stale_ids)} stale job IDs from _running_jobs: {stale_ids}")
+                        _running_jobs.difference_update(stale_ids)
+
             # Periodically check for zombie jobs (runs every ZOMBIE_CHECK_INTERVAL_MINUTES)
             await check_and_reset_zombie_jobs()
 
@@ -3641,4 +3656,3 @@ async def create_extract_citations_job(
     monitor_job_creation_rate(paper_id, "extract_citations")
 
     return job
-# Worker restart trigger Thu Jan  8 06:37:53 PM CST 2026
