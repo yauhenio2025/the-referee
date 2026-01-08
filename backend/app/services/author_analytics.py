@@ -133,7 +133,19 @@ Rules:
                     json_lines.append(line)
             response_text = "\n".join(json_lines)
 
-        result = json.loads(response_text)
+        # Clean up common JSON issues from LLM output
+        import re
+        # Remove trailing commas before } or ]
+        response_text = re.sub(r',\s*([}\]])', r'\1', response_text)
+        # Remove any comments (// style)
+        response_text = re.sub(r'//[^\n]*', '', response_text)
+
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Try with more aggressive cleanup - sometimes LLM uses single quotes
+            response_text = response_text.replace("'", '"')
+            result = json.loads(response_text)
 
         # Map source_entry_ids to actual citation_ids from original data
         for author in result.get("individual_authors", []):
