@@ -8958,7 +8958,9 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         select(
             ThinkerWork.id,
             ThinkerWork.paper_id,
+            ThinkerWork.scholar_id,
             ThinkerWork.title,
+            ThinkerWork.authors_raw,
             ThinkerWork.year,
             ThinkerWork.link,
             func.count(Citation.id).label("citations_received")
@@ -8967,7 +8969,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .outerjoin(Citation, Citation.paper_id == Paper.id)
         .where(ThinkerWork.thinker_id == thinker_id)
         .where(ThinkerWork.decision == "accepted")
-        .group_by(ThinkerWork.id, ThinkerWork.paper_id, ThinkerWork.title, ThinkerWork.year, ThinkerWork.link)
+        .group_by(ThinkerWork.id, ThinkerWork.paper_id, ThinkerWork.scholar_id, ThinkerWork.title, ThinkerWork.authors_raw, ThinkerWork.year, ThinkerWork.link)
         .order_by(func.count(Citation.id).desc())
         .limit(20)
     )
@@ -8975,7 +8977,9 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         MostCitedWork(
             work_id=r.id,
             paper_id=r.paper_id,
+            scholar_id=r.scholar_id,
             title=r.title,
+            authors=r.authors_raw,
             year=r.year,
             link=r.link,
             citations_received=r.citations_received
@@ -9642,6 +9646,125 @@ async def make_citation_seed(
         dossier_id=target_dossier_id,
         dossier_name=target_dossier_name,
         message=f"Created seed paper from citation: {new_paper.title[:50]}..."
+    )
+
+
+@app.post("/api/thinker-works/{work_id}/make-seed", response_model=CitationMakeSeedResponse)
+async def make_thinker_work_seed(
+    work_id: int,
+    request: CitationMakeSeedRequest = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Convert a thinker's work into a seed paper for harvesting.
+
+    This allows harvesting citations for works that don't yet have a linked Paper.
+    If the work already has a paper_id, returns that paper.
+    """
+    if request is None:
+        request = CitationMakeSeedRequest()
+
+    # Get the thinker work
+    result = await db.execute(select(ThinkerWork).where(ThinkerWork.id == work_id))
+    work = result.scalar_one_or_none()
+    if not work:
+        raise HTTPException(status_code=404, detail="Thinker work not found")
+
+    # If work already has a paper_id, return that
+    if work.paper_id:
+        paper_result = await db.execute(select(Paper).where(Paper.id == work.paper_id))
+        existing_paper = paper_result.scalar_one_or_none()
+        if existing_paper:
+            return CitationMakeSeedResponse(
+                paper_id=existing_paper.id,
+                title=existing_paper.title,
+                dossier_id=existing_paper.dossier_id,
+                dossier_name=None,
+                message=f"Work already linked to paper (ID: {existing_paper.id})"
+            )
+
+    # Check if a paper with this scholar_id already exists
+    if work.scholar_id:
+        existing = await db.execute(
+            select(Paper).where(Paper.scholar_id == work.scholar_id)
+        )
+        existing_paper = existing.scalar_one_or_none()
+        if existing_paper:
+            # Link the work to this paper
+            work.paper_id = existing_paper.id
+            await db.commit()
+            return CitationMakeSeedResponse(
+                paper_id=existing_paper.id,
+                title=existing_paper.title,
+                dossier_id=existing_paper.dossier_id,
+                dossier_name=None,
+                message=f"Paper already exists, linked to work (ID: {existing_paper.id})"
+            )
+
+    # Determine target dossier
+    target_dossier_id = None
+    target_dossier_name = None
+    target_collection_id = None
+
+    if request.create_new_dossier and request.new_dossier_name:
+        # Create a new dossier
+        if not request.collection_id:
+            raise HTTPException(status_code=400, detail="Collection ID required when creating new dossier")
+
+        # Verify collection exists
+        coll_result = await db.execute(select(Collection).where(Collection.id == request.collection_id))
+        collection = coll_result.scalar_one_or_none()
+        if not collection:
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+        new_dossier = Dossier(
+            name=request.new_dossier_name,
+            collection_id=request.collection_id,
+        )
+        db.add(new_dossier)
+        await db.flush()
+        await db.refresh(new_dossier)
+        target_dossier_id = new_dossier.id
+        target_dossier_name = new_dossier.name
+        target_collection_id = request.collection_id
+
+    elif request.dossier_id:
+        # Use specified dossier
+        dossier_result = await db.execute(select(Dossier).where(Dossier.id == request.dossier_id))
+        dossier = dossier_result.scalar_one_or_none()
+        if not dossier:
+            raise HTTPException(status_code=404, detail="Dossier not found")
+        target_dossier_id = dossier.id
+        target_dossier_name = dossier.name
+        target_collection_id = dossier.collection_id
+
+    # Create the new Paper from the work
+    new_paper = Paper(
+        scholar_id=work.scholar_id,
+        title=work.title,
+        authors=work.authors_raw,
+        year=work.year,
+        venue=work.venue,
+        link=work.link,
+        citation_count=work.citation_count,
+        dossier_id=target_dossier_id,
+        collection_id=target_collection_id,
+        status="pending",
+    )
+    db.add(new_paper)
+    await db.flush()
+    await db.refresh(new_paper)
+
+    # Link the work to the new paper
+    work.paper_id = new_paper.id
+    await db.commit()
+
+    return CitationMakeSeedResponse(
+        paper_id=new_paper.id,
+        title=new_paper.title,
+        dossier_id=target_dossier_id,
+        dossier_name=target_dossier_name,
+        message=f"Created seed paper from thinker work: {new_paper.title[:50]}..."
     )
 
 

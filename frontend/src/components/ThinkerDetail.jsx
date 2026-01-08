@@ -131,18 +131,58 @@ function ThinkerDetail({ thinkerId, onBack }) {
   // Make a citation into a seed paper with dossier selection
   const handleMakeSeed = (citation) => {
     setPendingSeedCitation(citation)
+    setPendingSeedWork(null)  // Clear any pending work
+    setShowDossierModal(true)
+  }
+
+  // Make a thinker work into a seed paper with dossier selection
+  const [pendingSeedWork, setPendingSeedWork] = useState(null)
+  const handleMakeWorkSeed = (work) => {
+    setPendingSeedWork(work)
+    setPendingSeedCitation(null)  // Clear any pending citation
     setShowDossierModal(true)
   }
 
   // Called when dossier is selected from modal
   const handleDossierSelected = async (selections) => {
+    const selection = selections[0] || {}  // Take first selection
+
+    // Handle thinker work seed
+    if (pendingSeedWork) {
+      const workId = pendingSeedWork.work_id
+      setMakingSeed(prev => ({ ...prev, [`work_${workId}`]: true }))
+
+      try {
+        const result = await api.makeThinkerWorkSeed(workId, {
+          dossierId: selection.dossierId || null,
+          createNewDossier: selection.createNewDossier || false,
+          newDossierName: selection.newDossierName || null,
+          collectionId: selection.collectionId || null,
+        })
+
+        showToast(`✅ Seed created (Paper #${result.paper_id})${result.dossier_name ? ` in "${result.dossier_name}"` : ''}`, 'success')
+        showToast(`💡 Paper ready for harvesting. Go to Seeds tab to start.`, 'info')
+
+        // Refresh analytics to update status
+        queryClient.invalidateQueries({ queryKey: ['thinker-analytics', thinkerId] })
+
+      } catch (err) {
+        showToast(`Failed to create seed: ${err.message}`, 'error')
+      } finally {
+        setMakingSeed(prev => ({ ...prev, [`work_${workId}`]: false }))
+        setShowDossierModal(false)
+        setPendingSeedWork(null)
+      }
+      return
+    }
+
+    // Handle citation seed
     if (!pendingSeedCitation) return
 
     const citationId = pendingSeedCitation.citation_id || pendingSeedCitation.id
     setMakingSeed(prev => ({ ...prev, [citationId]: true }))
 
     try {
-      const selection = selections[0] || {}  // Take first selection
       const result = await api.makeCitationSeed(citationId, {
         dossierId: selection.dossierId || null,
         createNewDossier: selection.createNewDossier || false,
@@ -456,43 +496,71 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   <div className="analytics-card">
                     <h3>Most Cited Works</h3>
                     <p className="card-subtitle">
-                      This thinker's works ranked by how many papers cite them. Click title to view on Scholar.
+                      This thinker's works ranked by how many papers cite them. Click title to view on Scholar, author to explore.
                     </p>
-                    <div className="works-list-header">
-                      <span className="header-rank">#</span>
-                      <span className="header-work">Work</span>
-                      <span className="header-status">Status</span>
-                      <span className="header-citations" title="Number of papers that cite this work">Citations</span>
-                    </div>
-                    <div className="works-list">
+                    <div className="top-citing-papers-list">
                       {analytics.most_cited_works.slice(0, 10).map((work, i) => (
-                        <div key={work.work_id} className="work-list-item">
-                          <span className="work-rank">#{i + 1}</span>
-                          <div className="work-info">
-                            {work.link ? (
-                              <a href={work.link} target="_blank" rel="noopener noreferrer" className="work-title-text clickable-title">
-                                {work.title}
-                                <span className="external-link-icon">↗</span>
-                              </a>
-                            ) : (
-                              <span className="work-title-text">{work.title}</span>
+                        <div key={work.work_id} className="top-citing-paper">
+                          <div className="paper-rank-badge">#{i + 1}</div>
+                          <div className="paper-content">
+                            <div className="paper-title-row">
+                              {work.link ? (
+                                <a href={work.link} target="_blank" rel="noopener noreferrer" className="paper-title clickable-title">
+                                  {work.title}
+                                  <span className="external-link-icon">↗</span>
+                                </a>
+                              ) : (
+                                <span className="paper-title">{work.title}</span>
+                              )}
+                            </div>
+                            {work.authors && (
+                              <div className="paper-byline">
+                                <span className="paper-authors">
+                                  {work.authors.split(',').map((author, authorIdx, arr) => (
+                                    <span key={authorIdx}>
+                                      <span
+                                        className="clickable-author"
+                                        onClick={() => searchAuthorPapers(author.trim())}
+                                        title={`Search papers by ${author.trim()}`}
+                                      >
+                                        {author.trim()}
+                                      </span>
+                                      {authorIdx < arr.length - 1 && ', '}
+                                    </span>
+                                  ))}
+                                  {work.authors.includes(',') && (
+                                    <button
+                                      className="all-authors-btn"
+                                      onClick={() => searchAuthorPapers(work.authors)}
+                                      title="Search using full author string"
+                                    >
+                                      [All]
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
                             )}
-                            <span className="work-year">{work.year || 'n.d.'}</span>
+                            <div className="paper-details">
+                              {work.year && <span className="paper-year">{work.year}</span>}
+                              <span className={`work-status-badge ${work.paper_id ? 'status-harvested' : 'status-pending'}`}>
+                                {work.paper_id ? `✓ Harvested (#${work.paper_id})` : 'Pending'}
+                              </span>
+                            </div>
+                            <div className="paper-actions">
+                              <button
+                                className="action-btn seed-btn"
+                                onClick={() => handleMakeWorkSeed(work)}
+                                disabled={makingSeed[`work_${work.work_id}`]}
+                                title={work.paper_id ? 'Already harvested - click to view/update dossier' : 'Create seed paper for harvesting'}
+                              >
+                                {makingSeed[`work_${work.work_id}`] ? 'Creating...' : work.paper_id ? '📄 View Seed' : '🌱 Make Seed'}
+                              </button>
+                            </div>
                           </div>
-                          <span className="work-status">
-                            {work.paper_id ? (
-                              <span className="status-harvested" title={`Paper #${work.paper_id} - Citations harvested`}>
-                                ✓ Harvested
-                              </span>
-                            ) : (
-                              <span className="status-pending" title="Not yet harvested">
-                                Pending
-                              </span>
-                            )}
-                          </span>
-                          <span className="work-citations" title={`${work.citations_received} papers cite this work`}>
-                            {work.citations_received?.toLocaleString()}
-                          </span>
+                          <div className="paper-influence-badge" title="How many papers cite this work">
+                            <span className="influence-number">{work.citations_received?.toLocaleString()}</span>
+                            <span className="influence-label">citations</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -522,12 +590,34 @@ function ThinkerDetail({ thinkerId, onBack }) {
                               )}
                             </div>
                             <div className="paper-byline">
-                              <span
-                                className="paper-authors clickable-author"
-                                onClick={() => searchAuthorPapers(paper.authors?.split(',')[0]?.trim() || paper.authors)}
-                                title="Click to see all papers by this author"
-                              >
-                                {paper.authors || 'Unknown authors'}
+                              <span className="paper-authors">
+                                {paper.authors ? (
+                                  <>
+                                    {paper.authors.split(',').map((author, authorIdx, arr) => (
+                                      <span key={authorIdx}>
+                                        <span
+                                          className="clickable-author"
+                                          onClick={() => searchAuthorPapers(author.trim())}
+                                          title={`Search papers by ${author.trim()}`}
+                                        >
+                                          {author.trim()}
+                                        </span>
+                                        {authorIdx < arr.length - 1 && ', '}
+                                      </span>
+                                    ))}
+                                    {paper.authors.includes(',') && (
+                                      <button
+                                        className="all-authors-btn"
+                                        onClick={() => searchAuthorPapers(paper.authors)}
+                                        title="Search using full author string"
+                                      >
+                                        [All]
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  'Unknown authors'
+                                )}
                               </span>
                             </div>
                             <div className="paper-details">
@@ -1239,101 +1329,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
           color: var(--primary-color);
         }
 
-        /* Most Cited Works - Table Style */
-        .works-list-header {
-          display: grid;
-          grid-template-columns: 50px 1fr 100px 80px;
-          gap: 12px;
-          padding: 10px 12px;
-          border-bottom: 2px solid var(--border-color);
-          font-size: 0.75em;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--text-secondary);
-        }
-
-        .header-citations,
-        .header-status {
-          text-align: right;
-          cursor: help;
-        }
-
-        .works-list {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .work-list-item {
-          display: grid;
-          grid-template-columns: 50px 1fr 100px 80px;
-          gap: 12px;
-          padding: 14px 12px;
-          border-bottom: 1px solid var(--border-color);
-          align-items: center;
-        }
-
-        .work-list-item:last-child {
-          border-bottom: none;
-        }
-
-        .work-rank {
-          font-weight: 600;
-          color: var(--text-secondary);
-          font-size: 0.9em;
-        }
-
-        .work-info {
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-
-        .work-title-text {
-          font-weight: 500;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .work-year {
-          font-size: 0.85em;
-          color: var(--text-secondary);
-        }
-
-        .work-citations {
-          text-align: right;
-          font-weight: 600;
-          font-family: var(--font-mono);
-          font-size: 1.1em;
-          color: var(--primary-color);
-          cursor: help;
-        }
-
-        .work-status {
-          text-align: center;
-          font-size: 0.8em;
-        }
-
-        .work-status .status-harvested {
-          background: var(--success-bg);
-          color: var(--success-color);
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-
-        .work-status .status-pending {
-          background: var(--bg-tertiary);
-          color: var(--text-muted);
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-
-        /* Top Citing Papers - Card Style */
+        /* Top Citing Papers & Most Cited Works - Card Style */
         .top-citing-papers-list {
           display: flex;
           flex-direction: column;
@@ -1711,6 +1707,41 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .clickable-author:hover {
           color: var(--primary-color);
           text-decoration: underline;
+        }
+
+        /* All authors button */
+        .all-authors-btn {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          font-size: 0.8em;
+          cursor: pointer;
+          padding: 0 4px;
+          margin-left: 6px;
+          transition: color 0.15s;
+        }
+
+        .all-authors-btn:hover {
+          color: var(--primary-color);
+          text-decoration: underline;
+        }
+
+        /* Work status badge in paper details */
+        .work-status-badge {
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 0.75em;
+          font-weight: 500;
+        }
+
+        .work-status-badge.status-harvested {
+          background: var(--success-bg);
+          color: var(--success-color);
+        }
+
+        .work-status-badge.status-pending {
+          background: var(--bg-tertiary);
+          color: var(--text-muted);
         }
 
         /* Paper actions row */

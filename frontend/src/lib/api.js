@@ -978,6 +978,23 @@ class RefereeAPI {
     });
   }
 
+  /**
+   * Convert a thinker work into a seed paper for harvesting
+   * @param {number} workId - Thinker work ID
+   * @param {Object} options - { dossierId, createNewDossier, newDossierName, collectionId }
+   */
+  async makeThinkerWorkSeed(workId, options = {}) {
+    return this.request(`/api/thinker-works/${workId}/make-seed`, {
+      method: 'POST',
+      body: {
+        dossier_id: options.dossierId || null,
+        create_new_dossier: options.createNewDossier ?? false,
+        new_dossier_name: options.newDossierName || null,
+        collection_id: options.collectionId || null,
+      },
+    });
+  }
+
   // ============== Author Search ==============
 
   /**

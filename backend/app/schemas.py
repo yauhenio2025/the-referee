@@ -1105,7 +1105,9 @@ class MostCitedWork(BaseModel):
     """One of the thinker's most cited works"""
     work_id: int
     paper_id: Optional[int] = None  # Associated Paper ID if harvested
+    scholar_id: Optional[str] = None  # Scholar ID for seeding
     title: str
+    authors: Optional[str] = None  # Co-authors
     year: Optional[int] = None
     citations_received: int = 0
     link: Optional[str] = None  # Link to Google Scholar
