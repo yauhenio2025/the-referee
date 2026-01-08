@@ -3045,8 +3045,40 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
     papers_created = 0
     papers_linked = 0
 
+    # Import Scholar service for cluster ID lookups
+    from .scholar_search import get_scholar_service
+    scholar_service = get_scholar_service()
+
     for idx, work in enumerate(works):
         try:
+            # Check if scholar_id is in profile format (user:article_id) vs cluster ID (numeric)
+            # Profile format IDs don't work for citation lookup - need to find real cluster ID
+            cluster_id = work.scholar_id
+            if work.scholar_id and ':' in work.scholar_id:
+                log_now(f"[ThinkerHarvest] Work '{work.title[:40]}' has profile-format ID, searching for cluster ID...")
+                # Search for the paper to get the real cluster ID
+                search_results = await scholar_service.search(
+                    query=f'"{work.title}"',
+                    max_results=5,
+                )
+                if search_results:
+                    # Find best match by title similarity
+                    for result in search_results:
+                        result_title = result.get('title', '').lower().strip()
+                        work_title = work.title.lower().strip()
+                        # Check for exact or close match
+                        if result_title == work_title or work_title in result_title or result_title in work_title:
+                            cluster_id = result.get('scholar_id')
+                            log_now(f"[ThinkerHarvest] Found cluster ID: {cluster_id} for '{work.title[:40]}'")
+                            break
+                    else:
+                        # No exact match, use first result if reasonable
+                        cluster_id = search_results[0].get('scholar_id')
+                        log_now(f"[ThinkerHarvest] Using first result cluster ID: {cluster_id} for '{work.title[:40]}'")
+                else:
+                    log_now(f"[ThinkerHarvest] WARNING: No cluster ID found for '{work.title[:40]}', harvest may fail")
+                    # Keep original profile ID - will fail but better than no ID
+
             # Always create a new paper for each thinker work
             # Thinker works are discovered via author name search - they belong to this thinker
             # No fuzzy matching - that leads to linking "Human Action" by Gasparski to Mises' book
@@ -3065,11 +3097,12 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
 
             # Create edition for the paper
             # IMPORTANT: Must set scholar_id for harvesting - harvester checks e.scholar_id
+            # Use looked-up cluster_id for citation extraction to work
             edition = Edition(
                 paper_id=paper.id,
                 title=work.title,
-                scholar_id=work.scholar_id,  # Required for harvest to process edition
-                cluster_id=work.scholar_id,
+                scholar_id=cluster_id,  # Use numeric cluster ID for citation lookup
+                cluster_id=cluster_id,
                 citation_count=work.citation_count or 0,
                 confidence="high",
                 auto_selected=True,
