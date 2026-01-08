@@ -900,6 +900,9 @@ class ThinkerWork(Base):
 
     # Work metadata (from Scholar discovery)
     scholar_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+    # Cluster ID for citation harvesting (from "Cited by" link on profile)
+    # This is the numeric ID needed for cites= queries, different from scholar_id
+    cluster_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
     title: Mapped[str] = mapped_column(Text)
     authors_raw: Mapped[Optional[str]] = mapped_column(Text)  # Raw author string from Scholar
     year: Mapped[Optional[int]] = mapped_column(Integer)

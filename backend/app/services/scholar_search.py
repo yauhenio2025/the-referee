@@ -1499,6 +1499,8 @@ class ScholarSearchService:
                     pub["venue"] = gray_divs[1].get_text(strip=True)
 
                 # Citations - in td.gsc_a_c > a
+                # IMPORTANT: This link also contains the cluster ID needed for citation harvesting!
+                # The href looks like: /scholar?cites=12204165771334060032&...
                 cite_el = row.select_one("td.gsc_a_c a")
                 if cite_el:
                     cite_text = cite_el.get_text(strip=True)
@@ -1506,6 +1508,12 @@ class ScholarSearchService:
                         pub["citations"] = int(cite_text)
                     else:
                         pub["citations"] = 0
+
+                    # Extract cluster ID from the "Cited by" link href
+                    cite_href = cite_el.get("href", "")
+                    cluster_match = re.search(r"cites=(\d+)", cite_href)
+                    if cluster_match:
+                        pub["cluster_id"] = cluster_match.group(1)
                 else:
                     pub["citations"] = 0
 

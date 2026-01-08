@@ -1129,6 +1129,7 @@ ONLY return the JSON array, no other text."""
             work = ThinkerWork(
                 thinker_id=thinker_id,
                 scholar_id=scholar_id,
+                cluster_id=pub.get("cluster_id"),  # From "Cited by" link - needed for harvesting
                 title=pub.get("title", "Unknown"),
                 authors_raw=pub.get("authors"),
                 year=year,

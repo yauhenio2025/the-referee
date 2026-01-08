@@ -190,6 +190,9 @@ async def run_migrations():
         "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetch_status VARCHAR(20) NULL",
         "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetch_count INTEGER DEFAULT 0",
         "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetched_at TIMESTAMP NULL",
+        # Add cluster_id to thinker_works for citation harvesting (extracted from "Cited by" link)
+        "ALTER TABLE thinker_works ADD COLUMN IF NOT EXISTS cluster_id VARCHAR(50) NULL",
+        "CREATE INDEX IF NOT EXISTS idx_thinker_works_cluster_id ON thinker_works(cluster_id)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

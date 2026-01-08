@@ -3051,12 +3051,23 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
 
     for idx, work in enumerate(works):
         try:
-            # Check if scholar_id is in profile format (user:article_id) vs cluster ID (numeric)
-            # Profile format IDs don't work for citation lookup - need to find real cluster ID
-            cluster_id = work.scholar_id
-            if work.scholar_id and ':' in work.scholar_id:
+            # Priority for cluster ID:
+            # 1. Use work.cluster_id if set (extracted from "Cited by" link on profile)
+            # 2. If scholar_id is numeric (already a cluster ID), use it
+            # 3. If scholar_id is profile-format (user:article_id), search by title (fallback)
+            cluster_id = None
+
+            if work.cluster_id:
+                # Best case: cluster_id was extracted from profile's "Cited by" link
+                cluster_id = work.cluster_id
+                log_now(f"[ThinkerHarvest] Using stored cluster_id: {cluster_id} for '{work.title[:40]}'")
+            elif work.scholar_id and ':' not in work.scholar_id and work.scholar_id.isdigit():
+                # scholar_id is already a numeric cluster ID
+                cluster_id = work.scholar_id
+                log_now(f"[ThinkerHarvest] Using numeric scholar_id as cluster_id: {cluster_id} for '{work.title[:40]}'")
+            elif work.scholar_id and ':' in work.scholar_id:
+                # Profile-format ID - need to search for the real cluster ID (fallback)
                 log_now(f"[ThinkerHarvest] Work '{work.title[:40]}' has profile-format ID, searching for cluster ID...")
-                # Search for the paper to get the real cluster ID
                 search_results = await scholar_service.search(
                     query=f'"{work.title}"',
                     max_results=5,
@@ -3079,7 +3090,9 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
                         log_now(f"[ThinkerHarvest] Using first result cluster ID: {cluster_id} for '{work.title[:40]}'")
                 else:
                     log_now(f"[ThinkerHarvest] WARNING: No cluster ID found for '{work.title[:40]}', harvest may fail")
-                    # Keep original profile ID - will fail but better than no ID
+                    cluster_id = work.scholar_id  # Keep original profile ID - will fail but better than no ID
+            else:
+                cluster_id = work.scholar_id
 
             # Always create a new paper for each thinker work
             # Thinker works are discovered via author name search - they belong to this thinker
