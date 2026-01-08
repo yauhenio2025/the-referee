@@ -958,6 +958,44 @@ class RefereeAPI {
       body: update,
     });
   }
+
+  // ============== Citation to Seed ==============
+
+  /**
+   * Convert a citation into a seed paper for harvesting
+   * @param {number} citationId - Citation ID to convert
+   * @param {Object} options - { dossierId, createNewDossier, newDossierName, collectionId }
+   */
+  async makeCitationSeed(citationId, options = {}) {
+    return this.request(`/api/citations/${citationId}/make-seed`, {
+      method: 'POST',
+      body: {
+        dossier_id: options.dossierId || null,
+        create_new_dossier: options.createNewDossier ?? false,
+        new_dossier_name: options.newDossierName || null,
+        collection_id: options.collectionId || null,
+      },
+    });
+  }
+
+  // ============== Author Search ==============
+
+  /**
+   * Search for all papers by an author across the entire database
+   * @param {string} authorName - Author name to search for
+   * @param {number} currentThinkerId - Optional: flag papers from this thinker
+   * @param {number} limit - Max results (default 50)
+   */
+  async searchPapersByAuthor(authorName, currentThinkerId = null, limit = 50) {
+    const params = new URLSearchParams({
+      author_name: authorName,
+      limit: limit.toString(),
+    });
+    if (currentThinkerId) {
+      params.append('current_thinker_id', currentThinkerId.toString());
+    }
+    return this.request(`/api/search/papers-by-author?${params.toString()}`);
+  }
 }
 
 export const api = new RefereeAPI();

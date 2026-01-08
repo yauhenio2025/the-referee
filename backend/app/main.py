@@ -58,6 +58,10 @@ from .schemas import (
     DetectTranslationsRequest, DetectTranslationsResponse,
     RetrospectiveMatchRequest, RetrospectiveMatchResponse,
     HarvestCitationsRequest, HarvestCitationsResponse,
+    # Citation to Seed schemas
+    CitationMakeSeedRequest, CitationMakeSeedResponse,
+    # Author Search schemas
+    AuthorPaperResult, AuthorSearchResponse,
 )
 
 # Configure logging with immediate flush for Render
@@ -8812,16 +8816,18 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     # 1. Top Citing Papers (most influential papers that cite this thinker)
     top_papers_result = await db.execute(
         select(
+            Citation.id,
             Citation.title,
             Citation.authors,
             Citation.year,
             Citation.venue,
+            Citation.link,
             Citation.citation_count,
             func.count(distinct(Citation.paper_id)).label("cites_works")
         )
         .where(Citation.paper_id.in_(paper_ids))
         .where(Citation.scholar_id.isnot(None))
-        .group_by(Citation.scholar_id, Citation.title, Citation.authors, Citation.year, Citation.venue, Citation.citation_count)
+        .group_by(Citation.id, Citation.scholar_id, Citation.title, Citation.authors, Citation.year, Citation.venue, Citation.link, Citation.citation_count)
         .order_by(Citation.citation_count.desc().nulls_last())
         .limit(20)
     )
@@ -8842,10 +8848,12 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     for r in top_papers_result.fetchall():
         parsed_authors, parsed_venue = parse_citation_parts(r.authors)
         top_citing_papers.append(CitingPaper(
+            citation_id=r.id,
             title=r.title,
             authors=parsed_authors,
             year=r.year,
             venue=parsed_venue or r.venue,  # Use parsed venue or original
+            link=r.link,
             citation_count=r.citation_count or 0,
             cites_works=r.cites_works
         ))
@@ -9526,4 +9534,211 @@ async def start_harvest_citations(
         thinker_id=thinker_id,
         works_pending=pending_works,
         message=f"Citation harvest job queued for {thinker.canonical_name}",
+    )
+
+
+# ============== Citation to Seed Conversion ==============
+
+@app.post("/api/citations/{citation_id}/make-seed", response_model=CitationMakeSeedResponse)
+async def make_citation_seed(
+    citation_id: int,
+    request: CitationMakeSeedRequest = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Convert a citation into a new seed paper for harvesting.
+
+    Creates a new Paper from the citation's data (title, authors, year, venue).
+    Supports dossier selection:
+    - dossier_id: specific dossier to add to
+    - create_new_dossier: create a new dossier first
+    """
+    if request is None:
+        request = CitationMakeSeedRequest()
+
+    # Get the citation
+    result = await db.execute(select(Citation).where(Citation.id == citation_id))
+    citation = result.scalar_one_or_none()
+    if not citation:
+        raise HTTPException(status_code=404, detail="Citation not found")
+
+    # Check if a paper with this scholar_id already exists
+    if citation.scholar_id:
+        existing = await db.execute(
+            select(Paper).where(Paper.scholar_id == citation.scholar_id)
+        )
+        existing_paper = existing.scalar_one_or_none()
+        if existing_paper:
+            return CitationMakeSeedResponse(
+                paper_id=existing_paper.id,
+                title=existing_paper.title,
+                dossier_id=existing_paper.dossier_id,
+                dossier_name=None,
+                message=f"Paper already exists as seed (ID: {existing_paper.id})"
+            )
+
+    # Determine target dossier
+    target_dossier_id = None
+    target_dossier_name = None
+    target_collection_id = None
+
+    if request.create_new_dossier and request.new_dossier_name:
+        # Create a new dossier
+        if not request.collection_id:
+            raise HTTPException(status_code=400, detail="Collection ID required when creating new dossier")
+
+        # Verify collection exists
+        coll_result = await db.execute(select(Collection).where(Collection.id == request.collection_id))
+        collection = coll_result.scalar_one_or_none()
+        if not collection:
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+        new_dossier = Dossier(
+            name=request.new_dossier_name,
+            collection_id=request.collection_id,
+        )
+        db.add(new_dossier)
+        await db.flush()
+        await db.refresh(new_dossier)
+        target_dossier_id = new_dossier.id
+        target_dossier_name = new_dossier.name
+        target_collection_id = request.collection_id
+
+    elif request.dossier_id:
+        # Use specified dossier
+        dossier_result = await db.execute(select(Dossier).where(Dossier.id == request.dossier_id))
+        dossier = dossier_result.scalar_one_or_none()
+        if not dossier:
+            raise HTTPException(status_code=404, detail="Dossier not found")
+        target_dossier_id = dossier.id
+        target_dossier_name = dossier.name
+        target_collection_id = dossier.collection_id
+
+    # Create the new Paper
+    new_paper = Paper(
+        scholar_id=citation.scholar_id,
+        title=citation.title,
+        authors=citation.authors,
+        year=citation.year,
+        venue=citation.venue,
+        abstract=citation.abstract,
+        link=citation.link,
+        citation_count=citation.citation_count,
+        dossier_id=target_dossier_id,
+        collection_id=target_collection_id,
+        status="pending",
+    )
+    db.add(new_paper)
+    await db.commit()
+    await db.refresh(new_paper)
+
+    return CitationMakeSeedResponse(
+        paper_id=new_paper.id,
+        title=new_paper.title,
+        dossier_id=target_dossier_id,
+        dossier_name=target_dossier_name,
+        message=f"Created seed paper from citation: {new_paper.title[:50]}..."
+    )
+
+
+# ============== Author Search ==============
+
+@app.get("/api/search/papers-by-author", response_model=AuthorSearchResponse)
+async def search_papers_by_author(
+    author_name: str,
+    current_thinker_id: Optional[int] = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Search for all papers by an author across the entire database.
+
+    Searches both:
+    - Papers (seeds) table
+    - Citations table
+
+    Results are flagged if they belong to the current_thinker_id context.
+    """
+    # Normalize search term for ILIKE
+    search_term = f"%{author_name}%"
+
+    # Search Papers
+    papers_query = (
+        select(Paper, Dossier.name.label("dossier_name"))
+        .outerjoin(Dossier, Paper.dossier_id == Dossier.id)
+        .where(Paper.authors.ilike(search_term))
+        .where(Paper.deleted_at.is_(None))
+        .order_by(Paper.citation_count.desc())
+        .limit(limit)
+    )
+    papers_result = await db.execute(papers_query)
+    papers_rows = papers_result.all()
+
+    paper_results = []
+    for row in papers_rows:
+        paper = row[0]
+        paper_results.append(AuthorPaperResult(
+            source="paper",
+            id=paper.id,
+            title=paper.title,
+            authors=paper.authors,
+            year=paper.year,
+            venue=paper.venue,
+            citation_count=paper.citation_count,
+            link=paper.link,
+            citing_thinker_id=None,
+            citing_thinker_name=None,
+            citing_paper_id=None,
+            citing_paper_title=None,
+            is_from_current_thinker=False,
+        ))
+
+    # Search Citations with thinker info
+    citations_query = (
+        select(
+            Citation,
+            Paper.id.label("paper_id"),
+            Paper.title.label("paper_title"),
+            ThinkerWork.thinker_id,
+            Thinker.canonical_name.label("thinker_name")
+        )
+        .join(Paper, Citation.paper_id == Paper.id)
+        .outerjoin(ThinkerWork, Paper.id == ThinkerWork.paper_id)
+        .outerjoin(Thinker, ThinkerWork.thinker_id == Thinker.id)
+        .where(Citation.authors.ilike(search_term))
+        .order_by(Citation.citation_count.desc())
+        .limit(limit)
+    )
+    citations_result = await db.execute(citations_query)
+    citations_rows = citations_result.all()
+
+    citation_results = []
+    for row in citations_rows:
+        citation = row[0]
+        paper_id = row[1]
+        paper_title = row[2]
+        thinker_id = row[3]
+        thinker_name = row[4]
+
+        citation_results.append(AuthorPaperResult(
+            source="citation",
+            id=citation.id,
+            title=citation.title,
+            authors=citation.authors,
+            year=citation.year,
+            venue=citation.venue,
+            citation_count=citation.citation_count,
+            link=citation.link,
+            citing_thinker_id=thinker_id,
+            citing_thinker_name=thinker_name,
+            citing_paper_id=paper_id,
+            citing_paper_title=paper_title,
+            is_from_current_thinker=(thinker_id == current_thinker_id) if current_thinker_id and thinker_id else False,
+        ))
+
+    return AuthorSearchResponse(
+        query=author_name,
+        total_results=len(paper_results) + len(citation_results),
+        papers=paper_results,
+        citations=citation_results,
     )

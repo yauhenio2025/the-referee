@@ -1081,10 +1081,12 @@ class ThinkerQuickAddResponse(BaseModel):
 
 class CitingPaper(BaseModel):
     """A paper that cites one of the thinker's works"""
+    citation_id: int  # ID in citations table
     title: Optional[str] = None
     authors: Optional[str] = None
     year: Optional[int] = None
     venue: Optional[str] = None
+    link: Optional[str] = None  # URL to the paper
     citation_count: int = 0  # How cited is this paper itself
     cites_works: int = 1  # How many of thinker's works it cites
 
@@ -1139,6 +1141,54 @@ class ThinkerAnalyticsResponse(BaseModel):
     # Debug info for author LLM processing
     debug_llm_processed: Optional[bool] = None
     debug_llm_error: Optional[str] = None
+
+
+# ============== Citation to Seed Schemas ==============
+
+class CitationMakeSeedRequest(BaseModel):
+    """Request to convert a citation into a seed paper"""
+    dossier_id: Optional[int] = None  # Target dossier (optional)
+    create_new_dossier: bool = False
+    new_dossier_name: Optional[str] = None
+    collection_id: Optional[int] = None  # Required if creating new dossier
+
+
+class CitationMakeSeedResponse(BaseModel):
+    """Response after converting citation to seed"""
+    paper_id: int
+    title: str
+    dossier_id: Optional[int] = None
+    dossier_name: Optional[str] = None
+    message: str
+
+
+# ============== Author Search Schemas ==============
+
+class AuthorPaperResult(BaseModel):
+    """A paper result from author search"""
+    source: str  # 'citation' or 'paper'
+    id: int
+    title: str
+    authors: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    citation_count: int = 0
+    link: Optional[str] = None
+    # For citations: which thinker/paper it cites
+    citing_thinker_id: Optional[int] = None
+    citing_thinker_name: Optional[str] = None
+    citing_paper_id: Optional[int] = None
+    citing_paper_title: Optional[str] = None
+    # For flagging papers from current context
+    is_from_current_thinker: bool = False
+
+
+class AuthorSearchResponse(BaseModel):
+    """Response from author search"""
+    query: str
+    total_results: int
+    papers: List[AuthorPaperResult] = []
+    citations: List[AuthorPaperResult] = []
 
 
 # Update forward references

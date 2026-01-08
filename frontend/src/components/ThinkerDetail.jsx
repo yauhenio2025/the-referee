@@ -13,6 +13,14 @@ function ThinkerDetail({ thinkerId, onBack }) {
   const [selectedAuthor, setSelectedAuthor] = useState(null)  // For author papers modal
   const [authorPapers, setAuthorPapers] = useState([])
   const [loadingAuthorPapers, setLoadingAuthorPapers] = useState(false)
+  // Author search modal (for clicking author names in Top Citing Papers)
+  const [authorSearchQuery, setAuthorSearchQuery] = useState(null)
+  const [authorSearchResults, setAuthorSearchResults] = useState(null)
+  const [loadingAuthorSearch, setLoadingAuthorSearch] = useState(false)
+  // Dossier selection for make-seed
+  const [showDossierSelect, setShowDossierSelect] = useState(false)
+  const [pendingSeedCitation, setPendingSeedCitation] = useState(null)
+  const [makingSeed, setMakingSeed] = useState({})  // Track which citations are being made into seeds
   const queryClient = useQueryClient()
   const { showToast } = useToast()
 
@@ -84,7 +92,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
     onError: (err) => showToast(`Failed to start harvest: ${err.message}`, 'error'),
   })
 
-  // Fetch papers for a specific citing author
+  // Fetch papers for a specific citing author (from Top Citing Authors)
   const fetchAuthorPapers = async (author) => {
     if (!author.citation_ids?.length) {
       showToast('No paper data available for this author', 'warning')
@@ -102,6 +110,45 @@ function ThinkerDetail({ thinkerId, onBack }) {
       setLoadingAuthorPapers(false)
     }
   }
+
+  // Search ALL papers by author (from Top Citing Papers clickable author names)
+  const searchAuthorPapers = async (authorName) => {
+    setAuthorSearchQuery(authorName)
+    setLoadingAuthorSearch(true)
+    setAuthorSearchResults(null)
+    try {
+      const results = await api.searchPapersByAuthor(authorName, thinkerId, 50)
+      setAuthorSearchResults(results)
+    } catch (err) {
+      showToast(`Failed to search author: ${err.message}`, 'error')
+      setAuthorSearchResults({ papers: [], citations: [], total_results: 0 })
+    } finally {
+      setLoadingAuthorSearch(false)
+    }
+  }
+
+  // Make a citation into a seed paper
+  const makeCitationSeed = async (citationId, dossierId = null) => {
+    setMakingSeed(prev => ({ ...prev, [citationId]: true }))
+    try {
+      const result = await api.makeCitationSeed(citationId, { dossierId })
+      showToast(result.message, 'success')
+      // Close dossier modal if open
+      setShowDossierSelect(false)
+      setPendingSeedCitation(null)
+    } catch (err) {
+      showToast(`Failed to create seed: ${err.message}`, 'error')
+    } finally {
+      setMakingSeed(prev => ({ ...prev, [citationId]: false }))
+    }
+  }
+
+  // Fetch dossiers for selection
+  const { data: dossiers } = useQuery({
+    queryKey: ['dossiers'],
+    queryFn: () => api.getDossiers(),
+    enabled: showDossierSelect,
+  })
 
   if (isLoading) return <div className="loading">Loading thinker...</div>
   if (error) return <div className="error">Error: {error.message}</div>
@@ -410,22 +457,55 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   <div className="analytics-card">
                     <h3>Top Citing Papers</h3>
                     <p className="card-subtitle">
-                      Papers by other scholars that cite this thinker's work, ranked by their own influence (citation count)
+                      Papers by other scholars that cite this thinker's work. Click title to view, author to explore their work.
                     </p>
                     <div className="top-citing-papers-list">
                       {analytics.top_citing_papers.slice(0, 10).map((paper, i) => (
-                        <div key={i} className="top-citing-paper">
+                        <div key={paper.citation_id || i} className="top-citing-paper">
                           <div className="paper-rank-badge">#{i + 1}</div>
                           <div className="paper-content">
                             <div className="paper-title-row">
-                              <span className="paper-title">{paper.title || 'Untitled'}</span>
+                              {paper.link ? (
+                                <a href={paper.link} target="_blank" rel="noopener noreferrer" className="paper-title clickable-title">
+                                  {paper.title || 'Untitled'}
+                                  <span className="external-link-icon">↗</span>
+                                </a>
+                              ) : (
+                                <span className="paper-title">{paper.title || 'Untitled'}</span>
+                              )}
                             </div>
                             <div className="paper-byline">
-                              <span className="paper-authors">{paper.authors || 'Unknown authors'}</span>
+                              <span
+                                className="paper-authors clickable-author"
+                                onClick={() => searchAuthorPapers(paper.authors?.split(',')[0]?.trim() || paper.authors)}
+                                title="Click to see all papers by this author"
+                              >
+                                {paper.authors || 'Unknown authors'}
+                              </span>
                             </div>
                             <div className="paper-details">
                               {paper.venue && <span className="paper-venue">{paper.venue}</span>}
                               {paper.year && <span className="paper-year">{paper.year}</span>}
+                            </div>
+                            <div className="paper-actions">
+                              <button
+                                className="action-btn seed-btn"
+                                onClick={() => makeCitationSeed(paper.citation_id)}
+                                disabled={makingSeed[paper.citation_id]}
+                                title="Convert to seed paper for harvesting"
+                              >
+                                {makingSeed[paper.citation_id] ? '...' : '🌱 Make Seed'}
+                              </button>
+                              <button
+                                className="action-btn dossier-btn"
+                                onClick={() => {
+                                  setPendingSeedCitation(paper)
+                                  setShowDossierSelect(true)
+                                }}
+                                title="Add to a dossier"
+                              >
+                                📁 To Dossier
+                              </button>
                             </div>
                           </div>
                           <div className="paper-influence-badge" title="How many papers cite this citing paper">
@@ -509,7 +589,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   </div>
                 )}
 
-                {/* Author Papers Modal */}
+                {/* Author Papers Modal (from Top Citing Authors click) */}
                 {selectedAuthor && (
                   <div className="modal-overlay" onClick={() => setSelectedAuthor(null)}>
                     <div className="modal-content author-papers-modal" onClick={e => e.stopPropagation()}>
@@ -553,6 +633,147 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             ))}
                           </div>
                         )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Author Search Modal (from clicking author name in Top Citing Papers) */}
+                {authorSearchQuery && (
+                  <div className="modal-overlay" onClick={() => { setAuthorSearchQuery(null); setAuthorSearchResults(null); }}>
+                    <div className="modal-content author-search-modal" onClick={e => e.stopPropagation()}>
+                      <div className="modal-header">
+                        <h3>Papers by "{authorSearchQuery}"</h3>
+                        <button className="close-btn" onClick={() => { setAuthorSearchQuery(null); setAuthorSearchResults(null); }}>×</button>
+                      </div>
+                      <div className="modal-body">
+                        {loadingAuthorSearch ? (
+                          <div className="loading">Searching database...</div>
+                        ) : !authorSearchResults ? (
+                          <p className="no-data">No results</p>
+                        ) : (
+                          <div className="author-search-results">
+                            <p className="search-summary">
+                              Found {authorSearchResults.total_results} results
+                              ({authorSearchResults.papers?.length || 0} seed papers,
+                              {authorSearchResults.citations?.length || 0} citations)
+                            </p>
+
+                            {authorSearchResults.papers?.length > 0 && (
+                              <div className="search-section">
+                                <h4>Seed Papers</h4>
+                                <div className="search-papers-list">
+                                  {authorSearchResults.papers.map((paper) => (
+                                    <div key={`paper-${paper.id}`} className="search-paper-item">
+                                      <div className="search-paper-info">
+                                        {paper.link ? (
+                                          <a href={paper.link} target="_blank" rel="noopener noreferrer" className="search-paper-title">
+                                            {paper.title}
+                                          </a>
+                                        ) : (
+                                          <span className="search-paper-title">{paper.title}</span>
+                                        )}
+                                        <div className="search-paper-meta">
+                                          <span>{paper.authors}</span>
+                                          {paper.year && <span>{paper.year}</span>}
+                                          {paper.venue && <span>{paper.venue}</span>}
+                                        </div>
+                                      </div>
+                                      <span className="search-paper-citations">{paper.citation_count?.toLocaleString()}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {authorSearchResults.citations?.length > 0 && (
+                              <div className="search-section">
+                                <h4>Citations</h4>
+                                <div className="search-papers-list">
+                                  {authorSearchResults.citations.map((citation) => (
+                                    <div
+                                      key={`cit-${citation.id}`}
+                                      className={`search-paper-item ${citation.is_from_current_thinker ? 'from-current-thinker' : ''}`}
+                                    >
+                                      <div className="search-paper-info">
+                                        {citation.link ? (
+                                          <a href={citation.link} target="_blank" rel="noopener noreferrer" className="search-paper-title">
+                                            {citation.title}
+                                          </a>
+                                        ) : (
+                                          <span className="search-paper-title">{citation.title}</span>
+                                        )}
+                                        <div className="search-paper-meta">
+                                          <span>{citation.authors}</span>
+                                          {citation.year && <span>{citation.year}</span>}
+                                          {citation.citing_thinker_name && (
+                                            <span className={`thinker-tag ${citation.is_from_current_thinker ? 'current' : ''}`}>
+                                              Cites: {citation.citing_thinker_name}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="search-paper-actions">
+                                        <span className="search-paper-citations">{citation.citation_count?.toLocaleString()}</span>
+                                        <button
+                                          className="mini-action-btn"
+                                          onClick={() => makeCitationSeed(citation.id)}
+                                          disabled={makingSeed[citation.id]}
+                                          title="Make into seed paper"
+                                        >
+                                          🌱
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dossier Selection Modal */}
+                {showDossierSelect && pendingSeedCitation && (
+                  <div className="modal-overlay" onClick={() => { setShowDossierSelect(false); setPendingSeedCitation(null); }}>
+                    <div className="modal-content dossier-select-modal" onClick={e => e.stopPropagation()}>
+                      <div className="modal-header">
+                        <h3>Select Dossier</h3>
+                        <button className="close-btn" onClick={() => { setShowDossierSelect(false); setPendingSeedCitation(null); }}>×</button>
+                      </div>
+                      <div className="modal-body">
+                        <p className="dossier-modal-subtitle">
+                          Adding: <strong>{pendingSeedCitation.title?.substring(0, 60)}...</strong>
+                        </p>
+                        {!dossiers ? (
+                          <div className="loading">Loading dossiers...</div>
+                        ) : dossiers.length === 0 ? (
+                          <p className="no-data">No dossiers available. Create one first.</p>
+                        ) : (
+                          <div className="dossier-list">
+                            {dossiers.map((dossier) => (
+                              <button
+                                key={dossier.id}
+                                className="dossier-option"
+                                onClick={() => makeCitationSeed(pendingSeedCitation.citation_id, dossier.id)}
+                                disabled={makingSeed[pendingSeedCitation.citation_id]}
+                              >
+                                <span className="dossier-name">{dossier.name}</span>
+                                <span className="dossier-count">{dossier.paper_count || 0} papers</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          className="btn btn-secondary create-seed-no-dossier"
+                          onClick={() => makeCitationSeed(pendingSeedCitation.citation_id)}
+                          disabled={makingSeed[pendingSeedCitation.citation_id]}
+                        >
+                          Create without dossier
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1423,6 +1644,265 @@ function ThinkerDetail({ thinkerId, onBack }) {
           text-align: center;
           color: var(--text-secondary);
           padding: 24px;
+        }
+
+        /* Clickable title in Top Citing Papers */
+        .clickable-title {
+          color: var(--primary-color);
+          text-decoration: none;
+          display: inline-flex;
+          align-items: baseline;
+          gap: 4px;
+        }
+
+        .clickable-title:hover {
+          text-decoration: underline;
+        }
+
+        .external-link-icon {
+          font-size: 0.75em;
+          opacity: 0.6;
+        }
+
+        /* Clickable author name */
+        .clickable-author {
+          cursor: pointer;
+          color: var(--text-secondary);
+          transition: color 0.15s;
+        }
+
+        .clickable-author:hover {
+          color: var(--primary-color);
+          text-decoration: underline;
+        }
+
+        /* Paper actions row */
+        .paper-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .action-btn {
+          padding: 4px 10px;
+          font-size: 0.75em;
+          border: 1px solid var(--border-color);
+          border-radius: 4px;
+          background: var(--bg-secondary);
+          color: var(--text-primary);
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+
+        .action-btn:hover:not(:disabled) {
+          background: var(--bg-primary);
+          border-color: var(--primary-color);
+        }
+
+        .action-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .seed-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, green 10%, var(--bg-secondary));
+          border-color: green;
+        }
+
+        .dossier-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-secondary));
+        }
+
+        /* Author Search Modal */
+        .author-search-modal {
+          max-width: 800px;
+          width: 95%;
+          max-height: 85vh;
+        }
+
+        .search-summary {
+          font-size: 0.9em;
+          color: var(--text-secondary);
+          margin-bottom: 16px;
+          padding: 8px 12px;
+          background: var(--bg-secondary);
+          border-radius: 4px;
+        }
+
+        .search-section {
+          margin-bottom: 20px;
+        }
+
+        .search-section h4 {
+          margin: 0 0 10px 0;
+          font-size: 0.9em;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .search-papers-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .search-paper-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: start;
+          gap: 12px;
+          padding: 10px 12px;
+          background: var(--bg-secondary);
+          border-radius: 6px;
+          border-left: 3px solid transparent;
+        }
+
+        .search-paper-item.from-current-thinker {
+          border-left-color: var(--primary-color);
+          background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+        }
+
+        .search-paper-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .search-paper-title {
+          font-weight: 500;
+          display: block;
+          margin-bottom: 4px;
+          color: var(--text-primary);
+        }
+
+        a.search-paper-title {
+          color: var(--primary-color);
+          text-decoration: none;
+        }
+
+        a.search-paper-title:hover {
+          text-decoration: underline;
+        }
+
+        .search-paper-meta {
+          font-size: 0.8em;
+          color: var(--text-secondary);
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .search-paper-meta span::after {
+          content: '·';
+          margin-left: 8px;
+        }
+
+        .search-paper-meta span:last-child::after {
+          content: none;
+        }
+
+        .thinker-tag {
+          padding: 2px 6px;
+          background: var(--bg-primary);
+          border-radius: 4px;
+          font-weight: 500;
+        }
+
+        .thinker-tag.current {
+          background: color-mix(in srgb, var(--primary-color) 20%, transparent);
+          color: var(--primary-color);
+        }
+
+        .search-paper-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .search-paper-citations {
+          font-weight: 600;
+          font-family: var(--font-mono);
+          color: var(--primary-color);
+        }
+
+        .mini-action-btn {
+          padding: 4px 8px;
+          font-size: 0.9em;
+          border: 1px solid var(--border-color);
+          border-radius: 4px;
+          background: var(--bg-primary);
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+
+        .mini-action-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, green 15%, var(--bg-primary));
+          border-color: green;
+        }
+
+        .mini-action-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        /* Dossier Selection Modal */
+        .dossier-select-modal {
+          max-width: 450px;
+          width: 90%;
+        }
+
+        .dossier-modal-subtitle {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+          margin-bottom: 16px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border-color);
+        }
+
+        .dossier-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          max-height: 300px;
+          overflow-y: auto;
+          margin-bottom: 16px;
+        }
+
+        .dossier-option {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          border: 1px solid var(--border-color);
+          border-radius: 6px;
+          background: var(--bg-secondary);
+          cursor: pointer;
+          transition: all 0.15s;
+          text-align: left;
+        }
+
+        .dossier-option:hover:not(:disabled) {
+          border-color: var(--primary-color);
+          background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+        }
+
+        .dossier-option:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .dossier-name {
+          font-weight: 500;
+        }
+
+        .dossier-count {
+          font-size: 0.8em;
+          color: var(--text-secondary);
+        }
+
+        .create-seed-no-dossier {
+          width: 100%;
+          margin-top: 8px;
         }
       `}</style>
     </div>
