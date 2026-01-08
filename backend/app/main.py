@@ -198,7 +198,14 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "the-referee"}
+    from .services.job_worker import is_worker_healthy
+    worker_status = is_worker_healthy()
+
+    return {
+        "status": "healthy" if worker_status["healthy"] else "degraded",
+        "service": "the-referee",
+        "worker": worker_status,
+    }
 
 
 @app.get("/health/db")
@@ -8395,6 +8402,43 @@ async def cleanup_citation_buffer(max_age_hours: int = 24):
         "success": True,
         "files_removed": removed,
         "message": f"Removed {removed} buffer files older than {max_age_hours} hours",
+    }
+
+
+@app.get("/api/admin/worker/status")
+async def get_worker_status():
+    """Get detailed worker status."""
+    from .services.job_worker import is_worker_healthy
+
+    return is_worker_healthy()
+
+
+@app.post("/api/admin/worker/restart")
+async def restart_worker():
+    """
+    Force restart the background job worker.
+
+    Use this if the worker is stuck or not processing jobs.
+    The watchdog should auto-restart, but this provides a manual override.
+    """
+    from .services.job_worker import stop_worker, start_worker, is_worker_healthy
+
+    # Get status before restart
+    before = is_worker_healthy()
+
+    # Stop and restart
+    stop_worker()
+    await asyncio.sleep(1)  # Brief pause
+    start_worker()
+
+    # Get status after restart
+    after = is_worker_healthy()
+
+    return {
+        "success": True,
+        "message": "Worker restarted",
+        "before": before,
+        "after": after,
     }
 
 

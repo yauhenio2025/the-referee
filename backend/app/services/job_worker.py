@@ -113,7 +113,9 @@ YEAR_BY_YEAR_THRESHOLD = 1000
 
 # Global worker state
 _worker_task: Optional[asyncio.Task] = None
+_watchdog_task: Optional[asyncio.Task] = None
 _worker_running = False
+_last_job_processed: Optional[datetime] = None  # Track last successful job processing
 
 # Parallel processing settings
 MAX_CONCURRENT_JOBS = 20  # How many jobs can run simultaneously
@@ -3634,22 +3636,92 @@ async def worker_loop():
     log_now("[Worker] Worker loop stopped")
 
 
+async def worker_watchdog():
+    """
+    Watchdog that monitors the worker task and restarts it if it dies.
+
+    This catches cases where:
+    - The worker loop crashes with an unhandled exception
+    - The asyncio task gets cancelled unexpectedly
+    - Memory issues or other runtime problems kill the task
+    """
+    global _worker_task, _worker_running
+
+    log_now("[Watchdog] Worker watchdog started - monitoring worker health")
+
+    while _worker_running:
+        await asyncio.sleep(30)  # Check every 30 seconds
+
+        if _worker_task is None or _worker_task.done():
+            # Worker died - check why
+            if _worker_task and _worker_task.done():
+                try:
+                    exc = _worker_task.exception()
+                    if exc:
+                        log_now(f"[Watchdog] Worker died with exception: {exc}", "error")
+                except asyncio.CancelledError:
+                    log_now("[Watchdog] Worker was cancelled", "warning")
+                except Exception as e:
+                    log_now(f"[Watchdog] Error getting worker exception: {e}", "error")
+
+            # Restart the worker
+            log_now("[Watchdog] ⚠️ Worker task is dead - RESTARTING", "warning")
+            _worker_task = asyncio.create_task(worker_loop())
+            log_now("[Watchdog] ✓ Worker restarted successfully")
+
+    log_now("[Watchdog] Watchdog stopped")
+
+
 def start_worker():
-    """Start the background worker (called at app startup)"""
-    global _worker_task
+    """Start the background worker and watchdog (called at app startup)"""
+    global _worker_task, _watchdog_task, _worker_running
+    _worker_running = True
+
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(worker_loop())
-        log_now("[Worker] Background worker started (v2)")
+        log_now("[Worker] Background worker started (v3 with watchdog)")
+
+    # Start watchdog to monitor and restart worker if it dies
+    if _watchdog_task is None or _watchdog_task.done():
+        _watchdog_task = asyncio.create_task(worker_watchdog())
 
 
 def stop_worker():
-    """Stop the background worker"""
-    global _worker_running, _worker_task
+    """Stop the background worker and watchdog"""
+    global _worker_running, _worker_task, _watchdog_task
     _worker_running = False
+
+    if _watchdog_task:
+        _watchdog_task.cancel()
+        _watchdog_task = None
+
     if _worker_task:
         _worker_task.cancel()
         _worker_task = None
-    log_now("[Worker] Background worker stopped")
+
+    log_now("[Worker] Background worker and watchdog stopped")
+
+
+def is_worker_healthy() -> dict:
+    """
+    Check if the worker is healthy - used by /health endpoint.
+
+    Returns dict with:
+    - healthy: bool
+    - worker_alive: bool
+    - watchdog_alive: bool
+    - running_jobs: int
+    """
+    worker_alive = _worker_task is not None and not _worker_task.done()
+    watchdog_alive = _watchdog_task is not None and not _watchdog_task.done()
+
+    return {
+        "healthy": worker_alive and _worker_running,
+        "worker_alive": worker_alive,
+        "watchdog_alive": watchdog_alive,
+        "worker_running_flag": _worker_running,
+        "running_jobs_count": len(_running_jobs),
+    }
 
 
 async def create_fetch_more_job(
