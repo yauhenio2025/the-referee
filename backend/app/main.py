@@ -9115,7 +9115,7 @@ async def get_author_papers(
             venue=citation.venue,
             citation_count=citation.citation_count,
             scholar_id=citation.scholar_id,
-            url=citation.url
+            url=citation.link  # Note: model has 'link' not 'url'
         ))
 
     return papers
