@@ -228,6 +228,41 @@ function ThinkerDetail({ thinkerId, onBack }) {
     if (Array.isArray(field)) return field
     try { return JSON.parse(field) } catch { return [] }
   }
+
+  // Parse Scholar metadata string: "Author1, Author2 - 2000 - Publisher Name"
+  // Returns { authors: ["Author1", "Author2"], venue: "Publisher Name" }
+  const parseScholarMetadata = (rawString) => {
+    if (!rawString) return { authors: [], venue: null }
+
+    // Split by " - " to separate parts
+    const parts = rawString.split(' - ')
+
+    if (parts.length === 1) {
+      // No dashes, assume it's just authors
+      return {
+        authors: parts[0].split(',').map(a => a.trim()).filter(Boolean),
+        venue: null
+      }
+    }
+
+    // First part is always authors
+    const authorsPart = parts[0]
+    const authors = authorsPart.split(',').map(a => a.trim()).filter(Boolean)
+
+    // Find venue - skip year parts (4-digit numbers)
+    let venue = null
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i].trim()
+      // Skip if it looks like a year (4-digit number at start)
+      if (/^\d{4}$/.test(part)) continue
+      // This is likely the venue/publisher
+      venue = part
+      break
+    }
+
+    return { authors, venue }
+  }
+
   const domains = parseJsonField(thinker.domains)
   const notableWorks = parseJsonField(thinker.notable_works)
   const nameVariants = parseJsonField(thinker.name_variants)
@@ -499,7 +534,9 @@ function ThinkerDetail({ thinkerId, onBack }) {
                       This thinker's works ranked by how many papers cite them. Click title to view on Scholar, author to explore.
                     </p>
                     <div className="top-citing-papers-list">
-                      {analytics.most_cited_works.slice(0, 10).map((work, i) => (
+                      {analytics.most_cited_works.slice(0, 10).map((work, i) => {
+                        const { authors, venue } = parseScholarMetadata(work.authors)
+                        return (
                         <div key={work.work_id} className="top-citing-paper">
                           <div className="paper-rank-badge">#{i + 1}</div>
                           <div className="paper-content">
@@ -513,26 +550,26 @@ function ThinkerDetail({ thinkerId, onBack }) {
                                 <span className="paper-title">{work.title}</span>
                               )}
                             </div>
-                            {work.authors && (
+                            {authors.length > 0 && (
                               <div className="paper-byline">
                                 <span className="paper-authors">
-                                  {work.authors.split(',').map((author, authorIdx, arr) => (
+                                  {authors.map((author, authorIdx) => (
                                     <span key={authorIdx}>
                                       <span
                                         className="clickable-author"
-                                        onClick={() => searchAuthorPapers(author.trim())}
-                                        title={`Search papers by ${author.trim()}`}
+                                        onClick={() => searchAuthorPapers(author)}
+                                        title={`Search papers by ${author}`}
                                       >
-                                        {author.trim()}
+                                        {author}
                                       </span>
-                                      {authorIdx < arr.length - 1 && ', '}
+                                      {authorIdx < authors.length - 1 && ', '}
                                     </span>
                                   ))}
-                                  {work.authors.includes(',') && (
+                                  {authors.length > 1 && (
                                     <button
                                       className="all-authors-btn"
-                                      onClick={() => searchAuthorPapers(work.authors)}
-                                      title="Search using full author string"
+                                      onClick={() => searchAuthorPapers(authors.join(', '))}
+                                      title="Search using all authors"
                                     >
                                       [All]
                                     </button>
@@ -542,6 +579,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             )}
                             <div className="paper-details">
                               {work.year && <span className="paper-year">{work.year}</span>}
+                              {venue && <span className="paper-venue">{venue}</span>}
                               <span className={`work-status-badge ${work.paper_id ? 'status-harvested' : 'status-pending'}`}>
                                 {work.paper_id ? `✓ Harvested (#${work.paper_id})` : 'Pending'}
                               </span>
@@ -562,7 +600,8 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             <span className="influence-label">citations</span>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
