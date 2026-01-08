@@ -8890,10 +8890,11 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         return author_part if author_part else "Unknown"
 
     # Fetch citations grouped by parsed author name, including citation IDs for paper lookup
+    # Note: citation_count here is SUM of how many times each citing paper is itself cited (influence)
     top_authors_result = await db.execute(
         select(
             Citation.authors,
-            func.count().label("citation_count"),
+            func.coalesce(func.sum(Citation.citation_count), 0).label("citation_count"),  # Sum of influence
             func.count(distinct(Citation.scholar_id)).label("papers_count"),
             func.array_agg(Citation.id).label("citation_ids")
         )
@@ -8901,7 +8902,7 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         .where(Citation.authors.isnot(None))
         .where(Citation.authors != "")
         .group_by(Citation.authors)
-        .order_by(func.count().desc())
+        .order_by(func.coalesce(func.sum(Citation.citation_count), 0).desc())
         .limit(100)  # Back to 100 now that we use heuristics instead of LLM
     )
 
