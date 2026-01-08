@@ -1047,6 +1047,124 @@ ONLY return the JSON array, no other text."""
             "status": thinker.status,
         }
 
+    async def seed_works_from_profile(
+        self,
+        thinker_id: int,
+        profile_url: str,
+    ) -> Dict[str, Any]:
+        """
+        Fetch all publications from a Google Scholar profile and create ThinkerWorks.
+
+        Publications from the author's profile are auto-accepted since they are
+        definitively by this author. This seeds the bibliography before running
+        author: search discovery (which will then find any works NOT on the profile).
+
+        Args:
+            thinker_id: The thinker to seed works for
+            profile_url: Google Scholar profile URL (e.g., https://scholar.google.com/citations?user=zKHBVTkAAAAJ)
+
+        Returns:
+            Dict with seeding results including count of works created
+        """
+        from .scholar_search import get_scholar_service
+
+        logger.info(f"[Thinker] Seeding works from Scholar profile: {profile_url}")
+
+        # Get thinker
+        thinker = await self.db.get(Thinker, thinker_id)
+        if not thinker:
+            return {"success": False, "error": "Thinker not found", "works_seeded": 0}
+
+        # Fetch profile with ALL publications (paginated)
+        scholar = get_scholar_service()
+        profile_data = await scholar.fetch_author_profile_with_all_publications(profile_url)
+
+        if not profile_data:
+            logger.error(f"[Thinker] Failed to fetch Scholar profile: {profile_url}")
+            return {"success": False, "error": "Failed to fetch profile", "works_seeded": 0}
+
+        # Extract user ID and update thinker
+        thinker.scholar_user_id = profile_data.get("scholar_user_id")
+        thinker.scholar_profile_url = profile_url
+
+        publications = profile_data.get("publications", [])
+        logger.info(f"[Thinker] Found {len(publications)} publications in profile")
+
+        # Get existing scholar_ids to avoid duplicates
+        result = await self.db.execute(
+            select(ThinkerWork.scholar_id)
+            .where(ThinkerWork.thinker_id == thinker_id)
+            .where(ThinkerWork.scholar_id.isnot(None))
+        )
+        existing_scholar_ids = set(row[0] for row in result.fetchall())
+
+        # Create ThinkerWorks for each publication
+        works_created = 0
+        works_skipped = 0
+
+        for pub in publications:
+            scholar_id = pub.get("scholar_id")
+
+            # Skip if already exists (by scholar_id)
+            if scholar_id and scholar_id in existing_scholar_ids:
+                works_skipped += 1
+                continue
+
+            # Parse year safely
+            year = None
+            if pub.get("year"):
+                try:
+                    year = int(pub["year"])
+                except (ValueError, TypeError):
+                    pass
+
+            # Parse citation count safely
+            citation_count = 0
+            if pub.get("citations"):
+                try:
+                    citation_count = int(pub["citations"])
+                except (ValueError, TypeError):
+                    pass
+
+            work = ThinkerWork(
+                thinker_id=thinker_id,
+                scholar_id=scholar_id,
+                title=pub.get("title", "Unknown"),
+                authors_raw=pub.get("authors"),
+                year=year,
+                venue=pub.get("venue"),
+                citation_count=citation_count,
+                link=pub.get("link"),
+                decision="accepted",  # Profile works are auto-accepted
+                confidence=1.0,  # Maximum confidence - from author's own profile
+                reason="From author's Google Scholar profile",
+                found_by_variant="scholar_profile",
+                created_at=datetime.utcnow(),
+            )
+            self.db.add(work)
+            works_created += 1
+
+            if scholar_id:
+                existing_scholar_ids.add(scholar_id)
+
+        # Update thinker's works count
+        thinker.works_discovered = (thinker.works_discovered or 0) + works_created
+        await self.db.commit()
+
+        logger.info(
+            f"[Thinker] Seeded {works_created} works from profile "
+            f"(skipped {works_skipped} duplicates)"
+        )
+
+        return {
+            "success": True,
+            "works_seeded": works_created,
+            "works_skipped": works_skipped,
+            "profile_name": profile_data.get("full_name"),
+            "affiliation": profile_data.get("affiliation"),
+            "total_in_profile": len(publications),
+        }
+
     async def get_thinker(self, thinker_id: int) -> Optional[Thinker]:
         """Get a thinker by ID"""
         return await self.db.get(Thinker, thinker_id)

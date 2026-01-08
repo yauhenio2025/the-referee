@@ -10,6 +10,7 @@ import { useToast } from './Toast'
 function Thinkers({ onSelectThinker }) {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [addInput, setAddInput] = useState('')
+  const [scholarProfileUrl, setScholarProfileUrl] = useState('')
   const [isQuickAdd, setIsQuickAdd] = useState(true)
   const queryClient = useQueryClient()
   const { showToast } = useToast()
@@ -41,12 +42,14 @@ function Thinkers({ onSelectThinker }) {
 
   // Create thinker mutation
   const createMutation = useMutation({
-    mutationFn: (name) => api.createThinker(name),
+    mutationFn: ({ name, scholarProfileUrl }) => api.createThinker(name, scholarProfileUrl || null),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['thinkers'] })
       setShowAddDialog(false)
       setAddInput('')
-      showToast(`Thinker "${data.canonical_name}" created`, 'success')
+      setScholarProfileUrl('')
+      const seededMsg = data.works_discovered > 0 ? ` (${data.works_discovered} works from profile)` : ''
+      showToast(`Thinker "${data.canonical_name}" created${seededMsg}`, 'success')
       if (data.status === 'pending') {
         onSelectThinker?.(data)
       }
@@ -73,8 +76,17 @@ function Thinkers({ onSelectThinker }) {
     if (isQuickAdd) {
       quickAddMutation.mutate(addInput.trim())
     } else {
-      createMutation.mutate(addInput.trim())
+      createMutation.mutate({
+        name: addInput.trim(),
+        scholarProfileUrl: scholarProfileUrl.trim() || null
+      })
     }
+  }
+
+  const handleCloseDialog = () => {
+    setShowAddDialog(false)
+    setAddInput('')
+    setScholarProfileUrl('')
   }
 
   const handleDelete = (e, thinker) => {
@@ -118,11 +130,11 @@ function Thinkers({ onSelectThinker }) {
 
       {/* Add Dialog */}
       {showAddDialog && (
-        <div className="modal-overlay" onClick={() => setShowAddDialog(false)}>
+        <div className="modal-overlay" onClick={handleCloseDialog}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Add Thinker</h3>
-              <button className="close-btn" onClick={() => setShowAddDialog(false)}>&times;</button>
+              <button className="close-btn" onClick={handleCloseDialog}>&times;</button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -160,9 +172,27 @@ function Thinkers({ onSelectThinker }) {
                   "collect citations to all works by Andrew Feenberg"
                 </p>
               )}
+              {!isQuickAdd && (
+                <div className="form-group">
+                  <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>
+                    Google Scholar Profile URL (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={scholarProfileUrl}
+                    onChange={(e) => setScholarProfileUrl(e.target.value)}
+                    placeholder="https://scholar.google.com/citations?user=..."
+                    className="input-full"
+                  />
+                  <p className="hint" style={{ marginTop: '4px' }}>
+                    If provided, all publications from the profile will be imported first.
+                    This ensures a complete bibliography even if the author search misses some works.
+                  </p>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowAddDialog(false)}>
+              <button className="btn btn-secondary" onClick={handleCloseDialog}>
                 Cancel
               </button>
               <button

@@ -179,6 +179,9 @@ async def run_migrations():
         # Publications cache for scholar author profiles
         "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications TEXT",
         "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications_count INTEGER DEFAULT 0",
+        # Google Scholar profile URL support for thinkers
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS scholar_profile_url TEXT NULL",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS scholar_user_id VARCHAR(50) NULL",
         # Thinker harvest batch tracking for profile pre-fetching
         "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_id VARCHAR(36) NULL",
         "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_jobs_total INTEGER DEFAULT 0",

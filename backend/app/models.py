@@ -837,6 +837,11 @@ class Thinker(Base):
     # e.g., ['author:"Herbert Marcuse"', 'author:"H Marcuse"', 'マルクーゼ']
     name_variants: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Google Scholar author profile URL (optional)
+    # If provided, publications are pre-seeded from profile before discovery
+    scholar_profile_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scholar_user_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     # Status: pending, disambiguated, generating_variants, harvesting, complete
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
 

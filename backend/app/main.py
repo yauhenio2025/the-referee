@@ -8518,7 +8518,8 @@ async def create_thinker(
     This will:
     1. Use LLM to disambiguate the thinker (e.g., "Marcuse" → "Herbert Marcuse")
     2. Create the thinker record with biographical info
-    3. Return disambiguation results if confirmation is needed
+    3. If scholar_profile_url provided, fetch ALL publications and seed ThinkerWorks
+    4. Return disambiguation results if confirmation is needed
     """
     from .services.thinker_service import get_thinker_service
 
@@ -8533,7 +8534,24 @@ async def create_thinker(
             )
         raise HTTPException(status_code=500, detail=result.get("error", "Failed to create thinker"))
 
-    thinker = await service.get_thinker(result["thinker_id"])
+    thinker_id = result["thinker_id"]
+
+    # If Scholar profile URL provided, seed works from profile
+    if request.scholar_profile_url:
+        logger.info(f"[Thinker] Seeding works from Scholar profile for thinker {thinker_id}")
+        seed_result = await service.seed_works_from_profile(
+            thinker_id,
+            request.scholar_profile_url
+        )
+        if seed_result.get("success"):
+            logger.info(
+                f"[Thinker] Seeded {seed_result.get('works_seeded', 0)} works from profile "
+                f"(total in profile: {seed_result.get('total_in_profile', 0)})"
+            )
+        else:
+            logger.warning(f"[Thinker] Failed to seed from profile: {seed_result.get('error')}")
+
+    thinker = await service.get_thinker(thinker_id)
     return await service.thinker_to_response(thinker)
 
 

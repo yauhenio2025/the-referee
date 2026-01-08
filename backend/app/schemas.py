@@ -853,6 +853,7 @@ class AIDiagnosisResponse(BaseModel):
 class ThinkerCreate(BaseModel):
     """Create a new thinker for bibliography harvesting"""
     name: str  # User input like "Marcuse" or "Herbert Marcuse"
+    scholar_profile_url: Optional[str] = None  # e.g., https://scholar.google.com/citations?user=zKHBVTkAAAAJ
 
 
 class ThinkerUpdate(BaseModel):

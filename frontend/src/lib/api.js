@@ -804,11 +804,16 @@ class RefereeAPI {
   /**
    * Create a new thinker (triggers disambiguation)
    * @param {string} name - Thinker name input
+   * @param {string} scholarProfileUrl - Optional Google Scholar profile URL
    */
-  async createThinker(name) {
+  async createThinker(name, scholarProfileUrl = null) {
+    const body = { name };
+    if (scholarProfileUrl) {
+      body.scholar_profile_url = scholarProfileUrl;
+    }
     return this.request('/api/thinkers', {
       method: 'POST',
-      body: { name },
+      body,
     });
   }
 
