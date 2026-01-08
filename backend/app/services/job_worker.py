@@ -3069,12 +3069,13 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
                         work_title = work.title.lower().strip()
                         # Check for exact or close match
                         if result_title == work_title or work_title in result_title or result_title in work_title:
-                            cluster_id = result.get('scholar_id')
+                            # Search returns camelCase: scholarId, clusterId
+                            cluster_id = result.get('scholarId') or result.get('clusterId')
                             log_now(f"[ThinkerHarvest] Found cluster ID: {cluster_id} for '{work.title[:40]}'")
                             break
                     else:
                         # No exact match, use first result if reasonable
-                        cluster_id = papers[0].get('scholar_id')
+                        cluster_id = papers[0].get('scholarId') or papers[0].get('clusterId')
                         log_now(f"[ThinkerHarvest] Using first result cluster ID: {cluster_id} for '{work.title[:40]}'")
                 else:
                     log_now(f"[ThinkerHarvest] WARNING: No cluster ID found for '{work.title[:40]}', harvest may fail")
