@@ -8957,23 +8957,27 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
     most_cited_result = await db.execute(
         select(
             ThinkerWork.id,
+            ThinkerWork.paper_id,
             ThinkerWork.title,
             ThinkerWork.year,
+            ThinkerWork.link,
             func.count(Citation.id).label("citations_received")
         )
         .outerjoin(Paper, ThinkerWork.paper_id == Paper.id)
         .outerjoin(Citation, Citation.paper_id == Paper.id)
         .where(ThinkerWork.thinker_id == thinker_id)
         .where(ThinkerWork.decision == "accepted")
-        .group_by(ThinkerWork.id, ThinkerWork.title, ThinkerWork.year)
+        .group_by(ThinkerWork.id, ThinkerWork.paper_id, ThinkerWork.title, ThinkerWork.year, ThinkerWork.link)
         .order_by(func.count(Citation.id).desc())
         .limit(20)
     )
     most_cited_works = [
         MostCitedWork(
             work_id=r.id,
+            paper_id=r.paper_id,
             title=r.title,
             year=r.year,
+            link=r.link,
             citations_received=r.citations_received
         )
         for r in most_cited_result.fetchall()

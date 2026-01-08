@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import DossierSelectModal from './DossierSelectModal'
 
 function ThinkerDetail({ thinkerId, onBack }) {
   const [activeTab, setActiveTab] = useState('works')
@@ -17,8 +18,8 @@ function ThinkerDetail({ thinkerId, onBack }) {
   const [authorSearchQuery, setAuthorSearchQuery] = useState(null)
   const [authorSearchResults, setAuthorSearchResults] = useState(null)
   const [loadingAuthorSearch, setLoadingAuthorSearch] = useState(false)
-  // Dossier selection for make-seed
-  const [showDossierSelect, setShowDossierSelect] = useState(false)
+  // Dossier selection for make-seed (using DossierSelectModal)
+  const [showDossierModal, setShowDossierModal] = useState(false)
   const [pendingSeedCitation, setPendingSeedCitation] = useState(null)
   const [makingSeed, setMakingSeed] = useState({})  // Track which citations are being made into seeds
   const queryClient = useQueryClient()
@@ -127,28 +128,55 @@ function ThinkerDetail({ thinkerId, onBack }) {
     }
   }
 
-  // Make a citation into a seed paper
-  const makeCitationSeed = async (citationId, dossierId = null) => {
+  // Make a citation into a seed paper with dossier selection
+  const handleMakeSeed = (citation) => {
+    setPendingSeedCitation(citation)
+    setShowDossierModal(true)
+  }
+
+  // Called when dossier is selected from modal
+  const handleDossierSelected = async (selections) => {
+    if (!pendingSeedCitation) return
+
+    const citationId = pendingSeedCitation.citation_id || pendingSeedCitation.id
+    setMakingSeed(prev => ({ ...prev, [citationId]: true }))
+
+    try {
+      const selection = selections[0] || {}  // Take first selection
+      const result = await api.makeCitationSeed(citationId, {
+        dossierId: selection.dossierId || null,
+        createNewDossier: selection.createNewDossier || false,
+        newDossierName: selection.newDossierName || null,
+        collectionId: selection.collectionId || null,
+      })
+
+      // Show success with paper ID
+      showToast(`✅ Seed created (Paper #${result.paper_id})${result.dossier_name ? ` in "${result.dossier_name}"` : ''}`, 'success')
+
+      // Offer to start harvest
+      showToast(`💡 Paper ready for harvesting. Go to Seeds tab to start.`, 'info')
+
+    } catch (err) {
+      showToast(`Failed to create seed: ${err.message}`, 'error')
+    } finally {
+      setMakingSeed(prev => ({ ...prev, [citationId]: false }))
+      setShowDossierModal(false)
+      setPendingSeedCitation(null)
+    }
+  }
+
+  // Quick seed without dossier selection (from search modal)
+  const quickMakeSeed = async (citationId) => {
     setMakingSeed(prev => ({ ...prev, [citationId]: true }))
     try {
-      const result = await api.makeCitationSeed(citationId, { dossierId })
-      showToast(result.message, 'success')
-      // Close dossier modal if open
-      setShowDossierSelect(false)
-      setPendingSeedCitation(null)
+      const result = await api.makeCitationSeed(citationId, {})
+      showToast(`✅ Seed created (Paper #${result.paper_id})`, 'success')
     } catch (err) {
       showToast(`Failed to create seed: ${err.message}`, 'error')
     } finally {
       setMakingSeed(prev => ({ ...prev, [citationId]: false }))
     }
   }
-
-  // Fetch dossiers for selection
-  const { data: dossiers } = useQuery({
-    queryKey: ['dossiers'],
-    queryFn: () => api.getDossiers(),
-    enabled: showDossierSelect,
-  })
 
   if (isLoading) return <div className="loading">Loading thinker...</div>
   if (error) return <div className="error">Error: {error.message}</div>
@@ -428,11 +456,12 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   <div className="analytics-card">
                     <h3>Most Cited Works</h3>
                     <p className="card-subtitle">
-                      This thinker's works ranked by how many papers cite them
+                      This thinker's works ranked by how many papers cite them. Click title to view on Scholar.
                     </p>
                     <div className="works-list-header">
                       <span className="header-rank">#</span>
                       <span className="header-work">Work</span>
+                      <span className="header-status">Status</span>
                       <span className="header-citations" title="Number of papers that cite this work">Citations</span>
                     </div>
                     <div className="works-list">
@@ -440,9 +469,27 @@ function ThinkerDetail({ thinkerId, onBack }) {
                         <div key={work.work_id} className="work-list-item">
                           <span className="work-rank">#{i + 1}</span>
                           <div className="work-info">
-                            <span className="work-title-text">{work.title}</span>
+                            {work.link ? (
+                              <a href={work.link} target="_blank" rel="noopener noreferrer" className="work-title-text clickable-title">
+                                {work.title}
+                                <span className="external-link-icon">↗</span>
+                              </a>
+                            ) : (
+                              <span className="work-title-text">{work.title}</span>
+                            )}
                             <span className="work-year">{work.year || 'n.d.'}</span>
                           </div>
+                          <span className="work-status">
+                            {work.paper_id ? (
+                              <span className="status-harvested" title={`Paper #${work.paper_id} - Citations harvested`}>
+                                ✓ Harvested
+                              </span>
+                            ) : (
+                              <span className="status-pending" title="Not yet harvested">
+                                Pending
+                              </span>
+                            )}
+                          </span>
                           <span className="work-citations" title={`${work.citations_received} papers cite this work`}>
                             {work.citations_received?.toLocaleString()}
                           </span>
@@ -490,21 +537,11 @@ function ThinkerDetail({ thinkerId, onBack }) {
                             <div className="paper-actions">
                               <button
                                 className="action-btn seed-btn"
-                                onClick={() => makeCitationSeed(paper.citation_id)}
+                                onClick={() => handleMakeSeed(paper)}
                                 disabled={makingSeed[paper.citation_id]}
-                                title="Convert to seed paper for harvesting"
+                                title="Convert to seed paper for harvesting (choose dossier)"
                               >
-                                {makingSeed[paper.citation_id] ? '...' : '🌱 Make Seed'}
-                              </button>
-                              <button
-                                className="action-btn dossier-btn"
-                                onClick={() => {
-                                  setPendingSeedCitation(paper)
-                                  setShowDossierSelect(true)
-                                }}
-                                title="Add to a dossier"
-                              >
-                                📁 To Dossier
+                                {makingSeed[paper.citation_id] ? 'Creating...' : '🌱 Make Seed'}
                               </button>
                             </div>
                           </div>
@@ -717,11 +754,19 @@ function ThinkerDetail({ thinkerId, onBack }) {
                                         <span className="search-paper-citations">{citation.citation_count?.toLocaleString()}</span>
                                         <button
                                           className="mini-action-btn"
-                                          onClick={() => makeCitationSeed(citation.id)}
+                                          onClick={() => quickMakeSeed(citation.id)}
                                           disabled={makingSeed[citation.id]}
-                                          title="Make into seed paper"
+                                          title="Quick seed (no dossier)"
                                         >
                                           🌱
+                                        </button>
+                                        <button
+                                          className="mini-action-btn dossier"
+                                          onClick={() => handleMakeSeed(citation)}
+                                          disabled={makingSeed[citation.id]}
+                                          title="Seed with dossier selection"
+                                        >
+                                          📁
                                         </button>
                                       </div>
                                     </div>
@@ -736,48 +781,15 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   </div>
                 )}
 
-                {/* Dossier Selection Modal */}
-                {showDossierSelect && pendingSeedCitation && (
-                  <div className="modal-overlay" onClick={() => { setShowDossierSelect(false); setPendingSeedCitation(null); }}>
-                    <div className="modal-content dossier-select-modal" onClick={e => e.stopPropagation()}>
-                      <div className="modal-header">
-                        <h3>Select Dossier</h3>
-                        <button className="close-btn" onClick={() => { setShowDossierSelect(false); setPendingSeedCitation(null); }}>×</button>
-                      </div>
-                      <div className="modal-body">
-                        <p className="dossier-modal-subtitle">
-                          Adding: <strong>{pendingSeedCitation.title?.substring(0, 60)}...</strong>
-                        </p>
-                        {!dossiers ? (
-                          <div className="loading">Loading dossiers...</div>
-                        ) : dossiers.length === 0 ? (
-                          <p className="no-data">No dossiers available. Create one first.</p>
-                        ) : (
-                          <div className="dossier-list">
-                            {dossiers.map((dossier) => (
-                              <button
-                                key={dossier.id}
-                                className="dossier-option"
-                                onClick={() => makeCitationSeed(pendingSeedCitation.citation_id, dossier.id)}
-                                disabled={makingSeed[pendingSeedCitation.citation_id]}
-                              >
-                                <span className="dossier-name">{dossier.name}</span>
-                                <span className="dossier-count">{dossier.paper_count || 0} papers</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        <button
-                          className="btn btn-secondary create-seed-no-dossier"
-                          onClick={() => makeCitationSeed(pendingSeedCitation.citation_id)}
-                          disabled={makingSeed[pendingSeedCitation.citation_id]}
-                        >
-                          Create without dossier
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {/* Dossier Selection Modal (using shared component) */}
+                <DossierSelectModal
+                  isOpen={showDossierModal}
+                  onClose={() => { setShowDossierModal(false); setPendingSeedCitation(null); }}
+                  onSelect={handleDossierSelected}
+                  title="Create Seed Paper"
+                  subtitle={pendingSeedCitation ? `Adding: "${pendingSeedCitation.title?.substring(0, 50)}..."` : 'Select destination'}
+                  allowMultiple={false}
+                />
               </div>
             )}
           </div>
@@ -1230,7 +1242,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
         /* Most Cited Works - Table Style */
         .works-list-header {
           display: grid;
-          grid-template-columns: 50px 1fr 100px;
+          grid-template-columns: 50px 1fr 100px 80px;
           gap: 12px;
           padding: 10px 12px;
           border-bottom: 2px solid var(--border-color);
@@ -1241,7 +1253,8 @@ function ThinkerDetail({ thinkerId, onBack }) {
           color: var(--text-secondary);
         }
 
-        .header-citations {
+        .header-citations,
+        .header-status {
           text-align: right;
           cursor: help;
         }
@@ -1253,7 +1266,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
 
         .work-list-item {
           display: grid;
-          grid-template-columns: 50px 1fr 100px;
+          grid-template-columns: 50px 1fr 100px 80px;
           gap: 12px;
           padding: 14px 12px;
           border-bottom: 1px solid var(--border-color);
@@ -1297,6 +1310,27 @@ function ThinkerDetail({ thinkerId, onBack }) {
           font-size: 1.1em;
           color: var(--primary-color);
           cursor: help;
+        }
+
+        .work-status {
+          text-align: center;
+          font-size: 0.8em;
+        }
+
+        .work-status .status-harvested {
+          background: var(--success-bg);
+          color: var(--success-color);
+          padding: 4px 8px;
+          border-radius: 4px;
+          font-weight: 500;
+        }
+
+        .work-status .status-pending {
+          background: var(--bg-tertiary);
+          color: var(--text-muted);
+          padding: 4px 8px;
+          border-radius: 4px;
+          font-weight: 500;
         }
 
         /* Top Citing Papers - Card Style */
@@ -1517,22 +1551,23 @@ function ThinkerDetail({ thinkerId, onBack }) {
           color: var(--text-primary);
         }
 
-        /* Modal styles */
+        /* Modal styles - SOLID backgrounds */
         .modal-overlay {
           position: fixed;
           top: 0;
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.6);
+          background: rgba(0, 0, 0, 0.9);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000;
+          backdrop-filter: blur(4px);
         }
 
         .modal-content {
-          background: var(--bg-primary);
+          background: #1a1a1a;
           border-radius: 12px;
           max-width: 700px;
           width: 90%;
@@ -1540,7 +1575,8 @@ function ThinkerDetail({ thinkerId, onBack }) {
           overflow: hidden;
           display: flex;
           flex-direction: column;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+          border: 1px solid var(--border-color);
         }
 
         .modal-header {
@@ -1575,6 +1611,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .modal-body {
           padding: 20px;
           overflow-y: auto;
+          background: #1a1a1a;
         }
 
         .author-papers-list {
@@ -1587,7 +1624,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
           display: flex;
           gap: 12px;
           padding: 12px;
-          background: var(--bg-secondary);
+          background: #252525;
           border-radius: 8px;
         }
 
@@ -1718,6 +1755,11 @@ function ThinkerDetail({ thinkerId, onBack }) {
           max-width: 800px;
           width: 95%;
           max-height: 85vh;
+          background: #1a1a1a;
+        }
+
+        .author-search-modal .modal-body {
+          background: #1a1a1a;
         }
 
         .search-summary {
@@ -1725,7 +1767,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
           color: var(--text-secondary);
           margin-bottom: 16px;
           padding: 8px 12px;
-          background: var(--bg-secondary);
+          background: #252525;
           border-radius: 4px;
         }
 
@@ -1753,14 +1795,14 @@ function ThinkerDetail({ thinkerId, onBack }) {
           align-items: start;
           gap: 12px;
           padding: 10px 12px;
-          background: var(--bg-secondary);
+          background: #252525;
           border-radius: 6px;
           border-left: 3px solid transparent;
         }
 
         .search-paper-item.from-current-thinker {
           border-left-color: var(--primary-color);
-          background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+          background: #2a2a35;
         }
 
         .search-paper-info {
