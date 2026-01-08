@@ -1136,6 +1136,10 @@ class ThinkerAnalyticsResponse(BaseModel):
     top_venues: List[TopVenue] = []
     citations_by_year: List[YearCitations] = []
 
+    # Debug info for author LLM processing
+    debug_llm_processed: Optional[bool] = None
+    debug_llm_error: Optional[str] = None
+
 
 # Update forward references
 PaperDetail.model_rebuild()

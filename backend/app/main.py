@@ -8893,10 +8893,16 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         })
 
     # Use LLM to disaggregate multi-author entries and detect self-citations
+    import logging
+    analytics_logger = logging.getLogger("analytics")
+    analytics_logger.info(f"Calling LLM for {len(raw_author_groups)} author groups, thinker: {thinker.canonical_name}")
+
     llm_result = await process_citing_authors(
         thinker_name=thinker.canonical_name,
         raw_author_groups=raw_author_groups
     )
+
+    analytics_logger.info(f"LLM result: processed={llm_result.get('llm_processed')}, error={llm_result.get('error')}, authors={len(llm_result.get('individual_authors', []))}")
 
     # Build final author list from LLM results
     if llm_result.get("llm_processed") and "individual_authors" in llm_result:
@@ -9045,6 +9051,8 @@ async def get_thinker_analytics(thinker_id: int, db: AsyncSession = Depends(get_
         most_cited_works=most_cited_works,
         top_venues=top_venues,
         citations_by_year=citations_by_year,
+        debug_llm_processed=llm_result.get("llm_processed"),
+        debug_llm_error=llm_result.get("error"),
     )
 
 
