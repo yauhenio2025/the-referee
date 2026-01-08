@@ -107,7 +107,7 @@ Rules:
 - source_entry_ids links back to input entry IDs for fetching papers later"""
 
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-5-20250929",  # Using Sonnet as Haiku may not be available
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}]
         )
