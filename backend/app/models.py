@@ -853,6 +853,18 @@ class Thinker(Base):
     harvest_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     harvest_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Harvest batch tracking for profile pre-fetching
+    # Tracks completion of all extract_citations jobs to trigger automatic profile fetching
+    harvest_batch_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # UUID
+    harvest_batch_jobs_total: Mapped[int] = mapped_column(Integer, default=0)
+    harvest_batch_jobs_completed: Mapped[int] = mapped_column(Integer, default=0)
+    harvest_batch_jobs_failed: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Profile pre-fetch status: null, pending, running, completed, failed
+    profiles_prefetch_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    profiles_prefetch_count: Mapped[int] = mapped_column(Integer, default=0)
+    profiles_prefetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     works: Mapped[List["ThinkerWork"]] = relationship(
         "ThinkerWork", back_populates="thinker", cascade="all, delete-orphan"

@@ -1568,6 +1568,114 @@ class ScholarSearchService:
             log_now(f"[AUTHOR PROFILE] Error fetching {enhanced_url}: {e}")
             return None
 
+    async def fetch_author_profile_with_all_publications(
+        self, profile_url: str, max_publications: int = 2000
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch author profile with ALL publications via pagination.
+
+        Loops through pages using cstart parameter until no more publications found.
+        Rate limited to avoid overwhelming Google Scholar.
+
+        Args:
+            profile_url: Base profile URL
+            max_publications: Safety limit to prevent infinite loops (default 2000)
+
+        Returns:
+            Profile data with complete publications list
+        """
+        log_now(f"[AUTHOR PROFILE] Fetching ALL publications (max {max_publications}): {profile_url[:60]}...")
+
+        # Extract user ID from URL
+        user_id_match = re.search(r"user=([A-Za-z0-9_-]+)", profile_url)
+        if not user_id_match:
+            log_now(f"[AUTHOR PROFILE] Could not extract user ID from: {profile_url}")
+            return None
+
+        scholar_user_id = user_id_match.group(1)
+
+        all_publications = []
+        current_start = 0
+        page_size = 100
+        profile_metadata = None
+        consecutive_empty = 0
+        max_consecutive_empty = 2  # Stop after 2 empty pages
+        page_num = 0
+
+        while len(all_publications) < max_publications:
+            # Build URL with cstart offset and pagesize
+            enhanced_url = f"https://scholar.google.com/citations?user={scholar_user_id}&hl=en&cstart={current_start}&pagesize={page_size}"
+
+            try:
+                html = await self._fetch_with_retry(enhanced_url)
+                if not html:
+                    log_now(f"[AUTHOR PROFILE] No HTML returned for page {page_num}")
+                    break
+
+                parsed = self._parse_author_profile(html, scholar_user_id, profile_url)
+
+                # Store profile metadata from first page
+                if page_num == 0:
+                    profile_metadata = {k: v for k, v in parsed.items() if k != 'publications'}
+
+                new_pubs = parsed.get("publications", [])
+
+                if not new_pubs:
+                    consecutive_empty += 1
+                    log_now(f"[AUTHOR PROFILE] Empty page {page_num} (consecutive: {consecutive_empty})")
+                    if consecutive_empty >= max_consecutive_empty:
+                        log_now(f"[AUTHOR PROFILE] Stopping after {consecutive_empty} consecutive empty pages")
+                        break
+                else:
+                    consecutive_empty = 0
+
+                    # Deduplicate by scholar_id to handle any overlap
+                    existing_ids = {p.get("scholar_id") for p in all_publications if p.get("scholar_id")}
+                    added = 0
+                    for pub in new_pubs:
+                        pub_id = pub.get("scholar_id")
+                        if pub_id and pub_id not in existing_ids:
+                            all_publications.append(pub)
+                            existing_ids.add(pub_id)
+                            added += 1
+                        elif not pub_id:
+                            # No scholar_id, add anyway (can't dedupe)
+                            all_publications.append(pub)
+                            added += 1
+
+                    log_now(f"[AUTHOR PROFILE] Page {page_num}: {len(new_pubs)} found, {added} added (total: {len(all_publications)})")
+
+                    # If we got fewer than page_size, we're likely at the end
+                    if len(new_pubs) < page_size:
+                        log_now(f"[AUTHOR PROFILE] Got {len(new_pubs)} < {page_size}, likely at end")
+                        break
+
+                current_start += page_size
+                page_num += 1
+
+                # Rate limiting: 4 seconds between pages
+                if len(all_publications) < max_publications:
+                    await asyncio.sleep(4)
+
+            except Exception as e:
+                log_now(f"[AUTHOR PROFILE] Error fetching page {page_num}: {e}")
+                break
+
+        # Combine metadata with all publications
+        result = profile_metadata or {
+            "scholar_user_id": scholar_user_id,
+            "profile_url": profile_url,
+            "full_name": None,
+            "affiliation": None,
+            "homepage_url": None,
+            "topics": [],
+        }
+        result["publications"] = all_publications
+        result["publications_count"] = len(all_publications)
+
+        log_now(f"[AUTHOR PROFILE] Complete: {len(all_publications)} total publications fetched in {page_num + 1} pages")
+        return result
+
 
 # Singleton instance
 _scholar_service: Optional[ScholarSearchService] = None

@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     health_monitor_interval_minutes: int = 5
     health_monitor_dry_run: bool = False  # If True, diagnose but don't execute actions
 
+    # Internal webhook for thinker harvest completion tracking
+    # Used to trigger automatic profile pre-fetching after all citation jobs complete
+    internal_base_url: str = "http://localhost:8000"  # Backend's self-referencing URL
+    internal_webhook_secret: str = "internal-webhook-secret-change-in-prod"  # HMAC signing secret
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

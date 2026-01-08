@@ -9308,11 +9308,11 @@ async def get_scholar_author_profile(
                 fetched_at=cached_profile.fetched_at,
             )
 
-    # Fetch fresh from Scholar (with publications)
+    # Fetch fresh from Scholar (with ALL publications via pagination)
     scholar_service = get_scholar_service()
     profile_url = f"https://scholar.google.com/citations?user={user_id}&hl=en"
-    # Use the enhanced method that fetches up to 100 publications
-    profile_data = await scholar_service.fetch_author_profile_with_publications(profile_url)
+    # Use the paginated method that fetches ALL publications (up to 2000)
+    profile_data = await scholar_service.fetch_author_profile_with_all_publications(profile_url)
 
     if not profile_data:
         raise HTTPException(status_code=404, detail=f"Could not fetch Scholar profile for user {user_id}")
@@ -9360,6 +9360,245 @@ async def get_scholar_author_profile(
         publications_count=publications_count,
         fetched_at=datetime.utcnow(),
     )
+
+
+# ============================================================================
+# Internal Webhooks - Profile Pre-Fetching
+# ============================================================================
+
+async def prefetch_top_author_profiles(thinker_id: int, max_profiles: int = 20):
+    """
+    Pre-fetch Google Scholar profiles for top citing authors.
+
+    Runs as background task after all harvest jobs complete for a thinker.
+    Uses the same analytics query logic as the frontend would.
+    """
+    from .services.scholar_search import get_scholar_service
+
+    logger.info(f"[ProfilePrefetch] Starting for thinker {thinker_id} (max {max_profiles} profiles)")
+
+    async with async_session() as db:
+        thinker = await db.get(Thinker, thinker_id)
+        if not thinker:
+            logger.error(f"[ProfilePrefetch] Thinker {thinker_id} not found")
+            return
+
+        thinker.profiles_prefetch_status = "running"
+        await db.commit()
+
+        try:
+            # Get paper IDs for this thinker (same query as analytics endpoint)
+            paper_ids_result = await db.execute(
+                select(ThinkerWork.paper_id)
+                .where(ThinkerWork.thinker_id == thinker_id)
+                .where(ThinkerWork.decision == "accepted")
+                .where(ThinkerWork.paper_id.isnot(None))
+            )
+            paper_ids = [r[0] for r in paper_ids_result.fetchall()]
+
+            if not paper_ids:
+                logger.info(f"[ProfilePrefetch] No papers for thinker {thinker_id}")
+                thinker.profiles_prefetch_status = "completed"
+                thinker.profiles_prefetch_count = 0
+                thinker.profiles_prefetched_at = datetime.utcnow()
+                await db.commit()
+                return
+
+            # Get top citing authors with profile URLs
+            # Group citations by author, aggregate profile URLs
+            from sqlalchemy import func
+            author_query = await db.execute(
+                select(
+                    Citation.authors,
+                    func.count(Citation.id).label("papers_count"),
+                    func.sum(Citation.citation_count).label("total_influence"),
+                    func.array_agg(Citation.author_profiles).label("author_profiles_list"),
+                )
+                .where(Citation.paper_id.in_(paper_ids))
+                .where(Citation.authors.isnot(None))
+                .group_by(Citation.authors)
+                .order_by(func.sum(Citation.citation_count).desc())
+                .limit(50)  # Get more than needed, we'll filter by profile URL
+            )
+            top_authors = author_query.fetchall()
+
+            # Build profile URL lookup from author_profiles JSON
+            author_profile_urls = {}
+            for row in top_authors:
+                author_name = row[0]
+                profiles_list = row[3] or []
+                for profiles_json in profiles_list:
+                    if profiles_json:
+                        try:
+                            profiles = json.loads(profiles_json) if isinstance(profiles_json, str) else profiles_json
+                            for p in profiles:
+                                if isinstance(p, dict) and p.get("profile_url"):
+                                    name = p.get("name", "").lower().strip()
+                                    if name and name in author_name.lower():
+                                        author_profile_urls[author_name] = p["profile_url"]
+                                        break
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if author_name in author_profile_urls:
+                        break
+
+            logger.info(f"[ProfilePrefetch] Found {len(author_profile_urls)} authors with profile URLs")
+
+            # Fetch profiles with rate limiting
+            scholar_service = get_scholar_service()
+            profiles_fetched = 0
+
+            for author_name, profile_url in list(author_profile_urls.items())[:max_profiles]:
+                # Extract user ID
+                user_match = re.search(r"user=([A-Za-z0-9_-]+)", profile_url)
+                if not user_match:
+                    continue
+
+                user_id = user_match.group(1)
+
+                # Check if already cached and fresh
+                cached_result = await db.execute(
+                    select(ScholarAuthorProfile)
+                    .where(ScholarAuthorProfile.scholar_user_id == user_id)
+                )
+                existing = cached_result.scalar_one_or_none()
+
+                if existing and (datetime.utcnow() - existing.fetched_at).days < 7:
+                    logger.info(f"[ProfilePrefetch] Skipping {user_id} - already cached")
+                    continue
+
+                # Fetch with ALL publications (paginated)
+                logger.info(f"[ProfilePrefetch] Fetching profile for {user_id} ({author_name[:30]}...)")
+                profile_data = await scholar_service.fetch_author_profile_with_all_publications(profile_url)
+
+                if profile_data:
+                    # Store in cache
+                    topics_json = json.dumps(profile_data.get("topics", []))
+                    publications_json = json.dumps(profile_data.get("publications", []))
+                    pubs_count = len(profile_data.get("publications", []))
+
+                    if existing:
+                        existing.full_name = profile_data.get("full_name")
+                        existing.affiliation = profile_data.get("affiliation")
+                        existing.homepage_url = profile_data.get("homepage_url")
+                        existing.topics = topics_json
+                        existing.publications = publications_json
+                        existing.publications_count = pubs_count
+                        existing.fetched_at = datetime.utcnow()
+                    else:
+                        new_profile = ScholarAuthorProfile(
+                            scholar_user_id=user_id,
+                            profile_url=profile_url,
+                            full_name=profile_data.get("full_name"),
+                            affiliation=profile_data.get("affiliation"),
+                            homepage_url=profile_data.get("homepage_url"),
+                            topics=topics_json,
+                            publications=publications_json,
+                            publications_count=pubs_count,
+                            fetched_at=datetime.utcnow(),
+                        )
+                        db.add(new_profile)
+
+                    await db.commit()
+                    profiles_fetched += 1
+                    logger.info(f"[ProfilePrefetch] Cached profile {user_id} with {pubs_count} publications ({profiles_fetched}/{max_profiles})")
+
+                # Rate limiting: 5 seconds between profile fetches
+                # (Each profile fetch may involve multiple pages)
+                await asyncio.sleep(5)
+
+            # Update thinker status
+            thinker.profiles_prefetch_status = "completed"
+            thinker.profiles_prefetch_count = profiles_fetched
+            thinker.profiles_prefetched_at = datetime.utcnow()
+            await db.commit()
+
+            logger.info(f"[ProfilePrefetch] Complete: {profiles_fetched} profiles pre-fetched for {thinker.canonical_name}")
+
+        except Exception as e:
+            logger.error(f"[ProfilePrefetch] Error for thinker {thinker_id}: {e}")
+            thinker.profiles_prefetch_status = "failed"
+            await db.commit()
+
+
+@app.post("/api/internal/thinker-harvest-callback/{thinker_id}")
+async def handle_thinker_harvest_callback(
+    thinker_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Internal webhook endpoint called when extract_citations jobs complete.
+
+    Tracks completion count and triggers profile pre-fetching when all jobs done.
+    Uses HMAC signature verification for security.
+    """
+    import hmac
+    import hashlib
+    from .config import get_settings
+
+    settings = get_settings()
+
+    # Verify webhook signature if secret is configured
+    if settings.internal_webhook_secret:
+        signature = request.headers.get("X-Webhook-Signature", "")
+        body = await request.body()
+
+        expected_signature = hmac.new(
+            settings.internal_webhook_secret.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_signature):
+            logger.warning(f"[HarvestCallback] Invalid signature for thinker {thinker_id}")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Parse payload
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    status = payload.get("status", "completed")
+    job_id = payload.get("job_id")
+
+    logger.info(f"[HarvestCallback] Received callback for thinker {thinker_id}, job {job_id}, status: {status}")
+
+    # Get thinker
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        logger.warning(f"[HarvestCallback] Thinker {thinker_id} not found")
+        return {"status": "thinker_not_found"}
+
+    # Update counters based on status
+    if status == "completed":
+        thinker.harvest_batch_jobs_completed = (thinker.harvest_batch_jobs_completed or 0) + 1
+    elif status == "failed":
+        thinker.harvest_batch_jobs_failed = (thinker.harvest_batch_jobs_failed or 0) + 1
+
+    await db.commit()
+
+    # Check if all jobs are done
+    total_done = (thinker.harvest_batch_jobs_completed or 0) + (thinker.harvest_batch_jobs_failed or 0)
+    total_expected = thinker.harvest_batch_jobs_total or 0
+
+    logger.info(f"[HarvestCallback] Thinker {thinker.canonical_name}: {total_done}/{total_expected} jobs complete")
+
+    if total_expected > 0 and total_done >= total_expected:
+        # All jobs done - trigger profile pre-fetching as background task
+        logger.info(f"[HarvestCallback] All {total_done} harvest jobs complete for {thinker.canonical_name}. Starting profile pre-fetch...")
+
+        # Run in background (don't block webhook response)
+        asyncio.create_task(prefetch_top_author_profiles(thinker_id))
+
+    return {
+        "status": "ok",
+        "thinker_id": thinker_id,
+        "completed": thinker.harvest_batch_jobs_completed,
+        "failed": thinker.harvest_batch_jobs_failed,
+        "total": total_expected,
+    }
 
 
 @app.post("/api/thinkers/{thinker_id}/confirm")

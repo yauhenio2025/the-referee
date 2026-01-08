@@ -3029,6 +3029,18 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
 
     log_now(f"[ThinkerHarvest] Processing {len(works)} works")
 
+    # Generate batch ID for tracking job completion
+    import uuid
+    from ..config import get_settings
+    settings = get_settings()
+    batch_id = str(uuid.uuid4())
+
+    # Build callback URL for job completion notifications
+    callback_url = f"{settings.internal_base_url}/api/internal/thinker-harvest-callback/{thinker_id}"
+    callback_secret = settings.internal_webhook_secret
+
+    log_now(f"[ThinkerHarvest] Batch ID: {batch_id}, callback: {callback_url}")
+
     jobs_queued = 0
     papers_created = 0
     papers_linked = 0
@@ -3073,11 +3085,14 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
             work.paper_id = paper.id
 
             # Queue citation extraction job (with duplicate prevention)
+            # Include callback URL for harvest completion tracking
             before_create = datetime.utcnow()
             extract_job = await create_extract_citations_job(
                 db=db,
                 paper_id=paper.id,
                 resume_message=f"Thinker harvest: {work.title[:50]}...",
+                callback_url=callback_url,
+                callback_secret=callback_secret,
             )
 
             # Check if new job was created or existing returned
@@ -3098,14 +3113,20 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
             log_now(f"[ThinkerHarvest] Error processing work {work.id}: {e}")
             continue
 
-    # Update thinker stats
+    # Update thinker stats and batch tracking
     thinker.works_harvested = (thinker.works_harvested or 0) + jobs_queued
+    thinker.harvest_batch_id = batch_id
+    thinker.harvest_batch_jobs_total = jobs_queued
+    thinker.harvest_batch_jobs_completed = 0
+    thinker.harvest_batch_jobs_failed = 0
+    thinker.profiles_prefetch_status = "pending" if jobs_queued > 0 else None
     await db.commit()
 
     log_now(f"[ThinkerHarvest] ═══════════════════════════════════════════════")
     log_now(f"[ThinkerHarvest] COMPLETE: {len(works)} works processed")
     log_now(f"[ThinkerHarvest] Papers created: {papers_created}, Linked: {papers_linked}")
-    log_now(f"[ThinkerHarvest] Jobs queued: {jobs_queued}")
+    log_now(f"[ThinkerHarvest] Jobs queued: {jobs_queued} (batch: {batch_id})")
+    log_now(f"[ThinkerHarvest] Profile pre-fetch will trigger when all jobs complete")
     log_now(f"[ThinkerHarvest] ═══════════════════════════════════════════════")
 
     return {
@@ -3115,6 +3136,7 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
         "papers_created": papers_created,
         "papers_linked": papers_linked,
         "jobs_queued": jobs_queued,
+        "batch_id": batch_id,
     }
 
 
@@ -3504,6 +3526,9 @@ async def create_extract_citations_job(
     # Resume mode params
     is_resume: bool = False,
     resume_message: str = None,
+    # Callback params for completion notification
+    callback_url: str = None,
+    callback_secret: str = None,
 ) -> Job:
     """Create an extract_citations job
 
@@ -3518,6 +3543,8 @@ async def create_extract_citations_job(
         force_create: If True, skip duplicate check (for special cases)
         is_resume: If True, this is an auto-resume job
         resume_message: Custom message for resume jobs
+        callback_url: URL to POST to when job completes (for thinker harvest tracking)
+        callback_secret: HMAC secret for signing callback requests
     """
     # DUPLICATE PREVENTION: Check for existing pending/running job for same paper
     if not force_create:
@@ -3569,6 +3596,8 @@ async def create_extract_citations_job(
         params=json.dumps(params),
         progress=0,
         progress_message=message,
+        callback_url=callback_url,
+        callback_secret=callback_secret,
     )
     db.add(job)
     await db.flush()

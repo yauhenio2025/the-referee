@@ -179,6 +179,14 @@ async def run_migrations():
         # Publications cache for scholar author profiles
         "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications TEXT",
         "ALTER TABLE scholar_author_profiles ADD COLUMN IF NOT EXISTS publications_count INTEGER DEFAULT 0",
+        # Thinker harvest batch tracking for profile pre-fetching
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_id VARCHAR(36) NULL",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_jobs_total INTEGER DEFAULT 0",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_jobs_completed INTEGER DEFAULT 0",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS harvest_batch_jobs_failed INTEGER DEFAULT 0",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetch_status VARCHAR(20) NULL",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetch_count INTEGER DEFAULT 0",
+        "ALTER TABLE thinkers ADD COLUMN IF NOT EXISTS profiles_prefetched_at TIMESTAMP NULL",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

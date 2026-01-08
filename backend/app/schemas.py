@@ -919,6 +919,10 @@ class ThinkerResponse(BaseModel):
     disambiguated_at: Optional[datetime] = None
     harvest_started_at: Optional[datetime] = None
     harvest_completed_at: Optional[datetime] = None
+    # Profile pre-fetch status (automatic after harvest completes)
+    profiles_prefetch_status: Optional[str] = None  # null, pending, running, completed, failed
+    profiles_prefetch_count: int = 0
+    profiles_prefetched_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
