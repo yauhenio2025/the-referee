@@ -1,7 +1,7 @@
 /**
  * Thinker Detail Component - Shows thinker info, works, and actions
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
@@ -116,16 +116,19 @@ function ThinkerDetail({ thinkerId, onBack }) {
   }
 
   // Load Scholar profiles for authors with profile_url but no cached affiliation
-  const loadAuthorProfiles = async () => {
+  // silent=true for auto-loading (no toast), false for manual button click
+  const loadAuthorProfiles = async (silent = false) => {
     if (!analytics?.top_citing_authors) return
+    if (loadingProfiles) return  // Prevent double-loading
 
     // Find authors with profile_url but no affiliation (not yet cached)
-    const authorsToLoad = analytics.top_citing_authors.filter(
-      a => a.profile_url && !a.affiliation && !loadedProfiles[a.profile_url]
-    )
+    // Limit to top 10 to avoid too many requests
+    const authorsToLoad = analytics.top_citing_authors
+      .slice(0, 10)
+      .filter(a => a.profile_url && !a.affiliation && !loadedProfiles[a.profile_url])
 
     if (authorsToLoad.length === 0) {
-      showToast('All profiles already loaded', 'info')
+      if (!silent) showToast('All profiles already loaded', 'info')
       return
     }
 
@@ -144,7 +147,7 @@ function ThinkerDetail({ thinkerId, onBack }) {
         setLoadedProfiles(prev => ({ ...prev, [author.profile_url]: profile }))
         loaded++
         // Small delay to avoid rate limiting
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise(r => setTimeout(r, 1500))
       } catch (err) {
         console.error(`Failed to load profile for ${userId}:`, err)
         failed++
@@ -154,8 +157,23 @@ function ThinkerDetail({ thinkerId, onBack }) {
     setLoadingProfiles(false)
     // Refresh analytics to get newly cached data
     queryClient.invalidateQueries({ queryKey: ['thinker-analytics', thinkerId] })
-    showToast(`Loaded ${loaded} profiles${failed > 0 ? `, ${failed} failed` : ''}`, loaded > 0 ? 'success' : 'warning')
+    if (!silent || loaded > 0) {
+      showToast(`Loaded ${loaded} profiles${failed > 0 ? `, ${failed} failed` : ''}`, loaded > 0 ? 'success' : 'warning')
+    }
   }
+
+  // Auto-load profiles when analytics data arrives
+  useEffect(() => {
+    if (analytics?.top_citing_authors?.length > 0 && activeTab === 'analytics') {
+      // Check if there are uncached profiles to load
+      const hasUncached = analytics.top_citing_authors
+        .slice(0, 10)
+        .some(a => a.profile_url && !a.affiliation && !loadedProfiles[a.profile_url])
+      if (hasUncached && !loadingProfiles) {
+        loadAuthorProfiles(true)  // Silent auto-load
+      }
+    }
+  }, [analytics?.top_citing_authors, activeTab])
 
   // Get merged profile data (from analytics or locally loaded)
   const getAuthorProfile = (author) => {
@@ -827,14 +845,8 @@ function ThinkerDetail({ thinkerId, onBack }) {
                   <div className="analytics-card">
                     <div className="card-header-with-action">
                       <h3>Top Citing Authors</h3>
-                      {analytics.top_citing_authors.some(a => a.profile_url && !a.affiliation) && (
-                        <button
-                          className="load-profiles-btn"
-                          onClick={loadAuthorProfiles}
-                          disabled={loadingProfiles}
-                        >
-                          {loadingProfiles ? '⏳ Loading...' : '🎓 Load Profiles'}
-                        </button>
+                      {loadingProfiles && (
+                        <span className="loading-profiles-indicator">⏳ Loading profiles...</span>
                       )}
                     </div>
                     <p className="card-subtitle">
@@ -1659,6 +1671,17 @@ function ThinkerDetail({ thinkerId, onBack }) {
         .load-profiles-btn:disabled {
           opacity: 0.6;
           cursor: not-allowed;
+        }
+
+        .loading-profiles-indicator {
+          font-size: 0.85em;
+          color: var(--text-secondary);
+          animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
 
         /* Top Citing Authors - Table Style */
