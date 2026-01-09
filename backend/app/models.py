@@ -428,7 +428,7 @@ class HarvestTarget(Base):
     edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
 
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # null = all years combined
-    letter: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # author letter partition: 'a'-'z', '_' for no-letter, null = all letters
+    letter: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # partition key: 'a'-'z', '_', 'lang_zh-CN', 'a_excl', etc.
 
     # What Scholar reported as the total count
     expected_count: Mapped[int] = mapped_column(Integer)
@@ -492,7 +492,7 @@ class PartitionRun(Base):
     edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
     job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)  # NULL for author-letter partitions
-    letter: Mapped[Optional[str]] = mapped_column(String(5), nullable=True, index=True)  # For author-letter partitions
+    letter: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)  # partition key: 'a'-'z', '_', 'lang_zh-CN', 'a_excl', etc.
 
     # Parent partition (for recursive partitioning)
     parent_partition_id: Mapped[Optional[int]] = mapped_column(

@@ -200,6 +200,9 @@ async def run_migrations():
         "ALTER TABLE partition_runs ALTER COLUMN year DROP NOT NULL",
         "ALTER TABLE partition_runs ADD COLUMN IF NOT EXISTS letter VARCHAR(5) NULL",
         "CREATE INDEX IF NOT EXISTS idx_partition_runs_letter ON partition_runs(edition_id, letter)",
+        # Expand letter columns to VARCHAR(20) for longer partition keys like 'lang_zh-CN', 'a_excl'
+        "ALTER TABLE harvest_targets ALTER COLUMN letter TYPE VARCHAR(20)",
+        "ALTER TABLE partition_runs ALTER COLUMN letter TYPE VARCHAR(20)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
