@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import HarvestDashboard from './HarvestDashboard'
@@ -206,7 +207,9 @@ export default function JobQueue() {
                     {/* Paper Title */}
                     {job.paper_id && (
                       <div className="job-paper-title">
-                        📄 {getPaperTitle(job.paper_id)}
+                        📄 <Link to={`/papers/${job.paper_id}/citations`} className="paper-link">
+                          {getPaperTitle(job.paper_id)}
+                        </Link>
                       </div>
                     )}
 
@@ -430,7 +433,11 @@ export default function JobQueue() {
                           </span>
                         </td>
                         <td className="job-paper-cell">
-                          {job.paper_id ? getPaperTitle(job.paper_id) : '-'}
+                          {job.paper_id ? (
+                            <Link to={`/papers/${job.paper_id}/citations`} className="paper-link">
+                              {getPaperTitle(job.paper_id)}
+                            </Link>
+                          ) : '-'}
                         </td>
                         <td>
                           {job.status === 'completed' && details.citations_saved ? (
