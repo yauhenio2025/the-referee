@@ -17,8 +17,18 @@ import JobQueue from './components/JobQueue'
 import Stats from './components/Stats'
 import ForeignEditionsNeeded from './components/ForeignEditionsNeeded'
 import { ToastProvider } from './components/Toast'
+import { AuthProvider, RequireAuth, useAuth } from './components/Auth'
 
 const queryClient = new QueryClient()
+
+function LogoutButton() {
+  const { logout } = useAuth()
+  return (
+    <button className="logout-button" onClick={logout} title="Sign out">
+      <span>🚪</span>
+    </button>
+  )
+}
 
 function AppContent() {
   const [selectedPaper, setSelectedPaper] = useState(null)
@@ -83,6 +93,7 @@ function AppContent() {
           <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             <span className="theme-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
           </button>
+          <LogoutButton />
         </div>
       </header>
 
@@ -279,13 +290,17 @@ function ThinkerDetailRoute() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ToastProvider>
-          <AppContent />
-        </ToastProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <AuthProvider>
+      <RequireAuth>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <ToastProvider>
+              <AppContent />
+            </ToastProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </RequireAuth>
+    </AuthProvider>
   )
 }
 
