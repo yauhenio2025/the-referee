@@ -291,6 +291,9 @@ const AIDiagnosisModal = ({ isOpen, onClose, diagnosisData, isLoading, error, ed
 
 // Alerts Section Component with restart functionality
 const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [showAllStalled, setShowAllStalled] = useState(false)
+  const [showAllFailed, setShowAllFailed] = useState(false)
   const [selectedEditions, setSelectedEditions] = useState(new Set())
   const [isRestarting, setIsRestarting] = useState(false)
   const [isMarking, setIsMarking] = useState(false)
@@ -304,6 +307,53 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
   // Filter to only stalled papers (the ones we can restart)
   const stalledAlerts = alerts.filter(a => a.type === 'stalled_paper' && a.edition_id)
   const otherAlerts = alerts.filter(a => a.type !== 'stalled_paper' || !a.edition_id)
+
+  // Group stalled alerts by paper_id to reduce duplication
+  const groupedByPaper = stalledAlerts.reduce((acc, alert) => {
+    const key = alert.paper_id
+    if (!acc[key]) {
+      acc[key] = {
+        paper_id: alert.paper_id,
+        paper_title: alert.paper_title,
+        editions: [],
+        total_harvested: 0,
+        total_expected: 0,
+        has_gs_fault: false,
+        has_needs_scraping: false,
+        has_no_data: false,
+      }
+    }
+    acc[key].editions.push(alert)
+    acc[key].total_harvested += alert.harvested_count || 0
+    acc[key].total_expected += alert.expected_count || 0
+    if (alert.diagnosis === 'gs_fault') acc[key].has_gs_fault = true
+    if (alert.diagnosis === 'needs_scraping') acc[key].has_needs_scraping = true
+    if (alert.diagnosis === 'no_data') acc[key].has_no_data = true
+    return acc
+  }, {})
+  const groupedPapers = Object.values(groupedByPaper)
+
+  // Group repeated failures by paper
+  const failedByPaper = otherAlerts.filter(a => a.type === 'repeated_failures').reduce((acc, alert) => {
+    const key = alert.paper_id
+    if (!acc[key]) {
+      acc[key] = { ...alert, fail_count: 0 }
+    }
+    // Extract fail count from message like "38 failed jobs in last 24h"
+    const match = alert.message?.match(/(\d+) failed/)
+    if (match) acc[key].fail_count = Math.max(acc[key].fail_count, parseInt(match[1]))
+    return acc
+  }, {})
+  const failedPapers = Object.values(failedByPaper).sort((a, b) => b.fail_count - a.fail_count)
+
+  // Non-failure other alerts
+  const otherNonFailure = otherAlerts.filter(a => a.type !== 'repeated_failures')
+
+  // Display limits
+  const STALLED_LIMIT = 5
+  const FAILED_LIMIT = 5
+  const displayedStalled = showAllStalled ? groupedPapers : groupedPapers.slice(0, STALLED_LIMIT)
+  const displayedFailed = showAllFailed ? failedPapers : failedPapers.slice(0, FAILED_LIMIT)
 
   // Count GS fault vs needs scraping
   const gsFaultCount = stalledAlerts.filter(a => a.diagnosis === 'gs_fault').length
@@ -457,6 +507,9 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
     onRefresh?.()
   }
 
+  // Calculate total fail count for summary
+  const totalFailCount = failedPapers.reduce((sum, p) => sum + p.fail_count, 0)
+
   return (
     <>
       <AIDiagnosisModal
@@ -468,15 +521,32 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
         editionId={diagnosisModal.editionId}
         onActionExecuted={handleActionExecuted}
       />
-    <div className="dashboard-alerts">
-      <div className="alerts-header">
+    <div className="dashboard-alerts collapsible">
+      {/* Collapsible Header with Summary Badges */}
+      <div className="alerts-header clickable" onClick={() => setIsExpanded(!isExpanded)}>
         <h3 className="dashboard-section-title">
-          Alerts ({stalledAlerts.length} stalled{otherAlerts.length > 0 ? `, ${otherAlerts.length} other` : ''})
-          {gsFaultCount > 0 && <span className="diagnosis-summary diagnosis-gs-fault"> • {gsFaultCount} GS Fault</span>}
-          {needsScrapingCount > 0 && <span className="diagnosis-summary diagnosis-needs-scraping"> • {needsScrapingCount} Incomplete</span>}
+          <span className="collapse-icon">{isExpanded ? '▼' : '▶'}</span>
+          Alerts
+          <span className="alert-badges">
+            {groupedPapers.length > 0 && (
+              <span className="alert-badge badge-stalled" title={`${stalledAlerts.length} stalled editions across ${groupedPapers.length} papers`}>
+                {groupedPapers.length} stalled
+              </span>
+            )}
+            {failedPapers.length > 0 && (
+              <span className="alert-badge badge-failed" title={`${totalFailCount} failures across ${failedPapers.length} papers`}>
+                {failedPapers.length} failing
+              </span>
+            )}
+            {otherNonFailure.length > 0 && (
+              <span className="alert-badge badge-other">
+                {otherNonFailure.length} other
+              </span>
+            )}
+          </span>
         </h3>
-        {stalledAlerts.length > 0 && (
-          <div className="alerts-actions">
+        {isExpanded && stalledAlerts.length > 0 && (
+          <div className="alerts-actions" onClick={e => e.stopPropagation()}>
             <button
               className="btn-mark-complete-selected"
               onClick={handleMarkCompleteSelected}
@@ -503,129 +573,200 @@ const AlertsSection = ({ alerts, onPaperClick, onRefresh }) => {
         )}
       </div>
 
-      {/* Stalled papers table */}
-      {stalledAlerts.length > 0 && (
-        <table className="alerts-table">
-          <thead>
-            <tr>
-              <th className="col-checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedEditions.size === stalledAlerts.length && stalledAlerts.length > 0}
-                  onChange={toggleSelectAll}
-                />
-              </th>
-              <th className="col-paper">Paper</th>
-              <th className="col-diagnosis">Diagnosis</th>
-              <th className="col-years">Years</th>
-              <th className="col-harvested">Harvested</th>
-              <th className="col-expected">Expected</th>
-              <th className="col-gap">Gap</th>
-              <th className="col-action">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stalledAlerts.map((alert) => {
-              const gapPercent = alert.expected_count > 0
-                ? Math.round((alert.gap_remaining / alert.expected_count) * 100)
-                : 0
-              const isSelected = selectedEditions.has(alert.edition_id)
-              const isRestartingThis = restartingIds.has(alert.edition_id)
-              const isMarkingThis = markingIds.has(alert.edition_id)
-              const diag = getDiagnosisLabel(alert.diagnosis)
+      {isExpanded && (
+        <>
+          {/* Grouped Stalled Papers - compact table */}
+          {groupedPapers.length > 0 && (
+            <div className="alerts-subsection">
+              <div className="subsection-header">
+                <span className="subsection-title">Stalled Papers ({groupedPapers.length} papers, {stalledAlerts.length} editions)</span>
+                <span className="diagnosis-chips">
+                  {gsFaultCount > 0 && <span className="chip chip-gs-fault">{gsFaultCount} GS Fault</span>}
+                  {needsScrapingCount > 0 && <span className="chip chip-incomplete">{needsScrapingCount} Incomplete</span>}
+                </span>
+              </div>
+              <table className="alerts-table compact">
+                <thead>
+                  <tr>
+                    <th className="col-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedEditions.size === stalledAlerts.length && stalledAlerts.length > 0}
+                        onChange={toggleSelectAll}
+                      />
+                    </th>
+                    <th className="col-paper">Paper</th>
+                    <th className="col-editions">Ed.</th>
+                    <th className="col-status">Status</th>
+                    <th className="col-gap-compact">Gap</th>
+                    <th className="col-action">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedStalled.map((group) => {
+                    const totalGap = group.total_expected - group.total_harvested
+                    const gapPercent = group.total_expected > 0
+                      ? Math.round((totalGap / group.total_expected) * 100)
+                      : 0
+                    const allSelected = group.editions.every(e => selectedEditions.has(e.edition_id))
+                    const someSelected = group.editions.some(e => selectedEditions.has(e.edition_id))
+                    const firstEdition = group.editions[0]
+                    const isRestartingAny = group.editions.some(e => restartingIds.has(e.edition_id))
 
-              return (
-                <tr key={alert.edition_id} className={`${isSelected ? 'selected' : ''} ${alert.diagnosis === 'gs_fault' ? 'row-gs-fault' : ''}`}>
-                  <td className="col-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleSelection(alert.edition_id)}
-                    />
-                  </td>
-                  <td className="col-paper">
+                    return (
+                      <tr key={group.paper_id} className={`${allSelected ? 'selected' : ''} ${group.has_gs_fault && !group.has_needs_scraping ? 'row-gs-fault' : ''}`}>
+                        <td className="col-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            ref={el => el && (el.indeterminate = someSelected && !allSelected)}
+                            onChange={() => {
+                              const edIds = group.editions.map(e => e.edition_id)
+                              if (allSelected) {
+                                setSelectedEditions(prev => {
+                                  const next = new Set(prev)
+                                  edIds.forEach(id => next.delete(id))
+                                  return next
+                                })
+                              } else {
+                                setSelectedEditions(prev => new Set([...prev, ...edIds]))
+                              }
+                            }}
+                          />
+                        </td>
+                        <td className="col-paper">
+                          <span
+                            className="clickable-paper"
+                            onClick={() => onPaperClick(group.paper_id)}
+                          >
+                            {group.paper_title ? `${group.paper_title.substring(0, 35)}...` : `Paper #${group.paper_id}`}
+                          </span>
+                        </td>
+                        <td className="col-editions">
+                          {group.editions.length > 1 ? (
+                            <span className="edition-count" title={`${group.editions.length} editions with issues`}>
+                              {group.editions.length}
+                            </span>
+                          ) : '1'}
+                        </td>
+                        <td className="col-status">
+                          <div className="status-badges">
+                            {group.has_no_data && <span className="mini-badge badge-no-data" title="No harvest data">No Data</span>}
+                            {group.has_needs_scraping && <span className="mini-badge badge-incomplete" title="Needs more scraping">Incomplete</span>}
+                            {group.has_gs_fault && <span className="mini-badge badge-gs-fault" title="All years scraped - gap is GS">GS Fault</span>}
+                          </div>
+                        </td>
+                        <td className="col-gap-compact">
+                          <span className={gapPercent > 50 ? 'gap-high' : gapPercent > 20 ? 'gap-medium' : 'gap-low'}>
+                            {gapPercent}%
+                          </span>
+                          <span className="gap-numbers">({totalGap.toLocaleString()})</span>
+                        </td>
+                        <td className="col-action">
+                          <div className="action-buttons compact">
+                            <button
+                              className="btn-mini btn-diagnose"
+                              onClick={() => handleDiagnose(firstEdition.edition_id)}
+                              disabled={diagnosingIds.has(firstEdition.edition_id)}
+                              title="AI Diagnosis"
+                            >
+                              {diagnosingIds.has(firstEdition.edition_id) ? '...' : '🤖'}
+                            </button>
+                            {group.has_gs_fault && !group.has_needs_scraping ? (
+                              <button
+                                className="btn-mini btn-mark-complete"
+                                onClick={() => {
+                                  group.editions.forEach(e => handleMarkCompleteSingle(e.edition_id))
+                                }}
+                                disabled={isMarking}
+                                title="Mark all editions complete"
+                              >
+                                ✓
+                              </button>
+                            ) : (
+                              <button
+                                className="btn-mini btn-restart"
+                                onClick={() => {
+                                  group.editions.forEach(e => handleRestartSingle(e.edition_id))
+                                }}
+                                disabled={isRestartingAny}
+                                title="Restart all editions"
+                              >
+                                {isRestartingAny ? '...' : '↻'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {groupedPapers.length > STALLED_LIMIT && (
+                <button
+                  className="btn-show-more"
+                  onClick={() => setShowAllStalled(!showAllStalled)}
+                >
+                  {showAllStalled ? `Show less` : `Show all ${groupedPapers.length} papers`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Repeated Failures - compact list */}
+          {failedPapers.length > 0 && (
+            <div className="alerts-subsection failures">
+              <div className="subsection-header">
+                <span className="subsection-title">Repeated Failures ({failedPapers.length} papers, {totalFailCount} total failures)</span>
+              </div>
+              <div className="failures-compact">
+                {displayedFailed.map((paper) => (
+                  <div key={paper.paper_id} className="failure-row">
+                    <span className="failure-icon">✕</span>
                     <span
-                      className="clickable-paper"
+                      className="failure-paper clickable-paper"
+                      onClick={() => paper.paper_id && onPaperClick(paper.paper_id)}
+                    >
+                      {paper.paper_title ? `${paper.paper_title.substring(0, 40)}...` : `Paper #${paper.paper_id}`}
+                    </span>
+                    <span className="failure-count">{paper.fail_count} fails/24h</span>
+                  </div>
+                ))}
+              </div>
+              {failedPapers.length > FAILED_LIMIT && (
+                <button
+                  className="btn-show-more"
+                  onClick={() => setShowAllFailed(!showAllFailed)}
+                >
+                  {showAllFailed ? `Show less` : `Show all ${failedPapers.length} papers`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Other alerts (non-failure, non-stalled) */}
+          {otherNonFailure.length > 0 && (
+            <div className="alerts-subsection other">
+              <div className="subsection-header">
+                <span className="subsection-title">Other Alerts ({otherNonFailure.length})</span>
+              </div>
+              <div className="alerts-list compact">
+                {otherNonFailure.map((alert, idx) => (
+                  <div key={idx} className={`alert-item-compact ${getAlertClass(alert.type)}`}>
+                    <span className="alert-icon">{getAlertIcon(alert.type)}</span>
+                    <span
+                      className="alert-paper clickable-paper"
                       onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
                     >
                       {alert.paper_title ? `${alert.paper_title.substring(0, 30)}...` : `Paper #${alert.paper_id}`}
                     </span>
-                  </td>
-                  <td className="col-diagnosis">
-                    <span className={`diagnosis-badge ${diag.class}`} title={diag.tip}>
-                      {diag.text}
-                      {alert.has_overflow_years && <span className="overflow-indicator" title="Has overflow years (>1000)">⚡</span>}
-                    </span>
-                  </td>
-                  <td className="col-years">
-                    {alert.years_total > 0 ? (
-                      <span className={alert.years_complete === alert.years_total ? 'years-complete' : 'years-partial'}>
-                        {alert.years_complete}/{alert.years_total}
-                      </span>
-                    ) : (
-                      <span className="years-none">—</span>
-                    )}
-                  </td>
-                  <td className="col-harvested">{(alert.harvested_count || 0).toLocaleString()}</td>
-                  <td className="col-expected">{(alert.expected_count || 0).toLocaleString()}</td>
-                  <td className="col-gap">
-                    <span className={gapPercent > 20 ? 'gap-high' : 'gap-low'}>
-                      {(alert.gap_remaining || 0).toLocaleString()} ({gapPercent}%)
-                    </span>
-                  </td>
-                  <td className="col-action">
-                    <div className="action-buttons">
-                      <button
-                        className="btn-diagnose"
-                        onClick={() => handleDiagnose(alert.edition_id)}
-                        disabled={diagnosingIds.has(alert.edition_id)}
-                        title="Run AI diagnosis to understand why harvest stalled"
-                      >
-                        {diagnosingIds.has(alert.edition_id) ? '🔄' : '🤖'}
-                      </button>
-                      {alert.diagnosis === 'gs_fault' ? (
-                        <button
-                          className="btn-mark-complete"
-                          onClick={() => handleMarkCompleteSingle(alert.edition_id)}
-                          disabled={isMarkingThis || isMarking}
-                          title="Mark as complete (gap is GS's fault)"
-                        >
-                          {isMarkingThis ? '...' : '✓ Done'}
-                        </button>
-                      ) : (
-                        <button
-                          className="btn-restart-single"
-                          onClick={() => handleRestartSingle(alert.edition_id)}
-                          disabled={isRestartingThis || isRestarting}
-                        >
-                          {isRestartingThis ? '...' : 'Restart'}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {/* Other alerts (non-stalled) */}
-      {otherAlerts.length > 0 && (
-        <div className="alerts-list">
-          {otherAlerts.map((alert, idx) => (
-            <div key={idx} className={`alert-item ${getAlertClass(alert.type)}`}>
-              <span className="alert-icon">{getAlertIcon(alert.type)}</span>
-              <span
-                className="alert-paper clickable-paper"
-                onClick={() => alert.paper_id && onPaperClick(alert.paper_id)}
-              >
-                {alert.paper_title ? `${alert.paper_title.substring(0, 40)}...` : `Paper #${alert.paper_id}`}
-              </span>
-              <span className="alert-message">{alert.message}</span>
+                    <span className="alert-message">{alert.message}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
     </>
