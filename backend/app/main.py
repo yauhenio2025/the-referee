@@ -8442,6 +8442,101 @@ async def restart_worker():
     }
 
 
+# ============================================================================
+# FOCUS MODE ENDPOINTS
+# Enable focus mode to ONLY process jobs for a specific thinker
+# All other jobs are halted, auto-resume is disabled
+# ============================================================================
+
+
+@app.post("/api/admin/focus/enable/{thinker_id}")
+async def enable_focus_mode_endpoint(thinker_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Enable focus mode for a specific thinker.
+
+    In focus mode:
+    - ONLY jobs for this thinker's papers will be processed
+    - All other pending/running jobs are effectively halted
+    - Auto-resume is completely disabled
+    - Useful for testing/debugging thinker harvesting without interference
+
+    Also cancels all pending/running jobs that are NOT for this thinker.
+    """
+    from .services.job_worker import enable_focus_mode
+
+    # Get the thinker's paper IDs
+    thinker = await db.get(Thinker, thinker_id)
+    if not thinker:
+        raise HTTPException(status_code=404, detail=f"Thinker {thinker_id} not found")
+
+    # Get all paper IDs for this thinker
+    result = await db.execute(
+        select(ThinkerWork.paper_id)
+        .where(ThinkerWork.thinker_id == thinker_id)
+        .where(ThinkerWork.decision == "accepted")
+        .where(ThinkerWork.paper_id.isnot(None))
+    )
+    paper_ids = [row[0] for row in result.fetchall()]
+
+    if not paper_ids:
+        raise HTTPException(status_code=400, detail=f"Thinker {thinker_id} has no papers to focus on")
+
+    # Cancel all non-thinker pending jobs
+    from sqlalchemy import update, and_, not_
+    cancelled_pending = await db.execute(
+        update(Job)
+        .where(Job.status == "pending")
+        .where(not_(Job.paper_id.in_(paper_ids)))
+        .values(status="cancelled")
+        .returning(Job.id)
+    )
+    cancelled_pending_count = len(cancelled_pending.fetchall())
+
+    # Cancel all non-thinker running jobs
+    cancelled_running = await db.execute(
+        update(Job)
+        .where(Job.status == "running")
+        .where(not_(Job.paper_id.in_(paper_ids)))
+        .values(status="cancelled")
+        .returning(Job.id)
+    )
+    cancelled_running_count = len(cancelled_running.fetchall())
+
+    await db.commit()
+
+    # Enable focus mode
+    result = enable_focus_mode(thinker_id, paper_ids)
+    result["cancelled_pending"] = cancelled_pending_count
+    result["cancelled_running"] = cancelled_running_count
+    result["thinker_name"] = thinker.canonical_name
+
+    logger.info(f"[FOCUS MODE] Enabled for thinker {thinker_id} ({thinker.canonical_name}). Cancelled {cancelled_pending_count} pending, {cancelled_running_count} running non-thinker jobs.")
+
+    return result
+
+
+@app.post("/api/admin/focus/disable")
+async def disable_focus_mode_endpoint():
+    """
+    Disable focus mode. All jobs will run normally.
+    Auto-resume will be re-enabled.
+    """
+    from .services.job_worker import disable_focus_mode
+
+    result = disable_focus_mode()
+    logger.info("[FOCUS MODE] Disabled")
+    return result
+
+
+@app.get("/api/admin/focus/status")
+async def get_focus_mode_status_endpoint():
+    """
+    Get current focus mode status.
+    """
+    from .services.job_worker import get_focus_mode_status
+    return get_focus_mode_status()
+
+
 @app.get("/api/dashboard/activity-stats")
 async def get_activity_stats_endpoint(db: AsyncSession = Depends(get_db)):
     """

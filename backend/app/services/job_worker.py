@@ -123,6 +123,49 @@ _job_semaphore: Optional[asyncio.Semaphore] = None
 _running_jobs: set = set()  # Track currently running job IDs
 _last_zombie_check: Optional[datetime] = None  # Track when we last checked for zombies
 
+# Focus Mode: When set, ONLY jobs for this thinker's papers are processed
+# All other jobs are halted, auto-resume is disabled
+_focus_mode_thinker_id: Optional[int] = None
+_focus_mode_paper_ids: set = set()  # Pre-fetched paper IDs for focused thinker
+
+
+def enable_focus_mode(thinker_id: int, paper_ids: List[int]) -> Dict:
+    """Enable focus mode for a specific thinker. Only their jobs will run."""
+    global _focus_mode_thinker_id, _focus_mode_paper_ids
+    _focus_mode_thinker_id = thinker_id
+    _focus_mode_paper_ids = set(paper_ids)
+    log_now(f"[FOCUS MODE] ✓ ENABLED for thinker {thinker_id} with {len(paper_ids)} papers")
+    return {
+        "enabled": True,
+        "thinker_id": thinker_id,
+        "paper_count": len(paper_ids),
+        "message": f"Focus mode enabled. Only jobs for thinker {thinker_id} will run."
+    }
+
+
+def disable_focus_mode() -> Dict:
+    """Disable focus mode. All jobs will run normally."""
+    global _focus_mode_thinker_id, _focus_mode_paper_ids
+    old_thinker = _focus_mode_thinker_id
+    _focus_mode_thinker_id = None
+    _focus_mode_paper_ids = set()
+    log_now(f"[FOCUS MODE] ✗ DISABLED (was thinker {old_thinker})")
+    return {
+        "enabled": False,
+        "previous_thinker_id": old_thinker,
+        "message": "Focus mode disabled. All jobs will run normally."
+    }
+
+
+def get_focus_mode_status() -> Dict:
+    """Get current focus mode status."""
+    return {
+        "enabled": _focus_mode_thinker_id is not None,
+        "thinker_id": _focus_mode_thinker_id,
+        "paper_count": len(_focus_mode_paper_ids),
+        "paper_ids": list(_focus_mode_paper_ids) if len(_focus_mode_paper_ids) <= 50 else f"{len(_focus_mode_paper_ids)} papers"
+    }
+
 
 async def update_job_progress(
     db: AsyncSession,
@@ -3581,18 +3624,31 @@ async def worker_loop():
 
             if available_slots > 0:
                 async with async_session() as db:
-                    # Get multiple pending jobs (up to available slots)
-                    result = await db.execute(
-                        select(Job)
-                        .where(Job.status == "pending")
-                        .order_by(Job.priority.desc(), Job.created_at.asc())
-                        .limit(available_slots)
-                    )
-                    pending_jobs = result.scalars().all()
+                    # FOCUS MODE: Only get jobs for the focused thinker's papers
+                    if _focus_mode_thinker_id is not None and _focus_mode_paper_ids:
+                        result = await db.execute(
+                            select(Job)
+                            .where(Job.status == "pending")
+                            .where(Job.paper_id.in_(_focus_mode_paper_ids))
+                            .order_by(Job.priority.desc(), Job.created_at.asc())
+                            .limit(available_slots)
+                        )
+                        pending_jobs = result.scalars().all()
+                        if pending_jobs:
+                            log_now(f"[Worker] FOCUS MODE (thinker {_focus_mode_thinker_id}): Found {len(pending_jobs)} jobs, {available_slots} slots")
+                    else:
+                        # Normal mode: get all pending jobs
+                        result = await db.execute(
+                            select(Job)
+                            .where(Job.status == "pending")
+                            .order_by(Job.priority.desc(), Job.created_at.asc())
+                            .limit(available_slots)
+                        )
+                        pending_jobs = result.scalars().all()
+                        if pending_jobs:
+                            log_now(f"[Worker] Found {len(pending_jobs)} pending jobs, {available_slots} slots available")
 
                     if pending_jobs:
-                        log_now(f"[Worker] Found {len(pending_jobs)} pending jobs, {available_slots} slots available")
-
                         # Start all pending jobs in parallel
                         for job in pending_jobs:
                             if job.id not in _running_jobs:
@@ -3600,6 +3656,12 @@ async def worker_loop():
                                 await asyncio.sleep(0.5)  # Small stagger to avoid race conditions
 
                         await asyncio.sleep(2)  # Brief pause before checking for more
+
+                    # FOCUS MODE: Skip all auto-resume and auto-retry functionality
+                    if _focus_mode_thinker_id is not None:
+                        if not pending_jobs:
+                            await asyncio.sleep(5)  # Wait before checking again
+                        continue  # Skip auto-resume entirely in focus mode
 
                     # Check for incomplete harvests if we have spare capacity
                     # BUT skip if there are high-priority jobs pending (like thinker_harvest_citations)
