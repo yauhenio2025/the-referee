@@ -3537,6 +3537,7 @@ async def create_extract_citations_job(
         callback_secret: HMAC secret for signing callback requests
     """
     # DUPLICATE PREVENTION: Check for existing pending/running job for same paper
+    # Uses FOR UPDATE SKIP LOCKED to handle concurrent requests safely
     if not force_create:
         from sqlalchemy import select
         existing_result = await db.execute(
@@ -3544,7 +3545,7 @@ async def create_extract_citations_job(
                 Job.paper_id == paper_id,
                 Job.job_type == "extract_citations",
                 Job.status.in_(["pending", "running"])
-            )
+            ).with_for_update(skip_locked=True)
         )
         existing_job = existing_result.scalar_one_or_none()
         if existing_job:
@@ -3591,8 +3592,30 @@ async def create_extract_citations_job(
         callback_secret=callback_secret,
     )
     db.add(job)
-    await db.flush()
-    await db.refresh(job)
+
+    try:
+        await db.flush()
+        await db.refresh(job)
+    except Exception as e:
+        # Handle unique constraint violation (race condition fallback)
+        # The partial unique index ix_jobs_active_paper_type prevents duplicates
+        if "ix_jobs_active_paper_type" in str(e) or "duplicate key" in str(e).lower():
+            await db.rollback()
+            logger.info(f"Duplicate prevention (constraint): Race condition detected for paper {paper_id}, fetching existing job")
+            # Re-query for the existing job
+            existing_result = await db.execute(
+                select(Job).where(
+                    Job.paper_id == paper_id,
+                    Job.job_type == "extract_citations",
+                    Job.status.in_(["pending", "running"])
+                )
+            )
+            existing_job = existing_result.scalar_one_or_none()
+            if existing_job:
+                return existing_job
+            # If somehow no job found, re-raise to avoid silent failure
+            raise
+        raise
 
     # Monitor job creation rate to detect runaway bugs
     monitor_job_creation_rate(paper_id, "extract_citations")

@@ -8537,6 +8537,80 @@ async def get_focus_mode_status_endpoint():
     return get_focus_mode_status()
 
 
+@app.post("/api/admin/cleanup-duplicate-jobs")
+async def cleanup_duplicate_jobs_endpoint(db: AsyncSession = Depends(get_db)):
+    """
+    Find and cancel duplicate active jobs (same paper_id + job_type).
+
+    For each paper that has multiple pending/running extract_citations jobs,
+    keeps the oldest one and cancels the rest.
+    """
+    from sqlalchemy import func, and_
+
+    # Find papers with duplicate active jobs
+    duplicate_query = (
+        select(Job.paper_id, func.count(Job.id).label("job_count"))
+        .where(
+            Job.job_type == "extract_citations",
+            Job.status.in_(["pending", "running"])
+        )
+        .group_by(Job.paper_id)
+        .having(func.count(Job.id) > 1)
+    )
+
+    duplicate_result = await db.execute(duplicate_query)
+    duplicate_papers = duplicate_result.fetchall()
+
+    cancelled_jobs = []
+    kept_jobs = []
+
+    for paper_id, job_count in duplicate_papers:
+        # Get all active jobs for this paper, ordered by created_at (keep oldest)
+        jobs_result = await db.execute(
+            select(Job)
+            .where(
+                Job.paper_id == paper_id,
+                Job.job_type == "extract_citations",
+                Job.status.in_(["pending", "running"])
+            )
+            .order_by(Job.created_at.asc())
+        )
+        jobs = list(jobs_result.scalars().all())
+
+        if len(jobs) > 1:
+            # Keep the first (oldest) job, cancel the rest
+            keep_job = jobs[0]
+            kept_jobs.append({
+                "job_id": keep_job.id,
+                "paper_id": paper_id,
+                "status": keep_job.status,
+                "created_at": keep_job.created_at.isoformat() if keep_job.created_at else None
+            })
+
+            for dup_job in jobs[1:]:
+                old_status = dup_job.status
+                cancelled_jobs.append({
+                    "job_id": dup_job.id,
+                    "paper_id": paper_id,
+                    "old_status": old_status,
+                    "created_at": dup_job.created_at.isoformat() if dup_job.created_at else None
+                })
+                dup_job.status = "failed"
+                dup_job.error = "Cancelled: duplicate job (cleanup)"
+                dup_job.completed_at = datetime.utcnow()
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "papers_with_duplicates": len(duplicate_papers),
+        "jobs_cancelled": len(cancelled_jobs),
+        "jobs_kept": len(kept_jobs),
+        "cancelled_details": cancelled_jobs[:50],  # Limit output
+        "kept_details": kept_jobs[:50],
+    }
+
+
 @app.get("/api/dashboard/activity-stats")
 async def get_activity_stats_endpoint(db: AsyncSession = Depends(get_db)):
     """

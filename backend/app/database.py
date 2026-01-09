@@ -203,6 +203,12 @@ async def run_migrations():
         # Expand letter columns to VARCHAR(20) for longer partition keys like 'lang_zh-CN', 'a_excl'
         "ALTER TABLE harvest_targets ALTER COLUMN letter TYPE VARCHAR(20)",
         "ALTER TABLE partition_runs ALTER COLUMN letter TYPE VARCHAR(20)",
+        # CRITICAL: Prevent duplicate active jobs for same paper + job_type
+        # This partial unique index enforces that only ONE pending/running job can exist per paper+type
+        # Solves race conditions where multiple requests create duplicate jobs simultaneously
+        """CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_paper_type
+           ON jobs(paper_id, job_type)
+           WHERE status IN ('pending', 'running')""",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
