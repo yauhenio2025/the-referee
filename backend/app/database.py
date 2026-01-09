@@ -196,6 +196,10 @@ async def run_migrations():
         # Author-letter partitioning for harvest_targets (replaces year-by-year strategy)
         "ALTER TABLE harvest_targets ADD COLUMN IF NOT EXISTS letter VARCHAR(5) NULL",
         "CREATE INDEX IF NOT EXISTS idx_harvest_targets_letter ON harvest_targets(edition_id, letter)",
+        # Author-letter partitioning for partition_runs (year is now nullable)
+        "ALTER TABLE partition_runs ALTER COLUMN year DROP NOT NULL",
+        "ALTER TABLE partition_runs ADD COLUMN IF NOT EXISTS letter VARCHAR(5) NULL",
+        "CREATE INDEX IF NOT EXISTS idx_partition_runs_letter ON partition_runs(edition_id, letter)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

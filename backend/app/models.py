@@ -491,7 +491,8 @@ class PartitionRun(Base):
     # What we're partitioning
     edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
     job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
-    year: Mapped[int] = mapped_column(Integer, index=True)
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)  # NULL for author-letter partitions
+    letter: Mapped[Optional[str]] = mapped_column(String(5), nullable=True, index=True)  # For author-letter partitions
 
     # Parent partition (for recursive partitioning)
     parent_partition_id: Mapped[Optional[int]] = mapped_column(
