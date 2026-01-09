@@ -412,9 +412,14 @@ class FailedFetch(Base):
 
 
 class HarvestTarget(Base):
-    """Track expected citation counts per year for an edition.
+    """Track expected citation counts per partition for an edition.
 
-    When we start harvesting, we record the total count Scholar reports for each year.
+    Partitions can be:
+    - year: Traditional year-by-year harvesting (legacy, still used for tracking)
+    - letter: Author-letter partitioning (e.g., 'a', 'b', ... 'z', or '_' for no-letter)
+    - Combined: Both year and letter can be set for fine-grained tracking
+
+    When we start harvesting, we record the total count Scholar reports for each partition.
     This lets us verify completeness and identify gaps.
     """
     __tablename__ = "harvest_targets"
@@ -423,6 +428,7 @@ class HarvestTarget(Base):
     edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
 
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # null = all years combined
+    letter: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # author letter partition: 'a'-'z', '_' for no-letter, null = all letters
 
     # What Scholar reported as the total count
     expected_count: Mapped[int] = mapped_column(Integer)

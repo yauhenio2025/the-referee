@@ -1479,3 +1479,648 @@ async def detect_and_handle_overflow(
         total_for_year=total_results,
         job_id=job_id,
     )
+
+
+# ============== AUTHOR-LETTER PARTITIONING STRATEGY ==============
+# This strategy replaces year-by-year harvesting for overflow cases.
+# It partitions by author letter (a-z) instead of year, which captures
+# papers without year metadata that year-by-year misses.
+
+# Author letters ordered by approximate frequency in academic publishing
+AUTHOR_LETTERS = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+    "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
+    "u", "v", "w", "x", "y", "z"
+]
+
+# Default source exclusion terms for splitting overflow letters
+# These are common academic sources that can be excluded to reduce count
+DEFAULT_SOURCE_EXCLUSIONS = [
+    "Available", "open", "historical", "work", "marine", "change",
+    "antipode", "frontiers", "geoforum", "urban", "sociology", "theory",
+    "world", "global", "education", "cogent", "geography", "geographer",
+    "Companion", "routledge", "rivista", "Encyclopedia", "Revista",
+    "palgrave", "post", "Transactions", "affairs", "economy", "political",
+    "compartaive", "literature", "language", "journalism", "communication",
+    "sociological", "anthropological", "cultural", "forum", "social",
+    "science", "modern", "studies", "review", "handbook", "research",
+    "annals", "society", "culture", "journal", "press", "sage", "quarterly"
+]
+
+# Extended source terms for deeper subdivision (when > 2000)
+EXTENDED_SOURCE_EXCLUSIONS = [
+    "Race", "Globalizations", "Democratization", "Environment", "Contemporary",
+    "space", "Environmental", "middle", "Curriculum", "local", "economic",
+    "public", "critical", "Critique", "Convergence", "gender", "Cambridge",
+    "third", "East", "feminist", "international", "european", "american",
+    "national", "human", "new", "development", "policy", "management"
+]
+
+
+def build_letter_exclusion_query(exclude_all_letters: bool = True, include_letter: str = None) -> str:
+    """
+    Build the author letter exclusion query.
+
+    Args:
+        exclude_all_letters: If True, excludes ALL letters (for harvesting non-letter items)
+        include_letter: If set, includes this letter while excluding all others
+
+    Returns:
+        Query string like: -author:"a*" -author:"b*" ... OR author:"a*" -author:"b*" ...
+    """
+    if exclude_all_letters:
+        # Harvest items with no author letter (rare edge case)
+        return " ".join([f'-author:"{letter}*"' for letter in AUTHOR_LETTERS])
+    elif include_letter:
+        # Harvest items for a specific letter, excluding all others
+        parts = [f'author:"{include_letter}*"']
+        for letter in AUTHOR_LETTERS:
+            if letter != include_letter:
+                parts.append(f'-author:"{letter}*"')
+        return " ".join(parts)
+    else:
+        return ""
+
+
+def build_source_exclusion_query(excluded_sources: List[str]) -> str:
+    """Build source exclusion query from list of source terms."""
+    return " ".join([f'-source:{source}' for source in excluded_sources])
+
+
+def build_source_inclusion_query(included_sources: List[str]) -> str:
+    """Build source inclusion query (OR) from list of source terms."""
+    return " OR ".join([f'source:{source}' for source in included_sources])
+
+
+async def get_query_count(
+    scholar_service,
+    scholar_id: str,
+    additional_query: str = "",
+    language_filter: str = None,
+) -> int:
+    """Get the count of results for a query without fetching all papers."""
+    result = await scholar_service.get_cited_by(
+        scholar_id=scholar_id,
+        max_results=10,  # Just first page for count
+        additional_query=additional_query if additional_query else None,
+        language_filter=language_filter,
+    )
+    return result.get('totalResults', 0)
+
+
+async def harvest_query_partition(
+    db: AsyncSession,
+    scholar_service,
+    scholar_id: str,
+    edition_id: int,
+    paper_id: int,
+    partition_key: str,  # e.g., "a", "_", "a_excl", "a_incl"
+    additional_query: str,
+    language_filter: str,
+    existing_scholar_ids: Set[str],
+    on_page_complete: Callable,
+    expected_count: int,
+    partition_run: Optional[PartitionRun] = None,
+) -> Tuple[int, int]:
+    """
+    Harvest a single partition and track it in harvest_targets.
+
+    Returns: (new_citations, total_citations)
+    """
+    from ..models import HarvestTarget
+
+    # Create or update harvest target for this partition
+    target_result = await db.execute(
+        select(HarvestTarget)
+        .where(HarvestTarget.edition_id == edition_id)
+        .where(HarvestTarget.letter == partition_key)
+    )
+    target = target_result.scalar_one_or_none()
+
+    if not target:
+        target = HarvestTarget(
+            edition_id=edition_id,
+            letter=partition_key,
+            expected_count=expected_count,
+            actual_count=0,
+            status="harvesting",
+            pages_attempted=0,
+            pages_succeeded=0,
+            pages_failed=0,
+        )
+        db.add(target)
+        await safe_flush(db)
+    else:
+        target.expected_count = expected_count
+        target.status = "harvesting"
+        await safe_flush(db)
+
+    log_now(f"  Harvesting partition '{partition_key}': {expected_count} expected")
+
+    # Track pages
+    pages_succeeded = 0
+    pages_failed = 0
+    new_citations = 0
+
+    async def wrapped_on_page_complete(page_num: int, papers: List[Dict]):
+        nonlocal pages_succeeded, new_citations
+        pages_succeeded += 1
+        # Call the original callback
+        result = await on_page_complete(page_num, papers)
+        if isinstance(result, int):
+            new_citations += result
+        return result
+
+    try:
+        result = await scholar_service.get_cited_by(
+            scholar_id=scholar_id,
+            max_results=min(expected_count + 50, 1000),  # Cap at 1000
+            additional_query=additional_query if additional_query else None,
+            language_filter=language_filter,
+            on_page_complete=wrapped_on_page_complete,
+        )
+
+        pages_failed = result.get("pages_failed", 0)
+        actual_count = result.get("totalResults", 0)
+
+        # Update target
+        target.actual_count = new_citations
+        target.pages_attempted = pages_succeeded + pages_failed
+        target.pages_succeeded = pages_succeeded
+        target.pages_failed = pages_failed
+        target.status = "complete" if pages_failed == 0 else "partial"
+        await safe_flush(db)
+
+        log_now(f"  Partition '{partition_key}': {new_citations} new citations (pages: {pages_succeeded} ok, {pages_failed} failed)")
+
+        return new_citations, actual_count
+
+    except Exception as e:
+        log_now(f"  Partition '{partition_key}' FAILED: {e}", "error")
+        target.status = "failed"
+        target.gap_reason = str(e)[:50]
+        await safe_flush(db)
+        return 0, 0
+
+
+async def find_source_exclusions_with_llm(
+    edition_title: str,
+    current_count: int,
+    target_count: int,
+    language: str,
+    existing_exclusions: List[str],
+) -> List[str]:
+    """
+    Use Claude Opus 4.5 with extended thinking to find source exclusion terms
+    that will reduce the result count below target_count.
+
+    Returns: List of additional source terms to exclude
+    """
+    import anthropic
+    import os
+
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+    prompt = f"""You are helping partition Google Scholar citation results to get below 1000 results.
+
+CONTEXT:
+- Paper being cited: "{edition_title}"
+- Language filter: {language}
+- Current result count: {current_count}
+- Target: Below {target_count}
+- Already excluded sources: {existing_exclusions}
+
+TASK:
+Suggest additional academic journal/source name patterns to exclude that will reduce the count.
+Focus on common academic publishers, journal names, and venue types.
+
+For {language} papers, suggest terms in that language if not English.
+
+Return ONLY a JSON array of source terms to exclude, like:
+["term1", "term2", "term3"]
+
+Suggest 10-20 terms that are likely to have significant coverage in this citation set.
+"""
+
+    try:
+        response = client.messages.create(
+            model="claude-opus-4-5-20251101",
+            max_tokens=16000,
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 32000
+            },
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # Extract the text response (after thinking)
+        text_response = ""
+        for block in response.content:
+            if block.type == "text":
+                text_response = block.text
+                break
+
+        # Parse JSON array from response
+        import json
+        # Find JSON array in response
+        match = re.search(r'\[.*?\]', text_response, re.DOTALL)
+        if match:
+            terms = json.loads(match.group())
+            log_now(f"  LLM suggested {len(terms)} additional source exclusions")
+            return terms
+
+        log_now(f"  LLM response did not contain valid JSON array", "warn")
+        return []
+
+    except Exception as e:
+        log_now(f"  LLM source exclusion failed: {e}", "error")
+        return []
+
+
+async def harvest_letter_with_subdivision(
+    db: AsyncSession,
+    scholar_service,
+    scholar_id: str,
+    edition_id: int,
+    paper_id: int,
+    edition_title: str,
+    letter: str,
+    letter_count: int,
+    language_filter: str,
+    existing_scholar_ids: Set[str],
+    on_page_complete: Callable,
+    partition_run: Optional[PartitionRun] = None,
+) -> int:
+    """
+    Harvest a letter partition that has > 1000 results using source-based subdivision.
+
+    Strategy:
+    - If 1000-2000: Split into 2 pools using default source exclusions
+    - If 2000-3000: Split into 3 pools using extended exclusions
+    - If > 3000: Use LLM to find more exclusion terms
+
+    Returns: Total new citations harvested
+    """
+    total_new = 0
+    letter_query = build_letter_exclusion_query(exclude_all_letters=False, include_letter=letter)
+
+    log_now(f"Letter '{letter}' has {letter_count} results - using source subdivision")
+
+    # Determine how many pools we need
+    if letter_count < 2000:
+        # 2 pools: exclusion set + inclusion set
+        exclusions = DEFAULT_SOURCE_EXCLUSIONS[:20]  # Start with first 20
+    elif letter_count < 3000:
+        # 3 pools: need more exclusions
+        exclusions = DEFAULT_SOURCE_EXCLUSIONS + EXTENDED_SOURCE_EXCLUSIONS[:15]
+    else:
+        # Need LLM to help find more terms
+        exclusions = DEFAULT_SOURCE_EXCLUSIONS + EXTENDED_SOURCE_EXCLUSIONS
+        additional = await find_source_exclusions_with_llm(
+            edition_title=edition_title,
+            current_count=letter_count,
+            target_count=900,
+            language=language_filter or "English",
+            existing_exclusions=exclusions,
+        )
+        exclusions = exclusions + additional
+
+    # Build exclusion query (Pool A: everything NOT in excluded sources)
+    exclusion_source_query = build_source_exclusion_query(exclusions)
+    pool_a_query = f"{letter_query} {exclusion_source_query}"
+
+    # Check Pool A count
+    pool_a_count = await get_query_count(
+        scholar_service, scholar_id, pool_a_query, language_filter
+    )
+    log_now(f"  Pool A (exclusion): {pool_a_count} results")
+
+    if pool_a_count >= 1000:
+        # Need to exclude more - try LLM
+        log_now(f"  Pool A still >= 1000, requesting LLM help...")
+        additional = await find_source_exclusions_with_llm(
+            edition_title=edition_title,
+            current_count=pool_a_count,
+            target_count=900,
+            language=language_filter or "English",
+            existing_exclusions=exclusions,
+        )
+        exclusions = exclusions + additional
+        exclusion_source_query = build_source_exclusion_query(exclusions)
+        pool_a_query = f"{letter_query} {exclusion_source_query}"
+        pool_a_count = await get_query_count(
+            scholar_service, scholar_id, pool_a_query, language_filter
+        )
+        log_now(f"  Pool A after LLM: {pool_a_count} results")
+
+    # Harvest Pool A if under 1000
+    if pool_a_count < 1000 and pool_a_count > 0:
+        new, _ = await harvest_query_partition(
+            db=db,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            edition_id=edition_id,
+            paper_id=paper_id,
+            partition_key=f"{letter}_excl",
+            additional_query=pool_a_query,
+            language_filter=language_filter,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            expected_count=pool_a_count,
+            partition_run=partition_run,
+        )
+        total_new += new
+        await asyncio.sleep(3)
+
+    # Build inclusion query (Pool B: everything IN excluded sources)
+    inclusion_source_query = build_source_inclusion_query(exclusions)
+    pool_b_query = f"{letter_query} ({inclusion_source_query})"
+
+    # Check Pool B count
+    pool_b_count = await get_query_count(
+        scholar_service, scholar_id, pool_b_query, language_filter
+    )
+    log_now(f"  Pool B (inclusion): {pool_b_count} results")
+
+    if pool_b_count < 1000 and pool_b_count > 0:
+        new, _ = await harvest_query_partition(
+            db=db,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            edition_id=edition_id,
+            paper_id=paper_id,
+            partition_key=f"{letter}_incl",
+            additional_query=pool_b_query,
+            language_filter=language_filter,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            expected_count=pool_b_count,
+            partition_run=partition_run,
+        )
+        total_new += new
+    elif pool_b_count >= 1000:
+        # Pool B still too large - need to recursively subdivide
+        # For now, just harvest first 1000 and log warning
+        log_now(f"  WARNING: Pool B has {pool_b_count} results, harvesting first 1000", "warn")
+        new, _ = await harvest_query_partition(
+            db=db,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            edition_id=edition_id,
+            paper_id=paper_id,
+            partition_key=f"{letter}_incl",
+            additional_query=pool_b_query,
+            language_filter=language_filter,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            expected_count=min(pool_b_count, 1000),
+            partition_run=partition_run,
+        )
+        total_new += new
+
+    return total_new
+
+
+async def harvest_with_author_letter_strategy(
+    db: AsyncSession,
+    scholar_service,
+    edition_id: int,
+    scholar_id: str,
+    edition_title: str,
+    paper_id: int,
+    total_citation_count: int,
+    existing_scholar_ids: Set[str],
+    on_page_complete: Callable,
+    job_id: Optional[int] = None,
+    language_filter: str = None,
+) -> Dict[str, Any]:
+    """
+    MAIN ENTRY POINT: Harvest citations using author-letter partitioning strategy.
+
+    This replaces year-by-year harvesting for overflow cases.
+
+    Strategy:
+    1. If total < 1000: harvest directly (no strategy needed)
+    2. If total >= 1000:
+       a. Check each language - if all < 1000, harvest by language
+       b. If any language >= 1000 (usually English):
+          - Harvest non-letter items first (rare)
+          - For each letter a-z:
+            - If < 1000: harvest directly
+            - If >= 1000: use source-based subdivision
+
+    Returns: Stats dict with harvest results
+    """
+    log_now(f"╔{'═'*60}╗")
+    log_now(f"║  AUTHOR-LETTER HARVEST STRATEGY")
+    log_now(f"║  Edition: {edition_id} ({edition_title[:40]}...)")
+    log_now(f"║  Total citations: {total_citation_count}")
+    log_now(f"╚{'═'*60}╝")
+
+    stats = {
+        "edition_id": edition_id,
+        "total_expected": total_citation_count,
+        "total_harvested": 0,
+        "strategy_used": "author_letter",
+        "letters_processed": [],
+        "success": False,
+    }
+
+    # Create partition run for tracking
+    partition_run = await create_partition_run(
+        db=db,
+        edition_id=edition_id,
+        job_id=job_id,
+        year=None,  # No year for author-letter strategy
+        initial_count=total_citation_count,
+        parent_partition_id=None,
+        base_query=None,
+        depth=0
+    )
+    await safe_commit(db)
+
+    # === LEVEL 0: Check if direct harvest is possible ===
+    if total_citation_count < GOOGLE_SCHOLAR_LIMIT:
+        log_now(f"Total ({total_citation_count}) < 1000 - harvesting directly")
+        new, _ = await harvest_query_partition(
+            db=db,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            edition_id=edition_id,
+            paper_id=paper_id,
+            partition_key="_all",
+            additional_query="",
+            language_filter=language_filter,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            expected_count=total_citation_count,
+            partition_run=partition_run,
+        )
+        stats["total_harvested"] = new
+        stats["strategy_used"] = "direct"
+        stats["success"] = True
+        partition_run.status = "completed"
+        await safe_commit(db)
+        return stats
+
+    # === LEVEL 1: Try language stratification first ===
+    log_now(f"Total >= 1000 - checking language stratification...")
+
+    # Check non-English languages
+    non_english_total = 0
+    non_english_harvested = 0
+
+    for lang_code in NON_ENGLISH_LANGUAGE_LIST:
+        lang_count = await get_query_count(scholar_service, scholar_id, "", lang_code)
+        if lang_count > 0:
+            log_now(f"  {lang_code}: {lang_count} results")
+            non_english_total += lang_count
+
+            if lang_count < GOOGLE_SCHOLAR_LIMIT:
+                new, _ = await harvest_query_partition(
+                    db=db,
+                    scholar_service=scholar_service,
+                    scholar_id=scholar_id,
+                    edition_id=edition_id,
+                    paper_id=paper_id,
+                    partition_key=f"lang_{lang_code}",
+                    additional_query="",
+                    language_filter=lang_code,
+                    existing_scholar_ids=existing_scholar_ids,
+                    on_page_complete=on_page_complete,
+                    expected_count=lang_count,
+                    partition_run=partition_run,
+                )
+                non_english_harvested += new
+                await asyncio.sleep(2)
+
+    log_now(f"Non-English: {non_english_harvested} harvested of {non_english_total} expected")
+    stats["non_english_harvested"] = non_english_harvested
+
+    # Check English
+    english_count = await get_query_count(scholar_service, scholar_id, "", ENGLISH_ONLY)
+    log_now(f"English: {english_count} results")
+
+    if english_count < GOOGLE_SCHOLAR_LIMIT:
+        # Can harvest English directly
+        log_now(f"English < 1000 - harvesting directly")
+        new, _ = await harvest_query_partition(
+            db=db,
+            scholar_service=scholar_service,
+            scholar_id=scholar_id,
+            edition_id=edition_id,
+            paper_id=paper_id,
+            partition_key="lang_en",
+            additional_query="",
+            language_filter=ENGLISH_ONLY,
+            existing_scholar_ids=existing_scholar_ids,
+            on_page_complete=on_page_complete,
+            expected_count=english_count,
+            partition_run=partition_run,
+        )
+        stats["english_harvested"] = new
+        stats["total_harvested"] = non_english_harvested + new
+        stats["success"] = True
+        partition_run.status = "completed"
+        await safe_commit(db)
+        return stats
+
+    # === LEVEL 2: English >= 1000 - Use author-letter partitioning ===
+    log_now(f"English >= 1000 - using author-letter partitioning")
+    stats["strategy_used"] = "author_letter"
+
+    english_harvested = 0
+
+    # Step 1: Harvest non-letter items (rare edge case)
+    no_letter_query = build_letter_exclusion_query(exclude_all_letters=True)
+    no_letter_count = await get_query_count(
+        scholar_service, scholar_id, no_letter_query, ENGLISH_ONLY
+    )
+
+    if no_letter_count > 0:
+        log_now(f"Non-letter items: {no_letter_count}")
+        if no_letter_count < GOOGLE_SCHOLAR_LIMIT:
+            new, _ = await harvest_query_partition(
+                db=db,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                edition_id=edition_id,
+                paper_id=paper_id,
+                partition_key="_",
+                additional_query=no_letter_query,
+                language_filter=ENGLISH_ONLY,
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                expected_count=no_letter_count,
+                partition_run=partition_run,
+            )
+            english_harvested += new
+            await asyncio.sleep(2)
+
+    # Step 2: Process each letter a-z
+    for letter in AUTHOR_LETTERS:
+        letter_query = build_letter_exclusion_query(exclude_all_letters=False, include_letter=letter)
+        letter_count = await get_query_count(
+            scholar_service, scholar_id, letter_query, ENGLISH_ONLY
+        )
+
+        if letter_count == 0:
+            log_now(f"Letter '{letter}': 0 results - skipping")
+            continue
+
+        log_now(f"Letter '{letter}': {letter_count} results")
+        stats["letters_processed"].append({"letter": letter, "count": letter_count})
+
+        if letter_count < GOOGLE_SCHOLAR_LIMIT:
+            # Direct harvest for this letter
+            new, _ = await harvest_query_partition(
+                db=db,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                edition_id=edition_id,
+                paper_id=paper_id,
+                partition_key=letter,
+                additional_query=letter_query,
+                language_filter=ENGLISH_ONLY,
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                expected_count=letter_count,
+                partition_run=partition_run,
+            )
+            english_harvested += new
+        else:
+            # Need subdivision for this letter
+            new = await harvest_letter_with_subdivision(
+                db=db,
+                scholar_service=scholar_service,
+                scholar_id=scholar_id,
+                edition_id=edition_id,
+                paper_id=paper_id,
+                edition_title=edition_title,
+                letter=letter,
+                letter_count=letter_count,
+                language_filter=ENGLISH_ONLY,
+                existing_scholar_ids=existing_scholar_ids,
+                on_page_complete=on_page_complete,
+                partition_run=partition_run,
+            )
+            english_harvested += new
+
+        await asyncio.sleep(3)  # Rate limit between letters
+
+    stats["english_harvested"] = english_harvested
+    stats["total_harvested"] = non_english_harvested + english_harvested
+    stats["success"] = True
+
+    partition_run.status = "completed"
+    partition_run.final_exclusion_query = f"author_letter_strategy"
+    await safe_commit(db)
+
+    log_now(f"╔{'═'*60}╗")
+    log_now(f"║  AUTHOR-LETTER HARVEST COMPLETE")
+    log_now(f"║  Total harvested: {stats['total_harvested']}")
+    log_now(f"║  Non-English: {non_english_harvested}")
+    log_now(f"║  English: {english_harvested}")
+    log_now(f"╚{'═'*60}╝")
+
+    return stats

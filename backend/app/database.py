@@ -193,6 +193,9 @@ async def run_migrations():
         # Add cluster_id to thinker_works for citation harvesting (extracted from "Cited by" link)
         "ALTER TABLE thinker_works ADD COLUMN IF NOT EXISTS cluster_id VARCHAR(50) NULL",
         "CREATE INDEX IF NOT EXISTS idx_thinker_works_cluster_id ON thinker_works(cluster_id)",
+        # Author-letter partitioning for harvest_targets (replaces year-by-year strategy)
+        "ALTER TABLE harvest_targets ADD COLUMN IF NOT EXISTS letter VARCHAR(5) NULL",
+        "CREATE INDEX IF NOT EXISTS idx_harvest_targets_letter ON harvest_targets(edition_id, letter)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures
