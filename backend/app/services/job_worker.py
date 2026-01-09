@@ -11,7 +11,7 @@ import logging
 import traceback
 import sys
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from sqlalchemy import select, update, func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -122,6 +122,8 @@ _last_job_processed: Optional[datetime] = None  # Track last successful job proc
 # Parallel processing settings
 MAX_CONCURRENT_JOBS = 20  # How many jobs can run simultaneously
 _job_semaphore: Optional[asyncio.Semaphore] = None
+_running_tasks: Dict[int, Tuple[asyncio.Task, datetime]] = {}  # job_id -> (task, started_at) for cancellation
+JOB_HARD_TIMEOUT_HOURS = 4  # Cancel tasks that run longer than this
 _running_jobs: set = set()  # Track currently running job IDs
 _last_zombie_check: Optional[datetime] = None  # Track when we last checked for zombies
 
@@ -2970,7 +2972,7 @@ async def process_thinker_harvest_citations(job: Job, db: AsyncSession) -> Dict[
 
 async def process_single_job(job_id: int):
     """Process a single job by ID with concurrency control"""
-    global _job_semaphore, _running_jobs
+    global _job_semaphore, _running_jobs, _running_tasks
 
     # Acquire semaphore to limit concurrent jobs
     if _job_semaphore is None:
@@ -2979,6 +2981,10 @@ async def process_single_job(job_id: int):
     async with _job_semaphore:
         # Track this job as running
         _running_jobs.add(job_id)
+        # Track task for cancellation (get current task)
+        current_task = asyncio.current_task()
+        if current_task:
+            _running_tasks[job_id] = (current_task, datetime.utcnow())
         log_now(f"[Worker] Job {job_id} acquired slot ({len(_running_jobs)}/{MAX_CONCURRENT_JOBS} running)")
 
         try:
@@ -3056,8 +3062,9 @@ async def process_single_job(job_id: int):
                     except:
                         pass
         finally:
-            # Always remove from running set
+            # Always remove from running set and task tracking
             _running_jobs.discard(job_id)
+            _running_tasks.pop(job_id, None)
             log_now(f"[Worker] Job {job_id} released slot ({len(_running_jobs)}/{MAX_CONCURRENT_JOBS} running)")
 
 
@@ -3125,11 +3132,63 @@ async def check_and_reset_zombie_jobs() -> int:
     return zombie_count
 
 
+async def cancel_stuck_tasks() -> int:
+    """
+    Cancel tasks that have been running longer than JOB_HARD_TIMEOUT_HOURS.
+
+    This releases semaphore slots held by truly stuck jobs that didn't crash
+    but are hanging (e.g., waiting on a network call that never returns).
+    """
+    global _running_tasks
+
+    now = datetime.utcnow()
+    timeout_threshold = now - timedelta(hours=JOB_HARD_TIMEOUT_HOURS)
+    cancelled_count = 0
+
+    # Find and cancel stuck tasks
+    stuck_jobs = []
+    for job_id, (task, started_at) in list(_running_tasks.items()):
+        if started_at < timeout_threshold:
+            stuck_jobs.append((job_id, task, started_at))
+
+    for job_id, task, started_at in stuck_jobs:
+        running_hours = (now - started_at).total_seconds() / 3600
+        log_now(f"[STUCK TASK] Cancelling job {job_id} - running for {running_hours:.1f} hours")
+
+        try:
+            # Cancel the task - this will release the semaphore
+            task.cancel()
+            cancelled_count += 1
+
+            # Mark job as failed in DB
+            async with async_session() as db:
+                await db.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        status="failed",
+                        error=f"Cancelled: task stuck for {running_hours:.1f} hours (timeout={JOB_HARD_TIMEOUT_HOURS}h)",
+                        completed_at=now
+                    )
+                )
+                await db.commit()
+
+            log_now(f"[STUCK TASK] Cancelled job {job_id} and marked as failed")
+        except Exception as e:
+            log_now(f"[STUCK TASK] Error cancelling job {job_id}: {e}")
+
+    if cancelled_count > 0:
+        log_now(f"[STUCK TASK] Cancelled {cancelled_count} stuck tasks, slots should be freed")
+
+    return cancelled_count
+
+
 async def worker_loop():
     """Main worker loop - processes pending jobs with parallel execution"""
-    global _worker_running, _job_semaphore, _running_jobs, _last_zombie_check
+    global _worker_running, _job_semaphore, _running_jobs, _last_zombie_check, _running_tasks
     _worker_running = True
     _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    _running_tasks = {}  # Reset task tracking on startup
     _last_zombie_check = None  # Reset on startup so first check runs immediately after startup detection
     _running_jobs = set()
 
@@ -3316,6 +3375,10 @@ async def worker_loop():
 
             # Periodically check for zombie jobs (runs every ZOMBIE_CHECK_INTERVAL_MINUTES)
             await check_and_reset_zombie_jobs()
+
+            # Cancel tasks stuck for more than JOB_HARD_TIMEOUT_HOURS
+            # This releases semaphore slots held by hanging tasks
+            await cancel_stuck_tasks()
 
         except Exception as e:
             log_now(f"[Worker] Loop error: {e}")
