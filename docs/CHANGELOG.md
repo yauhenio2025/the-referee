@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Dossier paper counts now correctly filter by collection_id ([backend/app/main.py](../backend/app/main.py)) - Previously, dossiers showed paper counts that included papers from other collections
 - Dossier paper counts now exclude soft-deleted papers
 - **Pydantic validation error on edition analysis endpoint** - Fixed response schema mismatches in `EditionAnalysisResultResponse` and `WorkWithEditionsResponse` ([backend/app/schemas.py](../backend/app/schemas.py)). Made `run` field Optional, added missing fields (`dossier_id`, `thinker_name`, `pending_gaps`), renamed `total_editions_found` to `total_editions`, flattened work fields in `WorkWithEditionsResponse`.
+- **DossierInventory attribute mismatch** - Fixed `_run_inventory_phase` in edition_analysis_orchestrator.py to use `paper_count` and `edition_count` instead of non-existent `total_papers` and `total_editions` ([backend/app/services/edition_analysis_orchestrator.py:180](../backend/app/services/edition_analysis_orchestrator.py))
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))
