@@ -1235,6 +1235,184 @@ class AuthorSearchResponse(BaseModel):
     citations: List[AuthorPaperResult] = []
 
 
+# ============== Edition Analysis Schemas ==============
+# Phase 6: API schemas for exhaustive edition analysis
+
+
+class WorkResponse(BaseModel):
+    """An abstract intellectual work (e.g., 'The Spirit of Utopia')"""
+    id: int
+    thinker_name: str
+    canonical_title: str
+    original_language: Optional[str] = None
+    original_title: Optional[str] = None
+    original_year: Optional[int] = None
+    work_type: Optional[str] = None  # book, article, essay, lecture
+    importance: Optional[str] = None  # major, minor, peripheral
+    notes: Optional[str] = None
+    created_at: datetime
+    # Computed fields
+    edition_count: int = 0
+    languages_available: List[str] = []
+
+    class Config:
+        from_attributes = True
+
+
+class WorkEditionResponse(BaseModel):
+    """Links a Work to a Paper/Edition"""
+    id: int
+    work_id: int
+    paper_id: Optional[int] = None
+    edition_id: Optional[int] = None
+    language: str
+    edition_type: Optional[str] = None  # original, translation, abridged, anthology_excerpt
+    year: Optional[int] = None
+    verified: bool = False
+    auto_linked: bool = True
+    confidence: Optional[float] = None
+    created_at: datetime
+    # Joined data
+    title: Optional[str] = None
+    citation_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class MissingEditionResponse(BaseModel):
+    """A gap identified in a thinker's bibliography"""
+    id: int
+    work_id: int
+    language: str
+    expected_title: Optional[str] = None
+    expected_year: Optional[int] = None
+    source: Optional[str] = None  # llm_knowledge, web_search, google_scholar
+    source_url: Optional[str] = None
+    priority: Optional[str] = None  # high, medium, low
+    status: str = "pending"  # pending, job_created, found, dismissed
+    job_id: Optional[int] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    # Joined data from Work
+    work_canonical_title: Optional[str] = None
+    work_original_language: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EditionAnalysisRunResponse(BaseModel):
+    """An edition analysis run (audit trail)"""
+    id: int
+    dossier_id: int
+    thinker_name: str
+    status: str  # pending, analyzing, web_searching, verifying, completed, failed
+    phase: Optional[str] = None
+    papers_analyzed: int = 0
+    editions_analyzed: int = 0
+    works_identified: int = 0
+    links_created: int = 0
+    gaps_found: int = 0
+    jobs_created: int = 0
+    llm_calls_count: int = 0
+    web_searches_count: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    thinking_tokens: int = 0
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EditionAnalysisLLMCallResponse(BaseModel):
+    """Audit trail for LLM calls during edition analysis"""
+    id: int
+    run_id: int
+    phase: Optional[str] = None  # inventory, bibliographic_research, gap_analysis, verification
+    model: Optional[str] = None
+    prompt: Optional[str] = None
+    context_json: Optional[dict] = None
+    raw_response: Optional[str] = None
+    parsed_result: Optional[dict] = None
+    thinking_text: Optional[str] = None
+    thinking_tokens: Optional[int] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    web_search_used: bool = False
+    status: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StartEditionAnalysisRequest(BaseModel):
+    """Request to start edition analysis for a dossier"""
+    force_rerun: bool = False  # Re-analyze even if recently completed
+
+
+class StartEditionAnalysisResponse(BaseModel):
+    """Response from starting edition analysis"""
+    run_id: int
+    dossier_id: int
+    thinker_name: str
+    status: str
+    message: str
+
+
+class EditionAnalysisResultResponse(BaseModel):
+    """Full results of an edition analysis"""
+    run: EditionAnalysisRunResponse
+    works: List[WorkResponse] = []
+    work_editions: List[WorkEditionResponse] = []
+    missing_editions: List[MissingEditionResponse] = []
+    # Summary stats
+    total_works: int = 0
+    total_editions_found: int = 0
+    total_gaps: int = 0
+    languages_coverage: Dict[str, int] = {}  # {language: count}
+
+
+class CreateJobFromGapRequest(BaseModel):
+    """Request to create a scraper job for a specific gap"""
+    priority: int = 10  # Default priority
+
+
+class CreateJobFromGapResponse(BaseModel):
+    """Response from creating a job for a gap"""
+    job_id: int
+    missing_edition_id: int
+    message: str
+
+
+class DismissGapRequest(BaseModel):
+    """Request to dismiss a gap (mark as not actually missing)"""
+    reason: Optional[str] = None
+
+
+class WorkWithEditionsResponse(BaseModel):
+    """A work with all its linked editions"""
+    work: WorkResponse
+    editions: List[WorkEditionResponse] = []
+    missing_translations: List[MissingEditionResponse] = []
+
+
+class ThinkerBibliographyResponse(BaseModel):
+    """Full bibliography for a thinker from edition analysis"""
+    thinker_name: str
+    works: List[WorkWithEditionsResponse] = []
+    total_works: int = 0
+    total_editions: int = 0
+    total_missing: int = 0
+    analysis_run: Optional[EditionAnalysisRunResponse] = None
+
+
 # Update forward references
 PaperDetail.model_rebuild()
 PapersPaginatedResponse.model_rebuild()

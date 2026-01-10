@@ -10612,3 +10612,646 @@ async def search_papers_by_author(
         papers=paper_results,
         citations=citation_results,
     )
+
+
+# ============== Edition Analysis (Exhaustive Bibliography) ==============
+# Phase 6: API routes for exhaustive edition analysis of thinker dossiers
+# These endpoints integrate with services from Phases 2-5
+# RECONCILED: Wired to orchestrator service on 2026-01-10
+
+from .schemas import (
+    WorkResponse, WorkEditionResponse, MissingEditionResponse,
+    EditionAnalysisRunResponse, EditionAnalysisLLMCallResponse,
+    StartEditionAnalysisRequest, StartEditionAnalysisResponse,
+    EditionAnalysisResultResponse, CreateJobFromGapRequest, CreateJobFromGapResponse,
+    DismissGapRequest, WorkWithEditionsResponse, ThinkerBibliographyResponse,
+)
+from .models import Work, WorkEdition, MissingEdition, EditionAnalysisRun, EditionAnalysisLLMCall
+from .services.edition_analysis_orchestrator import EditionAnalysisOrchestrator, run_edition_analysis_background
+
+
+@app.post("/api/dossiers/{dossier_id}/analyze-editions", response_model=StartEditionAnalysisResponse)
+async def start_edition_analysis(
+    dossier_id: int,
+    request: StartEditionAnalysisRequest = StartEditionAnalysisRequest(),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Trigger full edition analysis for a dossier.
+
+    This runs the complete analysis pipeline:
+    1. Inventory - analyze all papers/editions in the dossier
+    2. Bibliographic Research - use Claude to research thinker's bibliography
+    3. Edition Linking - match papers to Works
+    4. Gap Analysis - identify missing translations
+    5. Job Generation - create scraper jobs for gaps
+
+    Returns run_id for tracking progress. The analysis runs in background.
+    """
+    orchestrator = EditionAnalysisOrchestrator(db)
+
+    try:
+        # Create the analysis run
+        run = await orchestrator.start_analysis(
+            dossier_id=dossier_id,
+            force_refresh=request.force_refresh if hasattr(request, 'force_refresh') else False
+        )
+
+        # Schedule background execution
+        background_tasks.add_task(
+            run_edition_analysis_background,
+            db,
+            run.id,
+        )
+
+        return StartEditionAnalysisResponse(
+            run_id=run.id,
+            dossier_id=dossier_id,
+            thinker_name=run.thinker_name,
+            status=run.status,
+            message=f"Edition analysis started. Track progress with run_id={run.id}"
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/edition-analysis-runs/{run_id}", response_model=EditionAnalysisRunResponse)
+async def get_edition_analysis_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get status and results of an edition analysis run.
+    """
+    result = await db.execute(
+        select(EditionAnalysisRun)
+        .where(EditionAnalysisRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Edition analysis run {run_id} not found")
+
+    return EditionAnalysisRunResponse(
+        id=run.id,
+        dossier_id=run.dossier_id,
+        thinker_name=run.thinker_name,
+        status=run.status,
+        phase=run.phase,
+        phase_progress=run.phase_progress,
+        papers_analyzed=run.papers_analyzed,
+        editions_analyzed=run.editions_analyzed,
+        works_identified=run.works_identified,
+        links_created=run.links_created,
+        gaps_found=run.gaps_found,
+        jobs_created=run.jobs_created,
+        llm_calls_count=run.llm_calls_count,
+        web_searches_count=run.web_searches_count,
+        total_input_tokens=run.total_input_tokens,
+        total_output_tokens=run.total_output_tokens,
+        thinking_tokens=run.thinking_tokens,
+        error=run.error,
+        error_phase=run.error_phase,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+    )
+
+
+@app.get("/api/dossiers/{dossier_id}/edition-analysis", response_model=EditionAnalysisResultResponse)
+async def get_dossier_edition_analysis(
+    dossier_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get the latest edition analysis results for a dossier.
+
+    Returns:
+    - Works identified
+    - Edition links created
+    - Gaps found (missing translations)
+    - Summary statistics
+    """
+    # Verify dossier exists
+    result = await db.execute(
+        select(Dossier).where(Dossier.id == dossier_id)
+    )
+    dossier = result.scalar_one_or_none()
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier not found")
+
+    # Get the latest analysis run
+    run_result = await db.execute(
+        select(EditionAnalysisRun)
+        .where(EditionAnalysisRun.dossier_id == dossier_id)
+        .order_by(EditionAnalysisRun.created_at.desc())
+        .limit(1)
+    )
+    run = run_result.scalar_one_or_none()
+
+    # Get works for this thinker
+    works_result = await db.execute(
+        select(Work)
+        .where(Work.thinker_name == dossier.name)
+        .options(selectinload(Work.editions), selectinload(Work.missing_editions))
+    )
+    works = works_result.scalars().all()
+
+    # Build work responses
+    work_responses = []
+    for work in works:
+        edition_responses = [
+            WorkEditionResponse(
+                id=e.id,
+                work_id=e.work_id,
+                paper_id=e.paper_id,
+                edition_id=e.edition_id,
+                language=e.language,
+                edition_type=e.edition_type,
+                year=e.year,
+                translator=e.translator,
+                publisher=e.publisher,
+                verified=e.verified,
+                auto_linked=e.auto_linked,
+                confidence=e.confidence,
+                link_reason=e.link_reason,
+                created_at=e.created_at,
+            )
+            for e in work.editions
+        ]
+        missing_responses = [
+            MissingEditionResponse(
+                id=m.id,
+                work_id=m.work_id,
+                language=m.language,
+                expected_title=m.expected_title,
+                expected_year=m.expected_year,
+                expected_translator=m.expected_translator,
+                expected_publisher=m.expected_publisher,
+                source=m.source,
+                source_url=m.source_url,
+                priority=m.priority,
+                status=m.status,
+                job_id=m.job_id,
+                dismissed_reason=m.dismissed_reason,
+                created_at=m.created_at,
+                resolved_at=m.resolved_at,
+            )
+            for m in work.missing_editions
+        ]
+        work_responses.append(WorkWithEditionsResponse(
+            id=work.id,
+            thinker_name=work.thinker_name,
+            canonical_title=work.canonical_title,
+            original_language=work.original_language,
+            original_title=work.original_title,
+            original_year=work.original_year,
+            work_type=work.work_type,
+            importance=work.importance,
+            notes=work.notes,
+            created_at=work.created_at,
+            updated_at=work.updated_at,
+            editions=edition_responses,
+            missing_editions=missing_responses,
+        ))
+
+    # Count gaps
+    total_gaps = sum(len(w.missing_editions) for w in works)
+    pending_gaps = sum(1 for w in works for m in w.missing_editions if m.status == 'pending')
+
+    return EditionAnalysisResultResponse(
+        dossier_id=dossier_id,
+        thinker_name=dossier.name,
+        run=EditionAnalysisRunResponse(
+            id=run.id,
+            dossier_id=run.dossier_id,
+            thinker_name=run.thinker_name,
+            status=run.status,
+            phase=run.phase,
+            phase_progress=run.phase_progress,
+            papers_analyzed=run.papers_analyzed,
+            editions_analyzed=run.editions_analyzed,
+            works_identified=run.works_identified,
+            links_created=run.links_created,
+            gaps_found=run.gaps_found,
+            jobs_created=run.jobs_created,
+            llm_calls_count=run.llm_calls_count,
+            web_searches_count=run.web_searches_count,
+            total_input_tokens=run.total_input_tokens,
+            total_output_tokens=run.total_output_tokens,
+            thinking_tokens=run.thinking_tokens,
+            error=run.error,
+            error_phase=run.error_phase,
+            created_at=run.created_at,
+            started_at=run.started_at,
+            completed_at=run.completed_at,
+        ) if run else None,
+        works=work_responses,
+        total_works=len(works),
+        total_editions=sum(len(w.editions) for w in works),
+        total_gaps=total_gaps,
+        pending_gaps=pending_gaps,
+    )
+
+
+@app.post("/api/edition-analysis/missing/{missing_id}/create-job", response_model=CreateJobFromGapResponse)
+async def create_job_from_gap(
+    missing_id: int,
+    request: CreateJobFromGapRequest = CreateJobFromGapRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a scraper job to find a missing edition.
+
+    This creates a 'discover_editions' job that will search Google Scholar
+    for the missing translation/edition.
+    """
+    # Get the missing edition with its work
+    result = await db.execute(
+        select(MissingEdition)
+        .options(selectinload(MissingEdition.work))
+        .where(MissingEdition.id == missing_id)
+    )
+    gap = result.scalar_one_or_none()
+    if not gap:
+        raise HTTPException(status_code=404, detail=f"Missing edition {missing_id} not found")
+
+    if gap.status != 'pending':
+        raise HTTPException(status_code=400, detail=f"Gap already has status: {gap.status}")
+
+    # Find dossier for this thinker
+    dossier_result = await db.execute(
+        select(Dossier).where(Dossier.name == gap.work.thinker_name).limit(1)
+    )
+    dossier = dossier_result.scalar_one_or_none()
+    if not dossier:
+        raise HTTPException(status_code=404, detail=f"Dossier not found for thinker: {gap.work.thinker_name}")
+
+    # Create the job
+    search_query = f'"{gap.work.canonical_title}" {gap.language} translation'
+    if gap.expected_title:
+        search_query = f'"{gap.expected_title}" OR {search_query}'
+
+    job = Job(
+        job_type='discover_editions',
+        status='pending',
+        metadata_json=json.dumps({
+            'missing_edition_id': gap.id,
+            'work_id': gap.work_id,
+            'work_title': gap.work.canonical_title,
+            'target_language': gap.language,
+            'expected_title': gap.expected_title,
+            'expected_year': gap.expected_year,
+            'expected_translator': gap.expected_translator,
+            'search_query': search_query,
+            'dossier_id': dossier.id,
+        }),
+        dossier_id=dossier.id,
+        priority=request.priority if hasattr(request, 'priority') and request.priority else gap.priority,
+    )
+    db.add(job)
+    await db.flush()
+
+    # Update gap status
+    gap.status = 'job_created'
+    gap.job_id = job.id
+    await db.commit()
+
+    return CreateJobFromGapResponse(
+        job_id=job.id,
+        missing_id=gap.id,
+        status='job_created',
+        message=f"Created discover_editions job {job.id} for {gap.work.canonical_title} ({gap.language})"
+    )
+
+
+@app.post("/api/edition-analysis/missing/{missing_id}/dismiss")
+async def dismiss_gap(
+    missing_id: int,
+    request: DismissGapRequest = DismissGapRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a gap as dismissed (not actually missing).
+
+    Use this for false positives where the LLM incorrectly identified
+    a missing translation that doesn't exist.
+    """
+    result = await db.execute(
+        select(MissingEdition).where(MissingEdition.id == missing_id)
+    )
+    gap = result.scalar_one_or_none()
+    if not gap:
+        raise HTTPException(status_code=404, detail=f"Missing edition {missing_id} not found")
+
+    gap.status = 'dismissed'
+    gap.dismissed_reason = request.reason if hasattr(request, 'reason') else None
+    gap.resolved_at = datetime.utcnow()
+    await db.commit()
+
+    return {"status": "dismissed", "missing_id": missing_id}
+
+
+@app.get("/api/works", response_model=List[WorkResponse])
+async def list_works(
+    thinker: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all Works, optionally filtered by thinker name.
+
+    Works are abstract intellectual works (e.g., "The Spirit of Utopia")
+    that may have multiple editions/translations.
+    """
+    query = select(Work)
+    if thinker:
+        query = query.where(Work.thinker_name.ilike(f"%{thinker}%"))
+    query = query.order_by(Work.thinker_name, Work.canonical_title)
+    query = query.offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    works = result.scalars().all()
+
+    return [
+        WorkResponse(
+            id=w.id,
+            thinker_name=w.thinker_name,
+            canonical_title=w.canonical_title,
+            original_language=w.original_language,
+            original_title=w.original_title,
+            original_year=w.original_year,
+            work_type=w.work_type,
+            importance=w.importance,
+            notes=w.notes,
+            created_at=w.created_at,
+            updated_at=w.updated_at,
+        )
+        for w in works
+    ]
+
+
+@app.get("/api/works/{work_id}", response_model=WorkWithEditionsResponse)
+async def get_work_with_editions(
+    work_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a Work with all its linked editions and missing translations.
+    """
+    result = await db.execute(
+        select(Work)
+        .where(Work.id == work_id)
+        .options(selectinload(Work.editions), selectinload(Work.missing_editions))
+    )
+    work = result.scalar_one_or_none()
+    if not work:
+        raise HTTPException(status_code=404, detail=f"Work {work_id} not found")
+
+    edition_responses = [
+        WorkEditionResponse(
+            id=e.id,
+            work_id=e.work_id,
+            paper_id=e.paper_id,
+            edition_id=e.edition_id,
+            language=e.language,
+            edition_type=e.edition_type,
+            year=e.year,
+            translator=e.translator,
+            publisher=e.publisher,
+            verified=e.verified,
+            auto_linked=e.auto_linked,
+            confidence=e.confidence,
+            link_reason=e.link_reason,
+            created_at=e.created_at,
+        )
+        for e in work.editions
+    ]
+    missing_responses = [
+        MissingEditionResponse(
+            id=m.id,
+            work_id=m.work_id,
+            language=m.language,
+            expected_title=m.expected_title,
+            expected_year=m.expected_year,
+            expected_translator=m.expected_translator,
+            expected_publisher=m.expected_publisher,
+            source=m.source,
+            source_url=m.source_url,
+            priority=m.priority,
+            status=m.status,
+            job_id=m.job_id,
+            dismissed_reason=m.dismissed_reason,
+            created_at=m.created_at,
+            resolved_at=m.resolved_at,
+        )
+        for m in work.missing_editions
+    ]
+
+    return WorkWithEditionsResponse(
+        id=work.id,
+        thinker_name=work.thinker_name,
+        canonical_title=work.canonical_title,
+        original_language=work.original_language,
+        original_title=work.original_title,
+        original_year=work.original_year,
+        work_type=work.work_type,
+        importance=work.importance,
+        notes=work.notes,
+        created_at=work.created_at,
+        updated_at=work.updated_at,
+        editions=edition_responses,
+        missing_editions=missing_responses,
+    )
+
+
+@app.get("/api/works/{work_id}/editions", response_model=List[WorkEditionResponse])
+async def get_work_editions(
+    work_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all linked editions for a Work.
+    """
+    # Verify work exists
+    work_result = await db.execute(
+        select(Work).where(Work.id == work_id)
+    )
+    if not work_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Work {work_id} not found")
+
+    result = await db.execute(
+        select(WorkEdition)
+        .where(WorkEdition.work_id == work_id)
+        .order_by(WorkEdition.language, WorkEdition.year)
+    )
+    editions = result.scalars().all()
+
+    return [
+        WorkEditionResponse(
+            id=e.id,
+            work_id=e.work_id,
+            paper_id=e.paper_id,
+            edition_id=e.edition_id,
+            language=e.language,
+            edition_type=e.edition_type,
+            year=e.year,
+            translator=e.translator,
+            publisher=e.publisher,
+            verified=e.verified,
+            auto_linked=e.auto_linked,
+            confidence=e.confidence,
+            link_reason=e.link_reason,
+            created_at=e.created_at,
+        )
+        for e in editions
+    ]
+
+
+@app.get("/api/edition-analysis/bibliography/{thinker_name}", response_model=ThinkerBibliographyResponse)
+async def get_thinker_bibliography(
+    thinker_name: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get the full reconstructed bibliography for a thinker.
+
+    Returns all Works, their editions, and missing translations
+    identified through edition analysis.
+    """
+    # Get all works for this thinker
+    result = await db.execute(
+        select(Work)
+        .where(Work.thinker_name.ilike(f"%{thinker_name}%"))
+        .options(selectinload(Work.editions), selectinload(Work.missing_editions))
+        .order_by(Work.original_year.asc().nullslast(), Work.canonical_title)
+    )
+    works = result.scalars().all()
+
+    # Build work responses
+    work_responses = []
+    for work in works:
+        edition_responses = [
+            WorkEditionResponse(
+                id=e.id,
+                work_id=e.work_id,
+                paper_id=e.paper_id,
+                edition_id=e.edition_id,
+                language=e.language,
+                edition_type=e.edition_type,
+                year=e.year,
+                translator=e.translator,
+                publisher=e.publisher,
+                verified=e.verified,
+                auto_linked=e.auto_linked,
+                confidence=e.confidence,
+                link_reason=e.link_reason,
+                created_at=e.created_at,
+            )
+            for e in work.editions
+        ]
+        missing_responses = [
+            MissingEditionResponse(
+                id=m.id,
+                work_id=m.work_id,
+                language=m.language,
+                expected_title=m.expected_title,
+                expected_year=m.expected_year,
+                expected_translator=m.expected_translator,
+                expected_publisher=m.expected_publisher,
+                source=m.source,
+                source_url=m.source_url,
+                priority=m.priority,
+                status=m.status,
+                job_id=m.job_id,
+                dismissed_reason=m.dismissed_reason,
+                created_at=m.created_at,
+                resolved_at=m.resolved_at,
+            )
+            for m in work.missing_editions
+        ]
+        work_responses.append(WorkWithEditionsResponse(
+            id=work.id,
+            thinker_name=work.thinker_name,
+            canonical_title=work.canonical_title,
+            original_language=work.original_language,
+            original_title=work.original_title,
+            original_year=work.original_year,
+            work_type=work.work_type,
+            importance=work.importance,
+            notes=work.notes,
+            created_at=work.created_at,
+            updated_at=work.updated_at,
+            editions=edition_responses,
+            missing_editions=missing_responses,
+        ))
+
+    # Calculate stats
+    total_editions = sum(len(w.editions) for w in works)
+    total_gaps = sum(len(w.missing_editions) for w in works)
+    pending_gaps = sum(1 for w in works for m in w.missing_editions if m.status == 'pending')
+
+    # Get unique languages from editions
+    languages = set()
+    for work in works:
+        for e in work.editions:
+            languages.add(e.language)
+
+    return ThinkerBibliographyResponse(
+        thinker_name=thinker_name,
+        works=work_responses,
+        total_works=len(works),
+        total_editions=total_editions,
+        total_gaps=total_gaps,
+        pending_gaps=pending_gaps,
+        languages_covered=sorted(languages),
+    )
+
+
+@app.get("/api/edition-analysis-runs/{run_id}/llm-calls", response_model=List[EditionAnalysisLLMCallResponse])
+async def get_edition_analysis_llm_calls(
+    run_id: int,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get audit trail of LLM calls for an edition analysis run.
+
+    Useful for debugging and understanding the analysis process.
+    """
+    # Verify run exists
+    run_result = await db.execute(
+        select(EditionAnalysisRun).where(EditionAnalysisRun.id == run_id)
+    )
+    if not run_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Edition analysis run {run_id} not found")
+
+    result = await db.execute(
+        select(EditionAnalysisLLMCall)
+        .where(EditionAnalysisLLMCall.run_id == run_id)
+        .order_by(EditionAnalysisLLMCall.id)
+        .limit(limit)
+    )
+    calls = result.scalars().all()
+
+    return [
+        EditionAnalysisLLMCallResponse(
+            id=c.id,
+            run_id=c.run_id,
+            phase=c.phase,
+            model=c.model,
+            prompt=c.prompt[:500] + "..." if len(c.prompt) > 500 else c.prompt,  # Truncate for listing
+            raw_response=c.raw_response[:500] + "..." if c.raw_response and len(c.raw_response) > 500 else c.raw_response,
+            thinking_text=c.thinking_text[:500] + "..." if c.thinking_text and len(c.thinking_text) > 500 else c.thinking_text,
+            thinking_tokens=c.thinking_tokens,
+            input_tokens=c.input_tokens,
+            output_tokens=c.output_tokens,
+            latency_ms=c.latency_ms,
+            web_search_used=c.web_search_used,
+            status=c.status,
+            created_at=c.created_at,
+        )
+        for c in calls
+    ]

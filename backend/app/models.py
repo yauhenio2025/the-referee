@@ -46,6 +46,12 @@ class Dossier(Base):
     # Relationships
     collection: Mapped["Collection"] = relationship(back_populates="dossiers")
     papers: Mapped[List["Paper"]] = relationship(back_populates="dossier")
+    # Edition analysis runs for this dossier
+    edition_analysis_runs: Mapped[List["EditionAnalysisRun"]] = relationship(
+        "EditionAnalysisRun",
+        back_populates="dossier",
+        cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_dossiers_collection", "collection_id"),
@@ -129,6 +135,12 @@ class Paper(Base):
     jobs: Mapped[List["Job"]] = relationship(back_populates="paper", cascade="all, delete-orphan")
     # Additional dossiers (many-to-many via junction table)
     additional_dossiers: Mapped[List["PaperAdditionalDossier"]] = relationship(cascade="all, delete-orphan")
+    # Work edition link (if this paper is linked to a Work)
+    work_edition: Mapped[Optional["WorkEdition"]] = relationship(
+        "WorkEdition",
+        foreign_keys="WorkEdition.paper_id",
+        uselist=False
+    )
 
     __table_args__ = (
         Index("ix_papers_title", "title"),  # Regular index for title lookups
@@ -215,6 +227,12 @@ class Edition(Base):
         backref="canonical_edition",
         remote_side="Edition.id",
         foreign_keys="Edition.merged_into_edition_id"
+    )
+    # Work edition link (if this edition is linked to a Work)
+    work_edition: Mapped[Optional["WorkEdition"]] = relationship(
+        "WorkEdition",
+        foreign_keys="WorkEdition.edition_id",
+        uselist=False
     )
 
 
@@ -1095,3 +1113,288 @@ class ThinkerLLMCall(Base):
     thinker: Mapped["Thinker"] = relationship("Thinker", back_populates="llm_calls")
 
     # Note: Single-column indexes created by index=True on thinker_id and workflow columns
+
+
+# ============== EXHAUSTIVE EDITION ANALYSIS ==============
+# Work-centric model for analyzing and linking editions across languages
+# Used for comprehensive bibliographic analysis of thinker dossiers
+
+
+class Work(Base):
+    """
+    An abstract intellectual work (book, essay, article, etc.).
+
+    A Work is the abstract entity that can have multiple editions/translations.
+    For example, "The Spirit of Utopia" is a Work that has German original
+    "Geist der Utopie" and English translation "The Spirit of Utopia".
+
+    Works are identified by thinker + canonical_title, which is typically
+    the English title or the most commonly referenced title.
+    """
+    __tablename__ = "works"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Thinker identification (text, not FK - works can exist for thinkers without Thinker record)
+    thinker_name: Mapped[str] = mapped_column(String(255), index=True)
+
+    # Canonical identification
+    canonical_title: Mapped[str] = mapped_column(String(500))  # Usually English or most common title
+
+    # Original work details
+    original_language: Mapped[Optional[str]] = mapped_column(String(50))  # e.g., "german"
+    original_title: Mapped[Optional[str]] = mapped_column(String(500))  # e.g., "Geist der Utopie"
+    original_year: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Classification
+    work_type: Mapped[Optional[str]] = mapped_column(String(50))  # book, article, essay, lecture, anthology
+    importance: Mapped[Optional[str]] = mapped_column(String(20))  # major, minor, peripheral
+
+    # Additional context
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    editions: Mapped[List["WorkEdition"]] = relationship(
+        "WorkEdition", back_populates="work", cascade="all, delete-orphan"
+    )
+    missing_editions: Mapped[List["MissingEdition"]] = relationship(
+        "MissingEdition", back_populates="work", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_works_thinker_title", "thinker_name", "canonical_title", unique=True),
+        Index("ix_works_thinker", "thinker_name"),
+    )
+
+
+class WorkEdition(Base):
+    """
+    Links a Work to a specific Paper/Edition in the database.
+
+    Represents a concrete manifestation of a Work - either the original
+    or a translation in a specific language.
+
+    A Work can have multiple WorkEditions (one per language/translation).
+    A Paper or Edition can only link to one Work (enforced by unique constraint).
+    """
+    __tablename__ = "work_editions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[int] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
+
+    # Link to actual database record (one of these should be set)
+    paper_id: Mapped[Optional[int]] = mapped_column(ForeignKey("papers.id", ondelete="SET NULL"), index=True)
+    edition_id: Mapped[Optional[int]] = mapped_column(ForeignKey("editions.id", ondelete="SET NULL"), index=True)
+
+    # Edition details
+    language: Mapped[str] = mapped_column(String(50))  # e.g., "english", "german", "french"
+    edition_type: Mapped[Optional[str]] = mapped_column(String(50))  # original, translation, abridged, anthology_excerpt
+    year: Mapped[Optional[int]] = mapped_column(Integer)
+    translator: Mapped[Optional[str]] = mapped_column(String(255))  # For translations
+    publisher: Mapped[Optional[str]] = mapped_column(String(255))
+
+    # Verification status
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)  # Manually verified link
+    auto_linked: Mapped[bool] = mapped_column(Boolean, default=True)  # Linked by LLM/algorithm
+    confidence: Mapped[Optional[float]] = mapped_column(Float)  # 0.0 to 1.0
+    link_reason: Mapped[Optional[str]] = mapped_column(Text)  # Why this link was made
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    work: Mapped["Work"] = relationship("Work", back_populates="editions")
+
+    __table_args__ = (
+        # A specific edition can only be linked to one work
+        Index("ix_work_editions_edition_unique", "edition_id", unique=True, postgresql_where="edition_id IS NOT NULL"),
+        # A specific paper can only be linked to one work
+        Index("ix_work_editions_paper_unique", "paper_id", unique=True, postgresql_where="paper_id IS NOT NULL"),
+        Index("ix_work_editions_work", "work_id"),
+        Index("ix_work_editions_language", "work_id", "language"),
+    )
+
+
+class MissingEdition(Base):
+    """
+    A gap identified in the edition coverage for a Work.
+
+    When bibliographic analysis determines that a translation exists
+    but isn't in our database, we record it here. This can then be
+    used to generate scraper jobs to find the missing edition.
+    """
+    __tablename__ = "missing_editions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[int] = mapped_column(ForeignKey("works.id", ondelete="CASCADE"), index=True)
+
+    # What's missing
+    language: Mapped[str] = mapped_column(String(50))  # Missing language
+    expected_title: Mapped[Optional[str]] = mapped_column(String(500))  # Expected title in that language
+    expected_year: Mapped[Optional[int]] = mapped_column(Integer)
+    expected_translator: Mapped[Optional[str]] = mapped_column(String(255))
+    expected_publisher: Mapped[Optional[str]] = mapped_column(String(255))
+
+    # How we know it exists
+    source: Mapped[Optional[str]] = mapped_column(String(100))  # llm_knowledge, web_search, google_scholar
+    source_url: Mapped[Optional[str]] = mapped_column(Text)  # Verification URL if found
+    source_details: Mapped[Optional[str]] = mapped_column(Text)  # Additional source info (JSON)
+
+    # Priority and status
+    priority: Mapped[str] = mapped_column(String(20), default="medium")  # high, medium, low
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, job_created, found, dismissed
+
+    # Link to scraper job if created
+    job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
+
+    # Resolution tracking
+    dismissed_reason: Mapped[Optional[str]] = mapped_column(Text)  # Why dismissed if status=dismissed
+    found_edition_id: Mapped[Optional[int]] = mapped_column(ForeignKey("editions.id", ondelete="SET NULL"))
+
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    work: Mapped["Work"] = relationship("Work", back_populates="missing_editions")
+
+    __table_args__ = (
+        Index("ix_missing_editions_work", "work_id"),
+        Index("ix_missing_editions_status", "status"),
+        Index("ix_missing_editions_priority", "priority"),
+        Index("ix_missing_editions_work_lang", "work_id", "language", unique=True),
+    )
+
+
+class EditionAnalysisRun(Base):
+    """
+    Audit trail for a complete edition analysis run on a dossier.
+
+    Tracks the full lifecycle of analyzing a thinker's dossier:
+    1. Inventory of existing papers/editions
+    2. Bibliographic research via Claude
+    3. Linking editions to Works
+    4. Gap analysis
+    5. Job generation
+
+    Provides cost tracking and status updates for the UI.
+    """
+    __tablename__ = "edition_analysis_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dossier_id: Mapped[int] = mapped_column(ForeignKey("dossiers.id", ondelete="CASCADE"), index=True)
+
+    # Thinker being analyzed
+    thinker_name: Mapped[str] = mapped_column(String(255))
+
+    # Status tracking
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    # Statuses: pending, inventorying, researching, linking, analyzing_gaps, generating_jobs, completed, failed
+    phase: Mapped[Optional[str]] = mapped_column(String(50))  # Current phase description
+    phase_progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0 to 1.0
+
+    # Progress counters
+    papers_analyzed: Mapped[int] = mapped_column(Integer, default=0)
+    editions_analyzed: Mapped[int] = mapped_column(Integer, default=0)
+    works_identified: Mapped[int] = mapped_column(Integer, default=0)
+    links_created: Mapped[int] = mapped_column(Integer, default=0)
+    gaps_found: Mapped[int] = mapped_column(Integer, default=0)
+    jobs_created: Mapped[int] = mapped_column(Integer, default=0)
+
+    # LLM usage stats
+    llm_calls_count: Mapped[int] = mapped_column(Integer, default=0)
+    web_searches_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    thinking_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Results summary (JSON)
+    results_summary: Mapped[Optional[str]] = mapped_column(Text)  # JSON summary for quick display
+
+    # Error tracking
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    error_phase: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Timing
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    dossier: Mapped["Dossier"] = relationship("Dossier", back_populates="edition_analysis_runs")
+    llm_calls: Mapped[List["EditionAnalysisLLMCall"]] = relationship(
+        "EditionAnalysisLLMCall", back_populates="run", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_edition_analysis_runs_dossier", "dossier_id"),
+        Index("ix_edition_analysis_runs_status", "status"),
+    )
+
+
+class EditionAnalysisLLMCall(Base):
+    """
+    Detailed audit trail for each LLM call in edition analysis.
+
+    Provides complete traceability for:
+    - Bibliographic research queries
+    - Edition verification
+    - Gap analysis reasoning
+    - Job generation decisions
+    """
+    __tablename__ = "edition_analysis_llm_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("edition_analysis_runs.id", ondelete="CASCADE"), index=True)
+
+    # Call context
+    phase: Mapped[str] = mapped_column(String(50), index=True)
+    # Phases: inventory, bibliographic_research, gap_analysis, verification, job_generation
+    call_number: Mapped[int] = mapped_column(Integer, default=1)  # Sequence within phase
+    purpose: Mapped[Optional[str]] = mapped_column(String(200))  # Human-readable purpose
+
+    # Model info
+    model: Mapped[str] = mapped_column(String(100))
+
+    # Request
+    prompt: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[Optional[str]] = mapped_column(Text)  # JSON context provided
+
+    # Response
+    raw_response: Mapped[Optional[str]] = mapped_column(Text)
+    parsed_result: Mapped[Optional[str]] = mapped_column(Text)  # JSON parsed result
+
+    # Extended thinking (for Opus calls)
+    thinking_text: Mapped[Optional[str]] = mapped_column(Text)
+    thinking_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Web search tracking
+    web_search_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    web_search_queries: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of queries
+    web_sources_cited: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of URLs
+
+    # Usage stats
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # Statuses: pending, streaming, completed, failed, parse_error
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timing
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    run: Mapped["EditionAnalysisRun"] = relationship("EditionAnalysisRun", back_populates="llm_calls")
+
+    __table_args__ = (
+        Index("ix_edition_analysis_llm_calls_run", "run_id"),
+        Index("ix_edition_analysis_llm_calls_phase", "phase"),
+    )

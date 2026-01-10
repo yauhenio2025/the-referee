@@ -1027,6 +1027,109 @@ class RefereeAPI {
   async getScholarProfile(userId) {
     return this.request(`/api/scholar-profiles/${userId}`);
   }
+
+  // ============== Edition Analysis ==============
+
+  /**
+   * Start exhaustive edition analysis for a dossier.
+   * Compares linked Works against LLM-generated bibliography.
+   * @param {number} dossierId - Dossier ID
+   * @param {Object} options - { forceRefresh, maxWorks }
+   */
+  async startEditionAnalysis(dossierId, options = {}) {
+    return this.request(`/api/dossiers/${dossierId}/analyze-editions`, {
+      method: 'POST',
+      body: {
+        force_refresh: options.forceRefresh ?? false,
+        max_works: options.maxWorks ?? 100,
+      },
+    });
+  }
+
+  /**
+   * Get edition analysis run details.
+   * @param {number} runId - EditionAnalysisRun ID
+   */
+  async getEditionAnalysisRun(runId) {
+    return this.request(`/api/edition-analysis-runs/${runId}`);
+  }
+
+  /**
+   * Get all edition analysis runs for a dossier.
+   * @param {number} dossierId - Dossier ID
+   * @param {Object} params - { limit, offset }
+   */
+  async getDossierEditionAnalysis(dossierId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/api/dossiers/${dossierId}/edition-analysis${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Create a scraper job from a missing edition gap.
+   * @param {number} missingId - MissingEdition ID
+   * @param {Object} options - { priority }
+   */
+  async createJobFromGap(missingId, options = {}) {
+    return this.request(`/api/edition-analysis/missing/${missingId}/create-job`, {
+      method: 'POST',
+      body: {
+        priority: options.priority ?? 'normal',
+      },
+    });
+  }
+
+  /**
+   * Dismiss a gap (mark as not needed).
+   * @param {number} missingId - MissingEdition ID
+   * @param {string} reason - Reason for dismissal
+   */
+  async dismissGap(missingId, reason = '') {
+    return this.request(`/api/edition-analysis/missing/${missingId}/dismiss`, {
+      method: 'POST',
+      body: { reason },
+    });
+  }
+
+  /**
+   * List Works with optional filtering.
+   * @param {Object} params - { thinker, limit, offset }
+   */
+  async getWorks(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/api/works${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Get a Work with all its editions.
+   * @param {number} workId - Work ID
+   */
+  async getWorkWithEditions(workId) {
+    return this.request(`/api/works/${workId}`);
+  }
+
+  /**
+   * Get all editions for a Work.
+   * @param {number} workId - Work ID
+   */
+  async getWorkEditions(workId) {
+    return this.request(`/api/works/${workId}/editions`);
+  }
+
+  /**
+   * Get LLM-generated bibliography for a thinker.
+   * @param {string} thinkerName - Thinker name
+   */
+  async getThinkerBibliography(thinkerName) {
+    return this.request(`/api/edition-analysis/bibliography/${encodeURIComponent(thinkerName)}`);
+  }
+
+  /**
+   * Get LLM calls for an edition analysis run.
+   * @param {number} runId - EditionAnalysisRun ID
+   */
+  async getEditionAnalysisLLMCalls(runId) {
+    return this.request(`/api/edition-analysis-runs/${runId}/llm-calls`);
+  }
 }
 
 export const api = new RefereeAPI();
