@@ -177,8 +177,8 @@ class EditionAnalysisOrchestrator:
         inventory = await inventory_service.analyze_dossier(run.dossier_id)
 
         # Update run stats
-        run.papers_analyzed = inventory.total_papers
-        run.editions_analyzed = inventory.total_editions
+        run.papers_analyzed = inventory.paper_count
+        run.editions_analyzed = inventory.edition_count
         run.phase_progress = 1.0
         await self.db.commit()
 
