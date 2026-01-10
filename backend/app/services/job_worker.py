@@ -1366,6 +1366,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
         # Track current harvest mode (standard or author_letter) for progress reporting
         current_harvest_year = {"year": None, "mode": "standard"}
 
+        # Initialize effective_year_low before callback definition to avoid closure scope issues
+        effective_year_low = None
+
         # Target edition ID for citations - normally same as edition.id,
         # but for merged editions it points to their canonical edition
         target_edition_id = edition.id
