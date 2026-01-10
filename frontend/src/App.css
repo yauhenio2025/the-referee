@@ -3055,6 +3055,25 @@ button:disabled {
   background: var(--bg-dark);
 }
 
+/* Generic modal content box */
+.modal-content {
+  background: var(--bg-card);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content.modal-large {
+  max-width: 1000px;
+  max-height: 95vh;
+}
+
 /* Diagnosis loading state */
 .diagnosis-loading {
   display: flex;

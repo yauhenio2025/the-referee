@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useToast } from './Toast'
+import EditionAnalysis from './EditionAnalysis'
 
 /**
  * Collection Detail - Shows papers organized by dossiers
@@ -30,6 +31,7 @@ export default function CollectionDetail({ collectionId, initialDossier = null, 
   const [searchFilter, setSearchFilter] = useState('')
   const [expandedPapers, setExpandedPapers] = useState(new Set()) // Track which papers have editions expanded
   const [paperEditions, setPaperEditions] = useState({}) // Cache of editions by paper id
+  const [showEditionAnalysis, setShowEditionAnalysis] = useState(false) // Show edition analysis modal
 
   const { data: collection, isLoading } = useQuery({
     queryKey: ['collection', collectionId],
@@ -457,6 +459,16 @@ export default function CollectionDetail({ collectionId, initialDossier = null, 
               onChange={e => setSearchFilter(e.target.value)}
               className="search-input"
             />
+            {/* Edition Analysis button - show when a specific dossier is selected */}
+            {selectedDossier && selectedDossier !== 'unassigned' && (
+              <button
+                className="btn-secondary"
+                onClick={() => setShowEditionAnalysis(true)}
+                title="AI-powered analysis to find missing translations and editions"
+              >
+                🔬 Analyze Editions
+              </button>
+            )}
             {selectedPapers.size > 0 && (
               <div className="selection-actions">
                 <span className="selection-count">{selectedPapers.size} selected</span>
@@ -674,6 +686,19 @@ export default function CollectionDetail({ collectionId, initialDossier = null, 
           )}
         </main>
       </div>
+
+      {/* Edition Analysis Modal */}
+      {showEditionAnalysis && selectedDossier && selectedDossier !== 'unassigned' && (
+        <div className="modal-overlay" onClick={() => setShowEditionAnalysis(false)}>
+          <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
+            <EditionAnalysis
+              dossierId={selectedDossier}
+              thinkerName={dossiers.find(d => d.id === selectedDossier)?.name || 'Unknown'}
+              onClose={() => setShowEditionAnalysis(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
