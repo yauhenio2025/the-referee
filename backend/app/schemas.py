@@ -1309,6 +1309,7 @@ class EditionAnalysisRunResponse(BaseModel):
     thinker_name: str
     status: str  # pending, analyzing, web_searching, verifying, completed, failed
     phase: Optional[str] = None
+    phase_progress: float = 0.0
     papers_analyzed: int = 0
     editions_analyzed: int = 0
     works_identified: int = 0
@@ -1323,6 +1324,7 @@ class EditionAnalysisRunResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    error_phase: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -1366,17 +1368,33 @@ class StartEditionAnalysisResponse(BaseModel):
     message: str
 
 
+class WorkWithEditionsResponse(BaseModel):
+    """A work with all its linked editions"""
+    id: int
+    thinker_name: str
+    canonical_title: str
+    original_language: Optional[str] = None
+    original_title: Optional[str] = None
+    original_year: Optional[int] = None
+    work_type: Optional[str] = None
+    importance: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    editions: List[WorkEditionResponse] = []
+    missing_editions: List[MissingEditionResponse] = []
+
+
 class EditionAnalysisResultResponse(BaseModel):
     """Full results of an edition analysis"""
-    run: EditionAnalysisRunResponse
-    works: List[WorkResponse] = []
-    work_editions: List[WorkEditionResponse] = []
-    missing_editions: List[MissingEditionResponse] = []
-    # Summary stats
+    dossier_id: int
+    thinker_name: str
+    run: Optional[EditionAnalysisRunResponse] = None
+    works: List[WorkWithEditionsResponse] = []
     total_works: int = 0
-    total_editions_found: int = 0
+    total_editions: int = 0
     total_gaps: int = 0
-    languages_coverage: Dict[str, int] = {}  # {language: count}
+    pending_gaps: int = 0
 
 
 class CreateJobFromGapRequest(BaseModel):
@@ -1394,13 +1412,6 @@ class CreateJobFromGapResponse(BaseModel):
 class DismissGapRequest(BaseModel):
     """Request to dismiss a gap (mark as not actually missing)"""
     reason: Optional[str] = None
-
-
-class WorkWithEditionsResponse(BaseModel):
-    """A work with all its linked editions"""
-    work: WorkResponse
-    editions: List[WorkEditionResponse] = []
-    missing_translations: List[MissingEditionResponse] = []
 
 
 class ThinkerBibliographyResponse(BaseModel):
