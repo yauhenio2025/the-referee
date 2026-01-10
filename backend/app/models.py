@@ -469,6 +469,49 @@ class HarvestTarget(Base):
     )
 
 
+class HarvestQuery(Base):
+    """Universal query logging for ALL harvesting operations.
+
+    Records every Google Scholar query we execute, providing full traceability
+    for both standard (<1000) and overflow (>1000) harvesting.
+
+    This enables:
+    - Debugging why certain citations weren't captured
+    - Analyzing query patterns and success rates
+    - Resuming from specific queries on failure
+    - Auditing API usage and costs
+    """
+    __tablename__ = "harvest_queries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # The actual query sent to Google Scholar
+    query_string: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Partition type: 'standard', 'year', 'letter', 'lang', 'subdivision'
+    partition_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Partition value: year (2020), letter (a), lang code (zh-CN), or combined (a_excl)
+    partition_value: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Pagination
+    page_number: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Results
+    results_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Citations returned
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_harvest_queries_edition", "edition_id"),
+        Index("ix_harvest_queries_job", "job_id"),
+        Index("ix_harvest_queries_created", "created_at"),
+    )
+
+
 # ============== PARTITION HARVEST TRACEABILITY ==============
 # Complete tracking of overflow year harvesting using partition strategy
 

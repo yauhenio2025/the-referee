@@ -15,12 +15,12 @@ from typing import Optional, Dict, Any, List, Tuple
 from sqlalchemy import select, update, func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget, Thinker, ThinkerWork, ThinkerHarvestRun
+from ..models import Job, Paper, Edition, Citation, RawSearchResult, FailedFetch, HarvestTarget, HarvestQuery, Thinker, ThinkerWork, ThinkerHarvestRun
 from ..database import async_session
 from .edition_discovery import EditionDiscoveryService
 from .scholar_search import get_scholar_service
 from .citation_buffer import get_buffer, BufferedPage
-from .api_logger import log_api_call
+from .api_logger import log_api_call, log_harvest_query
 from .overflow_harvester import harvest_with_author_letter_strategy
 from ..config import get_settings
 
@@ -1584,6 +1584,9 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     )
                     await callback_db.commit()
 
+                # Return count of new citations for harvest tracking (used by overflow_harvester)
+                return new_count
+
             except asyncio.CancelledError:
                 # Task was cancelled (timeout, shutdown, etc.) - this corrupts greenlet state
                 # Mark for buffer retry and re-raise to propagate cancellation
@@ -1757,6 +1760,21 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                     on_page_failed=on_page_failed_standard,
                     start_page=resume_page,
                 )
+
+                # Log harvest query for traceability
+                query_str = f"cites:{edition.scholar_id}"
+                if effective_year_low:
+                    query_str += f" year_low:{effective_year_low}"
+                asyncio.create_task(log_harvest_query(
+                    edition_id=edition.id,
+                    query_string=query_str,
+                    partition_type="standard",
+                    partition_value=None,
+                    page_number=resume_page,
+                    job_id=job.id,
+                    results_count=result.get("totalResults") if isinstance(result, dict) else None,
+                    success=isinstance(result, dict),
+                ))
 
                 log_now(f"[EDITION {i+1}] get_cited_by returned:")
                 log_now(f"[EDITION {i+1}]   result type: {type(result)}")

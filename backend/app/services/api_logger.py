@@ -219,3 +219,51 @@ async def stop_flush_task():
         except asyncio.CancelledError:
             pass
         _flush_task = None
+
+
+async def log_harvest_query(
+    edition_id: int,
+    query_string: str,
+    partition_type: Optional[str] = None,
+    partition_value: Optional[str] = None,
+    page_number: int = 0,
+    job_id: Optional[int] = None,
+    results_count: Optional[int] = None,
+    success: bool = True,
+    error_message: Optional[str] = None
+):
+    """
+    Log a harvest query for full traceability.
+
+    This records every Google Scholar query we execute, enabling:
+    - Debugging why certain citations weren't captured
+    - Analyzing query patterns and success rates
+    - Auditing API usage
+    """
+    try:
+        from ..database import async_session
+
+        async with async_session() as db:
+            await db.execute(
+                text("""
+                    INSERT INTO harvest_queries
+                    (edition_id, job_id, query_string, partition_type, partition_value,
+                     page_number, results_count, success, error_message, created_at)
+                    VALUES (:edition_id, :job_id, :query_string, :partition_type, :partition_value,
+                            :page_number, :results_count, :success, :error_message, NOW())
+                """),
+                {
+                    "edition_id": edition_id,
+                    "job_id": job_id,
+                    "query_string": query_string,
+                    "partition_type": partition_type,
+                    "partition_value": partition_value,
+                    "page_number": page_number,
+                    "results_count": results_count,
+                    "success": success,
+                    "error_message": error_message[:500] if error_message else None,
+                }
+            )
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to log harvest query: {e}")

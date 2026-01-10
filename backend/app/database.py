@@ -209,6 +209,24 @@ async def run_migrations():
         """CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_active_paper_type
            ON jobs(paper_id, job_type)
            WHERE status IN ('pending', 'running')""",
+        # Universal query logging for ALL harvesting operations (standard and overflow)
+        # Provides full traceability for debugging and auditing
+        """CREATE TABLE IF NOT EXISTS harvest_queries (
+            id SERIAL PRIMARY KEY,
+            edition_id INTEGER REFERENCES editions(id) ON DELETE CASCADE,
+            job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+            query_string TEXT NOT NULL,
+            partition_type VARCHAR(20),
+            partition_value VARCHAR(50),
+            page_number INTEGER DEFAULT 0,
+            results_count INTEGER,
+            success BOOLEAN DEFAULT TRUE,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_harvest_queries_edition ON harvest_queries(edition_id)",
+        "CREATE INDEX IF NOT EXISTS ix_harvest_queries_job ON harvest_queries(job_id)",
+        "CREATE INDEX IF NOT EXISTS ix_harvest_queries_created ON harvest_queries(created_at)",
     ]
 
     # Run each migration in its own transaction to avoid cascading failures

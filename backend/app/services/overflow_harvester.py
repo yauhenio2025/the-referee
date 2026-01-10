@@ -35,7 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.exc import DBAPIError, OperationalError
 
-from ..models import PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall, Citation
+from ..models import PartitionRun, PartitionTermAttempt, PartitionQuery, PartitionLLMCall, Citation, Edition
+from .api_logger import log_harvest_query
 
 logger = logging.getLogger(__name__)
 
@@ -1643,6 +1644,21 @@ async def harvest_query_partition(
         pages_failed = result.get("pages_failed", 0)
         actual_count = result.get("totalResults", 0)
 
+        # Log harvest query for traceability
+        query_str = f"cites:{scholar_id}"
+        if additional_query:
+            query_str += f" {additional_query}"
+        if language_filter:
+            query_str += f" lang:{language_filter}"
+        asyncio.create_task(log_harvest_query(
+            edition_id=edition_id,
+            query_string=query_str,
+            partition_type="letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang",
+            partition_value=partition_key,
+            results_count=actual_count,
+            success=True,
+        ))
+
         # Update target
         target.actual_count = new_citations
         target.pages_attempted = pages_succeeded + pages_failed
@@ -1657,6 +1673,18 @@ async def harvest_query_partition(
 
     except Exception as e:
         log_now(f"  Partition '{partition_key}' FAILED: {e}", "error")
+        # Log failed harvest query
+        query_str = f"cites:{scholar_id}"
+        if additional_query:
+            query_str += f" {additional_query}"
+        asyncio.create_task(log_harvest_query(
+            edition_id=edition_id,
+            query_string=query_str,
+            partition_type="letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang",
+            partition_value=partition_key,
+            success=False,
+            error_message=str(e),
+        ))
         target.status = "failed"
         target.gap_reason = str(e)[:50]
         await safe_flush(db)
@@ -1926,6 +1954,42 @@ async def harvest_with_author_letter_strategy(
         "success": False,
     }
 
+    # === RESUME STATE MANAGEMENT ===
+    # Load resume state from edition to skip already-completed partitions
+    edition_result = await db.execute(
+        select(Edition).where(Edition.id == edition_id)
+    )
+    edition = edition_result.scalar_one_or_none()
+
+    resume_state = {}
+    completed_partitions = set()
+    if edition and edition.harvest_resume_state:
+        try:
+            resume_state = json.loads(edition.harvest_resume_state)
+            completed_partitions = set(resume_state.get("completed_partitions", []))
+            log_now(f"Loaded resume state: {len(completed_partitions)} partitions already completed")
+            if completed_partitions:
+                log_now(f"  Completed: {sorted(completed_partitions)}")
+        except json.JSONDecodeError:
+            log_now(f"Warning: Invalid resume state JSON, starting fresh")
+
+    async def mark_partition_complete(partition_key: str, new_citations: int):
+        """Mark a partition as complete in the resume state."""
+        nonlocal resume_state, completed_partitions
+        completed_partitions.add(partition_key)
+        resume_state["completed_partitions"] = list(completed_partitions)
+        resume_state["last_updated"] = datetime.utcnow().isoformat()
+        resume_state.setdefault("partition_stats", {})[partition_key] = new_citations
+
+        if edition:
+            await db.execute(
+                update(Edition)
+                .where(Edition.id == edition_id)
+                .values(harvest_resume_state=json.dumps(resume_state))
+            )
+            await safe_commit(db)
+            log_now(f"  ✓ Marked partition '{partition_key}' complete ({new_citations} citations)")
+
     # Create partition run for tracking
     partition_run = await create_partition_run(
         db=db,
@@ -1941,6 +2005,14 @@ async def harvest_with_author_letter_strategy(
 
     # === LEVEL 0: Check if direct harvest is possible ===
     if total_citation_count < GOOGLE_SCHOLAR_LIMIT:
+        if "_all" in completed_partitions:
+            log_now(f"Total ({total_citation_count}) < 1000 - ALREADY COMPLETE (resume)")
+            stats["total_harvested"] = resume_state.get("partition_stats", {}).get("_all", 0)
+            stats["strategy_used"] = "direct"
+            stats["success"] = True
+            stats["skipped_resume"] = True
+            return stats
+
         log_now(f"Total ({total_citation_count}) < 1000 - harvesting directly")
         new, _ = await harvest_query_partition(
             db=db,
@@ -1956,6 +2028,7 @@ async def harvest_with_author_letter_strategy(
             expected_count=total_citation_count,
             partition_run=partition_run,
         )
+        await mark_partition_complete("_all", new)
         stats["total_harvested"] = new
         stats["strategy_used"] = "direct"
         stats["success"] = True
@@ -1971,6 +2044,15 @@ async def harvest_with_author_letter_strategy(
     non_english_harvested = 0
 
     for lang_code in NON_ENGLISH_LANGUAGE_LIST:
+        partition_key = f"lang_{lang_code}"
+
+        # Check if already completed (resume)
+        if partition_key in completed_partitions:
+            prev_count = resume_state.get("partition_stats", {}).get(partition_key, 0)
+            log_now(f"  {lang_code}: SKIPPING (already complete, {prev_count} citations)")
+            non_english_harvested += prev_count
+            continue
+
         lang_count = await get_query_count(scholar_service, scholar_id, "", lang_code)
         if lang_count > 0:
             log_now(f"  {lang_code}: {lang_count} results")
@@ -1983,7 +2065,7 @@ async def harvest_with_author_letter_strategy(
                     scholar_id=scholar_id,
                     edition_id=edition_id,
                     paper_id=paper_id,
-                    partition_key=f"lang_{lang_code}",
+                    partition_key=partition_key,
                     additional_query="",
                     language_filter=lang_code,
                     existing_scholar_ids=existing_scholar_ids,
@@ -1991,6 +2073,7 @@ async def harvest_with_author_letter_strategy(
                     expected_count=lang_count,
                     partition_run=partition_run,
                 )
+                await mark_partition_complete(partition_key, new)
                 non_english_harvested += new
                 await asyncio.sleep(2)
 
@@ -1998,6 +2081,16 @@ async def harvest_with_author_letter_strategy(
     stats["non_english_harvested"] = non_english_harvested
 
     # Check English
+    # First check if lang_en is already complete (resume)
+    if "lang_en" in completed_partitions:
+        prev_count = resume_state.get("partition_stats", {}).get("lang_en", 0)
+        log_now(f"English: SKIPPING (already complete, {prev_count} citations)")
+        stats["english_harvested"] = prev_count
+        stats["total_harvested"] = non_english_harvested + prev_count
+        stats["success"] = True
+        stats["skipped_resume"] = True
+        return stats
+
     english_count = await get_query_count(scholar_service, scholar_id, "", ENGLISH_ONLY)
     log_now(f"English: {english_count} results")
 
@@ -2018,6 +2111,7 @@ async def harvest_with_author_letter_strategy(
             expected_count=english_count,
             partition_run=partition_run,
         )
+        await mark_partition_complete("lang_en", new)
         stats["english_harvested"] = new
         stats["total_harvested"] = non_english_harvested + new
         stats["success"] = True
@@ -2032,33 +2126,48 @@ async def harvest_with_author_letter_strategy(
     english_harvested = 0
 
     # Step 1: Harvest non-letter items (rare edge case)
-    no_letter_query = build_letter_exclusion_query(exclude_all_letters=True)
-    no_letter_count = await get_query_count(
-        scholar_service, scholar_id, no_letter_query, ENGLISH_ONLY
-    )
+    # Check if already complete (resume)
+    if "_" in completed_partitions:
+        prev_count = resume_state.get("partition_stats", {}).get("_", 0)
+        log_now(f"Non-letter items: SKIPPING (already complete, {prev_count} citations)")
+        english_harvested += prev_count
+    else:
+        no_letter_query = build_letter_exclusion_query(exclude_all_letters=True)
+        no_letter_count = await get_query_count(
+            scholar_service, scholar_id, no_letter_query, ENGLISH_ONLY
+        )
 
-    if no_letter_count > 0:
-        log_now(f"Non-letter items: {no_letter_count}")
-        if no_letter_count < GOOGLE_SCHOLAR_LIMIT:
-            new, _ = await harvest_query_partition(
-                db=db,
-                scholar_service=scholar_service,
-                scholar_id=scholar_id,
-                edition_id=edition_id,
-                paper_id=paper_id,
-                partition_key="_",
-                additional_query=no_letter_query,
-                language_filter=ENGLISH_ONLY,
-                existing_scholar_ids=existing_scholar_ids,
-                on_page_complete=on_page_complete,
-                expected_count=no_letter_count,
-                partition_run=partition_run,
-            )
-            english_harvested += new
-            await asyncio.sleep(2)
+        if no_letter_count > 0:
+            log_now(f"Non-letter items: {no_letter_count}")
+            if no_letter_count < GOOGLE_SCHOLAR_LIMIT:
+                new, _ = await harvest_query_partition(
+                    db=db,
+                    scholar_service=scholar_service,
+                    scholar_id=scholar_id,
+                    edition_id=edition_id,
+                    paper_id=paper_id,
+                    partition_key="_",
+                    additional_query=no_letter_query,
+                    language_filter=ENGLISH_ONLY,
+                    existing_scholar_ids=existing_scholar_ids,
+                    on_page_complete=on_page_complete,
+                    expected_count=no_letter_count,
+                    partition_run=partition_run,
+                )
+                await mark_partition_complete("_", new)
+                english_harvested += new
+                await asyncio.sleep(2)
 
     # Step 2: Process each letter a-z
     for letter in AUTHOR_LETTERS:
+        # Check if already complete (resume)
+        if letter in completed_partitions:
+            prev_count = resume_state.get("partition_stats", {}).get(letter, 0)
+            log_now(f"Letter '{letter}': SKIPPING (already complete, {prev_count} citations)")
+            english_harvested += prev_count
+            stats["letters_processed"].append({"letter": letter, "count": prev_count, "skipped": True})
+            continue
+
         letter_query = build_letter_exclusion_query(exclude_all_letters=False, include_letter=letter)
         letter_count = await get_query_count(
             scholar_service, scholar_id, letter_query, ENGLISH_ONLY
@@ -2066,6 +2175,7 @@ async def harvest_with_author_letter_strategy(
 
         if letter_count == 0:
             log_now(f"Letter '{letter}': 0 results - skipping")
+            await mark_partition_complete(letter, 0)  # Mark as complete even if empty
             continue
 
         log_now(f"Letter '{letter}': {letter_count} results")
@@ -2087,6 +2197,7 @@ async def harvest_with_author_letter_strategy(
                 expected_count=letter_count,
                 partition_run=partition_run,
             )
+            await mark_partition_complete(letter, new)
             english_harvested += new
         else:
             # Need subdivision for this letter
@@ -2104,6 +2215,7 @@ async def harvest_with_author_letter_strategy(
                 on_page_complete=on_page_complete,
                 partition_run=partition_run,
             )
+            await mark_partition_complete(letter, new)
             english_harvested += new
 
         await asyncio.sleep(3)  # Rate limit between letters

@@ -4,6 +4,56 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2026-01-10: Citation Harvesting Audit & Critical Fixes
+
+**Description:** Thorough audit of the citation harvesting system revealed and fixed three critical issues affecting letter-based partitioning, resume logic, and query traceability.
+
+**Issues Found & Fixed:**
+
+### 1. Letter-Based Partitioning Callback Bug (HIGH PRIORITY)
+- **Problem:** `save_page_citations()` didn't return a value, so `wrapped_on_page_complete()` in overflow_harvester.py couldn't update `new_citations`, leaving all `harvest_targets.actual_count = 0`
+- **Evidence:** 1,018 letter-based HarvestTargets with `actual_count = 0` despite citations being harvested
+- **Fix:** Added `return new_count` at end of `save_page_citations()` function
+
+### 2. Resume Logic Not Using harvest_resume_state (HIGH PRIORITY)
+- **Problem:** `harvest_resume_state` column existed but was never consulted during harvesting - resume logic only counted existing citations to calculate page offset, re-fetching all years from beginning
+- **Evidence:** Harvey's book showed 34,077 unique citations but 125,252 total encounters (3.7x duplicates)
+- **Fix:** Added full resume state management in `harvest_with_author_letter_strategy()`:
+  - Load resume state from edition at start
+  - Track `completed_partitions` set (lang codes, letters)
+  - Skip already-completed partitions
+  - Update resume state after each partition completes
+
+### 3. Query Traceability Gap (MEDIUM PRIORITY)
+- **Problem:** Overflow harvesting had full traceability via PartitionRun/PartitionQuery tables, but standard harvesting had NO query logging
+- **Fix:** Added universal `HarvestQuery` model and `log_harvest_query()` helper for all harvesting operations
+
+**New Database Table:**
+```sql
+CREATE TABLE harvest_queries (
+    id SERIAL PRIMARY KEY,
+    edition_id INTEGER REFERENCES editions(id) ON DELETE CASCADE,
+    job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    query_string TEXT NOT NULL,
+    partition_type VARCHAR(20),  -- 'standard', 'year', 'letter', 'lang'
+    partition_value VARCHAR(50), -- null, '2020', 'A', 'zh-CN'
+    page_number INTEGER DEFAULT 0,
+    results_count INTEGER,
+    success BOOLEAN DEFAULT TRUE,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Files Modified:**
+- `backend/app/services/job_worker.py` - Fixed callback return, added query logging
+- `backend/app/services/overflow_harvester.py` - Added resume state management, query logging
+- `backend/app/models.py` - Added HarvestQuery model
+- `backend/app/database.py` - Added migration for harvest_queries table
+- `backend/app/services/api_logger.py` - Added log_harvest_query() helper
+
+---
+
 ## 2025-12-22: Citation Search & Faceted Filtering
 
 **Commit:** `492fa3e` on `main`
