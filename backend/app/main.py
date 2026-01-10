@@ -756,7 +756,11 @@ async def list_dossiers(
 ):
     """List all dossiers, optionally filtered by collection"""
     # Get paper counts grouped by dossier in one query (avoids N+1)
-    counts_query = select(Paper.dossier_id, func.count(Paper.id).label('count')).group_by(Paper.dossier_id)
+    # Filter by collection_id when specified to only count papers in that collection
+    counts_query = select(Paper.dossier_id, func.count(Paper.id).label('count'))
+    if collection_id is not None:
+        counts_query = counts_query.where(Paper.collection_id == collection_id)
+    counts_query = counts_query.where(Paper.deleted_at.is_(None)).group_by(Paper.dossier_id)
     counts_result = await db.execute(counts_query)
     paper_counts = {row.dossier_id: row.count for row in counts_result}
 

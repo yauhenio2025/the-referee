@@ -8,13 +8,21 @@ import { useToast } from './Toast'
  * Collection Detail - Shows papers organized by dossiers
  * Power-user friendly with keyboard shortcuts and drag-drop
  */
-export default function CollectionDetail({ collectionId, onBack }) {
+export default function CollectionDetail({ collectionId, initialDossier = null, onBack, onDossierChange }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const toast = useToast()
   const [refreshBatchId, setRefreshBatchId] = useState(null)
   const [refreshProgress, setRefreshProgress] = useState(null)
-  const [selectedDossier, setSelectedDossier] = useState(null) // null = all papers, 'unassigned' = no dossier
+  const [selectedDossier, setSelectedDossierState] = useState(initialDossier) // null = all papers, 'unassigned' = no dossier
+  const setSelectedDossier = (dossierId) => {
+    setSelectedDossierState(dossierId)
+    onDossierChange?.(dossierId)
+  }
+  // Sync state when URL changes (browser back/forward)
+  useEffect(() => {
+    setSelectedDossierState(initialDossier)
+  }, [initialDossier])
   const [showCreateDossier, setShowCreateDossier] = useState(false)
   const [newDossierName, setNewDossierName] = useState('')
   const [editingDossier, setEditingDossier] = useState(null)

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { api } from './lib/api'
 import './App.css'
 
@@ -265,12 +265,28 @@ function PaperCitationsRoute({ selectedPaper, setSelectedPaper, onBack }) {
 // Route component for collection detail
 function CollectionDetailRoute() {
   const { collectionId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+
+  // Parse dossier from query param: ?dossier=5 or ?dossier=unassigned
+  const dossierParam = searchParams.get('dossier')
+  const initialDossier = dossierParam === 'unassigned'
+    ? 'unassigned'
+    : dossierParam
+      ? parseInt(dossierParam)
+      : null
 
   return (
     <CollectionDetail
       collectionId={parseInt(collectionId)}
+      initialDossier={initialDossier}
       onBack={() => navigate('/collections')}
+      onDossierChange={(dossierId) => {
+        const url = dossierId === null
+          ? `/collections/${collectionId}`
+          : `/collections/${collectionId}?dossier=${dossierId}`
+        navigate(url, { replace: true })
+      }}
     />
   )
 }
