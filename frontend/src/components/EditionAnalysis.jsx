@@ -109,10 +109,13 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
     )
   }
 
-  const runs = analysisData?.runs || []
-  const currentRun = runDetails || (runs.length > 0 ? runs[0] : null)
-  const missingEditions = currentRun?.missing_editions || []
-  const linkedWorks = currentRun?.linked_works || []
+  // API returns single 'run' object, convert to array for history display
+  const runs = analysisData?.run ? [analysisData.run] : []
+  const currentRun = runDetails || analysisData?.run || null
+  // Works and missing editions come from the top-level response, not the run
+  const linkedWorks = analysisData?.works || []
+  // Flatten missing editions from all works
+  const missingEditions = linkedWorks.flatMap(w => w.missing_editions || [])
 
   return (
     <div className="edition-analysis">
@@ -200,16 +203,16 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
               <>
                 <div className="stats-grid">
                   <div className="stat-card">
-                    <span className="stat-value">{currentRun.works_found || 0}</span>
-                    <span className="stat-label">Works Found</span>
+                    <span className="stat-value">{currentRun.works_identified || 0}</span>
+                    <span className="stat-label">Works Identified</span>
                   </div>
                   <div className="stat-card">
-                    <span className="stat-value">{currentRun.editions_linked || 0}</span>
+                    <span className="stat-value">{currentRun.links_created || 0}</span>
                     <span className="stat-label">Editions Linked</span>
                   </div>
                   <div className="stat-card warning">
-                    <span className="stat-value">{currentRun.gaps_identified || 0}</span>
-                    <span className="stat-label">Gaps Identified</span>
+                    <span className="stat-value">{currentRun.gaps_found || 0}</span>
+                    <span className="stat-label">Gaps Found</span>
                   </div>
                   <div className="stat-card">
                     <span className="stat-value">{currentRun.jobs_created || 0}</span>
@@ -245,21 +248,19 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
                     <h3>Gap Summary</h3>
                     <div className="gap-types">
                       <div className="gap-type">
-                        <span className="type-label">Missing Translations:</span>
+                        <span className="type-label">Missing Editions:</span>
+                        <span className="type-count">{missingEditions.length}</span>
+                      </div>
+                      <div className="gap-type">
+                        <span className="type-label">Pending:</span>
                         <span className="type-count">
-                          {missingEditions.filter(e => e.gap_type === 'translation').length}
+                          {missingEditions.filter(e => e.status === 'pending').length}
                         </span>
                       </div>
                       <div className="gap-type">
-                        <span className="type-label">Missing Major Works:</span>
+                        <span className="type-label">Jobs Created:</span>
                         <span className="type-count">
-                          {missingEditions.filter(e => e.gap_type === 'major_work').length}
-                        </span>
-                      </div>
-                      <div className="gap-type">
-                        <span className="type-label">Other Gaps:</span>
-                        <span className="type-count">
-                          {missingEditions.filter(e => !['translation', 'major_work'].includes(e.gap_type)).length}
+                          {missingEditions.filter(e => e.status === 'job_created').length}
                         </span>
                       </div>
                     </div>
@@ -282,24 +283,25 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
                 {missingEditions.map((gap) => (
                   <div key={gap.id} className={`gap-card gap-${gap.status}`}>
                     <div className="gap-header">
-                      <span className={`gap-type-badge type-${gap.gap_type}`}>
-                        {gap.gap_type === 'translation' ? 'Translation' :
-                         gap.gap_type === 'major_work' ? 'Major Work' : 'Other'}
+                      <span className={`gap-type-badge type-${gap.source || 'unknown'}`}>
+                        {gap.source === 'llm_knowledge' ? 'LLM Found' :
+                         gap.source === 'web_search' ? 'Web Search' :
+                         gap.source || 'Missing Edition'}
                       </span>
                       <span className={`gap-status status-${gap.status}`}>
                         {gap.status}
                       </span>
                     </div>
                     <div className="gap-content">
-                      <h4 className="gap-title">{gap.expected_title}</h4>
-                      {gap.expected_language && (
-                        <span className="gap-language">Language: {gap.expected_language}</span>
+                      <h4 className="gap-title">{gap.expected_title || gap.work_canonical_title}</h4>
+                      {gap.language && (
+                        <span className="gap-language">Language: {gap.language}</span>
                       )}
                       {gap.expected_year && (
                         <span className="gap-year">Year: {gap.expected_year}</span>
                       )}
-                      {gap.reason && (
-                        <p className="gap-reason">{gap.reason}</p>
+                      {gap.notes && (
+                        <p className="gap-reason">{gap.notes}</p>
                       )}
                     </div>
                     <div className="gap-actions">
@@ -388,7 +390,7 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
                     <th>Original Language</th>
                     <th>Year</th>
                     <th>Editions</th>
-                    <th>Status</th>
+                    <th>Importance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -401,11 +403,11 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
                         )}
                       </td>
                       <td>{work.original_language || '-'}</td>
-                      <td>{work.publication_year || '-'}</td>
-                      <td className="number-cell">{work.edition_count || 0}</td>
+                      <td>{work.original_year || '-'}</td>
+                      <td className="number-cell">{work.editions?.length || 0}</td>
                       <td>
-                        <span className={`status-badge status-${work.status || 'unknown'}`}>
-                          {work.status || 'unknown'}
+                        <span className={`importance importance-${work.importance || 'minor'}`}>
+                          {work.importance || 'minor'}
                         </span>
                       </td>
                     </tr>
@@ -483,8 +485,8 @@ function EditionAnalysis({ dossierId, thinkerName, onClose }) {
                       </span>
                     </div>
                     <div className="run-stats">
-                      <span>{run.works_found || 0} works</span>
-                      <span>{run.gaps_identified || 0} gaps</span>
+                      <span>{run.works_identified || 0} works</span>
+                      <span>{run.gaps_found || 0} gaps</span>
                       <span>{run.jobs_created || 0} jobs</span>
                     </div>
                     <div className="run-date">

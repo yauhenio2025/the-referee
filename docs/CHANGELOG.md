@@ -33,6 +33,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **LLM call log context_json type error** - Fixed `context_json` being passed as dict instead of JSON string to database ([backend/app/services/edition_analysis_orchestrator.py:251](../backend/app/services/edition_analysis_orchestrator.py)). The `edition_analysis_llm_calls.context_json` column is `Text`, so the dict must be serialized with `json.dumps()`.
 - **Error handler session rollback** - Fixed error handler in `run_analysis` to rollback the session before updating status ([backend/app/services/edition_analysis_orchestrator.py:155-169](../backend/app/services/edition_analysis_orchestrator.py)). When an exception occurred during commit, the session was left in a "pending rollback" state, preventing the status from being updated to "failed" and blocking new runs.
 - **Cancel stuck runs endpoint** - Added `DELETE /api/edition-analysis-runs/{run_id}/cancel` endpoint to cancel/reset stuck runs ([backend/app/main.py:10680-10703](../backend/app/main.py))
+- **Frontend-API field name mismatches** - Fixed EditionAnalysis.jsx to use correct field names from API response ([frontend/src/components/EditionAnalysis.jsx](../frontend/src/components/EditionAnalysis.jsx)):
+  - `analysisData.runs` → `analysisData.run` (single object, wrapped in array for history display)
+  - `works_found` → `works_identified`, `editions_linked` → `links_created`, `gaps_identified` → `gaps_found`
+  - `currentRun.linked_works` → `analysisData.works`, `currentRun.missing_editions` → flattened from works
+  - `publication_year` → `original_year`, `edition_count` → `editions.length`
+  - Removed non-existent `gap_type` field usage, simplified gap display to use `source` field
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))
