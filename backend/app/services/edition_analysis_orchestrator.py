@@ -12,6 +12,7 @@ This is the main entry point called by the API routes.
 
 Created by RECONCILER to wire together Phase 1-5 services.
 """
+import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
@@ -247,7 +248,7 @@ class EditionAnalysisOrchestrator:
                 purpose='Bibliography research',
                 model=log_entry.model,
                 prompt=log_entry.prompt,
-                context_json=log_entry.context_json,
+                context_json=json.dumps(log_entry.context_json) if log_entry.context_json else None,
                 raw_response=log_entry.raw_response or '',
                 thinking_text=log_entry.thinking_text or '',
                 thinking_tokens=log_entry.thinking_tokens or 0,

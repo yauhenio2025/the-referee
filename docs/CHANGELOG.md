@@ -30,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Method name: `research_thinker` → `research_thinker_bibliography`
   - LLM call logs: Changed from dict-style `.get()` to dataclass attribute access
   - Bibliography return: Convert `ThinkerBibliography` dataclass to dict with `asdict()` for downstream phases
+- **LLM call log context_json type error** - Fixed `context_json` being passed as dict instead of JSON string to database ([backend/app/services/edition_analysis_orchestrator.py:251](../backend/app/services/edition_analysis_orchestrator.py)). The `edition_analysis_llm_calls.context_json` column is `Text`, so the dict must be serialized with `json.dumps()`.
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))
