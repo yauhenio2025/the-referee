@@ -10677,6 +10677,32 @@ async def start_edition_analysis(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.delete("/api/edition-analysis-runs/{run_id}/cancel")
+async def cancel_edition_analysis_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cancel/reset a stuck edition analysis run.
+
+    Sets the run status to 'cancelled' so a new run can be started.
+    """
+    result = await db.execute(
+        select(EditionAnalysisRun).where(EditionAnalysisRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    if run.status in ['completed', 'failed', 'cancelled']:
+        return {"message": f"Run {run_id} already in terminal state: {run.status}"}
+
+    run.status = "cancelled"
+    run.error = "Cancelled by user"
+    await db.commit()
+    return {"message": f"Run {run_id} cancelled successfully"}
+
+
 @app.get("/api/edition-analysis-runs/{run_id}", response_model=EditionAnalysisRunResponse)
 async def get_edition_analysis_run(
     run_id: int,

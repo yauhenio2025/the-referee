@@ -31,6 +31,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - LLM call logs: Changed from dict-style `.get()` to dataclass attribute access
   - Bibliography return: Convert `ThinkerBibliography` dataclass to dict with `asdict()` for downstream phases
 - **LLM call log context_json type error** - Fixed `context_json` being passed as dict instead of JSON string to database ([backend/app/services/edition_analysis_orchestrator.py:251](../backend/app/services/edition_analysis_orchestrator.py)). The `edition_analysis_llm_calls.context_json` column is `Text`, so the dict must be serialized with `json.dumps()`.
+- **Error handler session rollback** - Fixed error handler in `run_analysis` to rollback the session before updating status ([backend/app/services/edition_analysis_orchestrator.py:155-169](../backend/app/services/edition_analysis_orchestrator.py)). When an exception occurred during commit, the session was left in a "pending rollback" state, preventing the status from being updated to "failed" and blocking new runs.
+- **Cancel stuck runs endpoint** - Added `DELETE /api/edition-analysis-runs/{run_id}/cancel` endpoint to cancel/reset stuck runs ([backend/app/main.py:10680-10703](../backend/app/main.py))
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))

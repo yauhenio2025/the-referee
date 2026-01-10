@@ -154,10 +154,19 @@ class EditionAnalysisOrchestrator:
 
         except Exception as e:
             logger.error(f"Edition analysis run {run_id} failed: {e}", exc_info=True)
-            run.status = "failed"
-            run.error = str(e)
-            run.error_phase = run.phase
-            await self.db.commit()
+            # Rollback any pending transaction before updating status
+            # This handles the case where the exception occurred during a commit
+            await self.db.rollback()
+            # Re-fetch the run to ensure we have a fresh object
+            result = await self.db.execute(
+                select(EditionAnalysisRun).where(EditionAnalysisRun.id == run_id)
+            )
+            run = result.scalar_one_or_none()
+            if run:
+                run.status = "failed"
+                run.error = str(e)[:1000]  # Truncate long errors
+                run.error_phase = run.phase
+                await self.db.commit()
 
         return run
 
