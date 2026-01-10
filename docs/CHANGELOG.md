@@ -6,13 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- **Exhaustive Edition Analysis** - Multi-session implementation plan for thinker-based bibliographic analysis ([communications/MASTER_MEMO.md](../communications/MASTER_MEMO.md))
-  - Schema design for Work, WorkEdition, MissingEdition tables
-  - Bibliographic Research Agent using Claude Opus 4.5 with 32k thinking + web search
-  - Gap analysis to identify missing translations and major works
-  - Job generation to create scraper tasks for missing literature
+- **Exhaustive Edition Analysis** - Full implementation of thinker-based bibliographic analysis
+  - New tables: `works`, `work_editions`, `missing_editions`, `edition_analysis_runs`, `edition_analysis_llm_calls`
+  - 5 new services: inventory, bibliographic agent, edition linking, gap analysis, job generation
+  - Uses Claude Opus 4.5 with 32k thinking tokens + web search
+  - 10 API endpoints for triggering analysis, reviewing results, creating jobs
+  - Frontend component for analysis UI ([frontend/src/components/EditionAnalysis.jsx](../frontend/src/components/EditionAnalysis.jsx))
 
 ### Fixed
+- **Duplicate index creation error** - Removed `__table_args__` Index definitions from edition analysis models ([backend/app/models.py](../backend/app/models.py)). Indexes are created via raw SQL migrations with `IF NOT EXISTS` in database.py; SQLAlchemy's `create_all()` was attempting to create them again without `IF NOT EXISTS`.
+- **Closure scope error** - Initialize `effective_year_low` before callback definition in job_worker.py ([backend/app/services/job_worker.py:1370](../backend/app/services/job_worker.py))
 - Dossier paper counts now correctly filter by collection_id ([backend/app/main.py](../backend/app/main.py)) - Previously, dossiers showed paper counts that included papers from other collections
 - Dossier paper counts now exclude soft-deleted papers
 
