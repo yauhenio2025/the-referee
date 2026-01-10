@@ -1518,6 +1518,13 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
 
                     # Update job progress using fresh session
                     # Store progress details in params["progress_details"] (Job model has no 'details' column)
+                    # Build current query for UI visibility
+                    current_query = f"cites:{edition.scholar_id}"
+                    if current_harvest_year.get("year"):
+                        current_query += f" year:{current_harvest_year['year']}"
+                    elif effective_year_low:
+                        current_query += f" year_low:{effective_year_low}"
+
                     params["progress_details"] = {
                         "edition_index": i + 1,
                         "editions_total": total_editions,
@@ -1535,6 +1542,8 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         # CRITICAL: Include these for UI display (was missing, causing "Already Had: 0" bug)
                         "previously_harvested": total_previously_harvested,
                         "target_citations_total": total_target_citations,
+                        # Real-time query visibility
+                        "current_query": current_query,
                     }
                     await callback_db.execute(
                         update(Job)
@@ -1646,6 +1655,34 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                 # - Source-based subdivision with LLM (for letters > 1000)
                 harvest_start = total_new_citations
 
+                # Create progress callback for real-time query visibility
+                async def on_overflow_progress(partition_type: str, partition_key: str, query_str: str):
+                    """Update job progress with current query for UI visibility."""
+                    try:
+                        async with async_session() as progress_db:
+                            # Update just the progress_details with current query
+                            params["progress_details"] = {
+                                "stage": "harvesting",
+                                "harvest_mode": "author_letter",
+                                "edition_index": i + 1,
+                                "editions_total": total_editions,
+                                "edition_id": edition.id,
+                                "edition_title": edition.title[:80] if edition.title else "Unknown",
+                                "edition_citation_count": edition.citation_count,
+                                "citations_saved": total_new_citations,
+                                "current_partition_type": partition_type,
+                                "current_partition": partition_key,
+                                "current_query": query_str,
+                            }
+                            await progress_db.execute(
+                                update(Job)
+                                .where(Job.id == job.id)
+                                .values(params=json.dumps(params))
+                            )
+                            await progress_db.commit()
+                    except Exception as e:
+                        log_now(f"[PROGRESS] Failed to update query progress: {e}")
+
                 try:
                     harvest_result = await harvest_with_author_letter_strategy(
                         db=db,
@@ -1658,6 +1695,7 @@ async def process_extract_citations_job(job: Job, db: AsyncSession) -> Dict[str,
                         existing_scholar_ids=existing_scholar_ids,
                         on_page_complete=save_page_citations,
                         job_id=job.id,
+                        on_progress=on_overflow_progress,
                     )
 
                     # Log harvest results

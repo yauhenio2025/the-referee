@@ -241,6 +241,9 @@ export default function JobQueue() {
                           {details.stage === 'harvesting' && details.harvest_mode === 'standard' && (
                             <span className="stage-badge stage-std">📥 Standard Harvest</span>
                           )}
+                          {details.stage === 'harvesting' && details.harvest_mode === 'author_letter' && (
+                            <span className="stage-badge stage-author-letter">🔤 Author-Letter Harvest</span>
+                          )}
                           {details.year_harvest_strategy === 'partition' && (
                             <span className="strategy-badge">⚡ Partition Mode</span>
                           )}
@@ -286,6 +289,28 @@ export default function JobQueue() {
                             {details.year_harvest_strategy === 'partition' && (
                               <span className="partition-note">(using partition strategy)</span>
                             )}
+                          </div>
+                        )}
+
+                        {/* Current Query (for author-letter or standard mode) */}
+                        {details.current_query && (
+                          <div className="current-query-row">
+                            <span className="query-label">
+                              {details.harvest_mode === 'author_letter' ? (
+                                <>
+                                  🔎 Query
+                                  {details.current_partition_type && (
+                                    <span className="partition-badge">
+                                      {details.current_partition_type === 'letter' ? '🔤' : '🌐'}
+                                      {details.current_partition}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>🔎 Current Query</>
+                              )}
+                            </span>
+                            <code className="query-string">{details.current_query}</code>
                           </div>
                         )}
 

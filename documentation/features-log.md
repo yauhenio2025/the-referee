@@ -4,6 +4,50 @@ A chronological log of major features introduced to the project.
 
 ---
 
+## 2026-01-10: Real-Time Query Visibility in Job Queue
+
+**Description:** Added real-time visibility of Google Scholar queries being executed during harvesting. Users can now monitor whether harvesting is using year-based, author-letter, or standard strategies.
+
+**Key Features:**
+
+### Current Query Display
+- Shows the actual Google Scholar query string being executed (e.g., `cites:ABC123 author:a lang:en`)
+- Displayed in monospace font for easy reading
+- Updates in real-time as harvesting progresses
+
+### Partition Information
+- For author-letter mode: shows partition type (letter/lang) and current partition key
+- Visual badges indicate partition type
+
+### Author-Letter Stage Badge
+- New purple stage badge for Author-Letter Harvest mode
+- Distinguishes between Standard, Year-by-Year, and Author-Letter strategies
+
+**Technical Implementation:**
+
+### Backend - Progress Callbacks
+- Added `on_progress` callback parameter to `harvest_with_author_letter_strategy()`
+- Added `on_progress` callback parameter to `harvest_query_partition()`
+- Added `on_progress` callback parameter to `harvest_letter_with_subdivision()`
+- Progress callback reports `(partition_type, partition_key, query_string)` before each harvest begins
+
+### Job Worker Integration
+- `on_overflow_progress` callback updates job `params.progress_details` with current query
+- Standard harvest also reports `current_query` in progress_details
+
+### Frontend - JobQueue.jsx
+- New `current-query-row` component displays the query with partition badge
+- New `stage-author-letter` stage badge for author-letter harvest mode
+- CSS styling with green border for query visibility
+
+**Files Modified:**
+- `backend/app/services/overflow_harvester.py` - Added on_progress callbacks throughout harvest chain
+- `backend/app/services/job_worker.py` - Added on_overflow_progress callback, current_query to progress_details
+- `frontend/src/components/JobQueue.jsx` - Added current query display and author-letter badge
+- `frontend/src/App.css` - Added styles for current-query-row, query-string, partition-badge
+
+---
+
 ## 2026-01-10: Citation Harvesting Audit & Critical Fixes
 
 **Description:** Thorough audit of the citation harvesting system revealed and fixed three critical issues affecting letter-based partitioning, resume logic, and query traceability.

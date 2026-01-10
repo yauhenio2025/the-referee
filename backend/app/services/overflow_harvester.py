@@ -1582,6 +1582,7 @@ async def harvest_query_partition(
     on_page_complete: Callable,
     expected_count: int,
     partition_run: Optional[PartitionRun] = None,
+    on_progress: Callable[[str, str, str], None] = None,  # (partition_type, partition_key, query_string)
 ) -> Tuple[int, int]:
     """
     Harvest a single partition and track it in harvest_targets.
@@ -1618,6 +1619,23 @@ async def harvest_query_partition(
 
     log_now(f"  Harvesting partition '{partition_key}': {expected_count} expected")
 
+    # Build query string for progress reporting and logging
+    query_str = f"cites:{scholar_id}"
+    if additional_query:
+        query_str += f" {additional_query}"
+    if language_filter:
+        query_str += f" lang:{language_filter}"
+
+    # Determine partition type for display
+    partition_type = "letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang"
+
+    # Report progress BEFORE starting harvest (for real-time UI visibility)
+    if on_progress:
+        try:
+            await on_progress(partition_type, partition_key, query_str)
+        except Exception as e:
+            log_now(f"  Warning: on_progress callback failed: {e}")
+
     # Track pages
     pages_succeeded = 0
     pages_failed = 0
@@ -1644,16 +1662,11 @@ async def harvest_query_partition(
         pages_failed = result.get("pages_failed", 0)
         actual_count = result.get("totalResults", 0)
 
-        # Log harvest query for traceability
-        query_str = f"cites:{scholar_id}"
-        if additional_query:
-            query_str += f" {additional_query}"
-        if language_filter:
-            query_str += f" lang:{language_filter}"
+        # Log harvest query for traceability (query_str already built above)
         asyncio.create_task(log_harvest_query(
             edition_id=edition_id,
             query_string=query_str,
-            partition_type="letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang",
+            partition_type=partition_type,
             partition_value=partition_key,
             results_count=actual_count,
             success=True,
@@ -1673,14 +1686,11 @@ async def harvest_query_partition(
 
     except Exception as e:
         log_now(f"  Partition '{partition_key}' FAILED: {e}", "error")
-        # Log failed harvest query
-        query_str = f"cites:{scholar_id}"
-        if additional_query:
-            query_str += f" {additional_query}"
+        # Log failed harvest query (query_str and partition_type already built above)
         asyncio.create_task(log_harvest_query(
             edition_id=edition_id,
             query_string=query_str,
-            partition_type="letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang",
+            partition_type=partition_type,
             partition_value=partition_key,
             success=False,
             error_message=str(e),
@@ -1778,6 +1788,7 @@ async def harvest_letter_with_subdivision(
     existing_scholar_ids: Set[str],
     on_page_complete: Callable,
     partition_run: Optional[PartitionRun] = None,
+    on_progress: Callable[[str, str, str], None] = None,
 ) -> int:
     """
     Harvest a letter partition that has > 1000 results using source-based subdivision.
@@ -1856,6 +1867,7 @@ async def harvest_letter_with_subdivision(
             on_page_complete=on_page_complete,
             expected_count=pool_a_count,
             partition_run=partition_run,
+            on_progress=on_progress,
         )
         total_new += new
         await asyncio.sleep(3)
@@ -1884,6 +1896,7 @@ async def harvest_letter_with_subdivision(
             on_page_complete=on_page_complete,
             expected_count=pool_b_count,
             partition_run=partition_run,
+            on_progress=on_progress,
         )
         total_new += new
     elif pool_b_count >= 1000:
@@ -1903,6 +1916,7 @@ async def harvest_letter_with_subdivision(
             on_page_complete=on_page_complete,
             expected_count=min(pool_b_count, 1000),
             partition_run=partition_run,
+            on_progress=on_progress,
         )
         total_new += new
 
@@ -1921,6 +1935,7 @@ async def harvest_with_author_letter_strategy(
     on_page_complete: Callable,
     job_id: Optional[int] = None,
     language_filter: str = None,
+    on_progress: Callable[[str, str, str], None] = None,  # (partition_type, partition_key, query_string)
 ) -> Dict[str, Any]:
     """
     MAIN ENTRY POINT: Harvest citations using author-letter partitioning strategy.
@@ -2027,6 +2042,7 @@ async def harvest_with_author_letter_strategy(
             on_page_complete=on_page_complete,
             expected_count=total_citation_count,
             partition_run=partition_run,
+            on_progress=on_progress,
         )
         await mark_partition_complete("_all", new)
         stats["total_harvested"] = new
@@ -2072,6 +2088,7 @@ async def harvest_with_author_letter_strategy(
                     on_page_complete=on_page_complete,
                     expected_count=lang_count,
                     partition_run=partition_run,
+                    on_progress=on_progress,
                 )
                 await mark_partition_complete(partition_key, new)
                 non_english_harvested += new
@@ -2110,6 +2127,7 @@ async def harvest_with_author_letter_strategy(
             on_page_complete=on_page_complete,
             expected_count=english_count,
             partition_run=partition_run,
+            on_progress=on_progress,
         )
         await mark_partition_complete("lang_en", new)
         stats["english_harvested"] = new
@@ -2153,6 +2171,7 @@ async def harvest_with_author_letter_strategy(
                     on_page_complete=on_page_complete,
                     expected_count=no_letter_count,
                     partition_run=partition_run,
+                    on_progress=on_progress,
                 )
                 await mark_partition_complete("_", new)
                 english_harvested += new
@@ -2196,6 +2215,7 @@ async def harvest_with_author_letter_strategy(
                 on_page_complete=on_page_complete,
                 expected_count=letter_count,
                 partition_run=partition_run,
+                on_progress=on_progress,
             )
             await mark_partition_complete(letter, new)
             english_harvested += new
@@ -2214,6 +2234,7 @@ async def harvest_with_author_letter_strategy(
                 existing_scholar_ids=existing_scholar_ids,
                 on_page_complete=on_page_complete,
                 partition_run=partition_run,
+                on_progress=on_progress,
             )
             await mark_partition_complete(letter, new)
             english_harvested += new
