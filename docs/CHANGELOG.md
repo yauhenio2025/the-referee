@@ -12,12 +12,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Uses Claude Opus 4.5 with 32k thinking tokens + web search
   - 10 API endpoints for triggering analysis, reviewing results, creating jobs
   - Frontend component for analysis UI ([frontend/src/components/EditionAnalysis.jsx](../frontend/src/components/EditionAnalysis.jsx))
+- **Edition Analysis UI Integration** - Added "Analyze Editions" button to dossier toolbar in CollectionDetail ([frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx)) with modal rendering and CSS styles for `.modal-content` and `.modal-large` ([frontend/src/App.css](../frontend/src/App.css))
 
 ### Fixed
 - **Duplicate index creation error** - Removed `__table_args__` Index definitions from edition analysis models ([backend/app/models.py](../backend/app/models.py)). Indexes are created via raw SQL migrations with `IF NOT EXISTS` in database.py; SQLAlchemy's `create_all()` was attempting to create them again without `IF NOT EXISTS`.
 - **Closure scope error** - Initialize `effective_year_low` before callback definition in job_worker.py ([backend/app/services/job_worker.py:1370](../backend/app/services/job_worker.py))
 - Dossier paper counts now correctly filter by collection_id ([backend/app/main.py](../backend/app/main.py)) - Previously, dossiers showed paper counts that included papers from other collections
 - Dossier paper counts now exclude soft-deleted papers
+- **Pydantic validation error on edition analysis endpoint** - Fixed response schema mismatches in `EditionAnalysisResultResponse` and `WorkWithEditionsResponse` ([backend/app/schemas.py](../backend/app/schemas.py)). Made `run` field Optional, added missing fields (`dossier_id`, `thinker_name`, `pending_gaps`), renamed `total_editions_found` to `total_editions`, flattened work fields in `WorkWithEditionsResponse`.
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))
