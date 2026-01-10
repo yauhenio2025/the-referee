@@ -1164,10 +1164,8 @@ class Work(Base):
         "MissingEdition", back_populates="work", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        Index("ix_works_thinker_title", "thinker_name", "canonical_title", unique=True),
-        Index("ix_works_thinker", "thinker_name"),
-    )
+    # Note: Indexes created via raw SQL migrations in database.py with IF NOT EXISTS
+    # Do not define __table_args__ indexes here to avoid duplicate creation errors
 
 
 class WorkEdition(Base):
@@ -1207,14 +1205,8 @@ class WorkEdition(Base):
     # Relationships
     work: Mapped["Work"] = relationship("Work", back_populates="editions")
 
-    __table_args__ = (
-        # A specific edition can only be linked to one work
-        Index("ix_work_editions_edition_unique", "edition_id", unique=True, postgresql_where="edition_id IS NOT NULL"),
-        # A specific paper can only be linked to one work
-        Index("ix_work_editions_paper_unique", "paper_id", unique=True, postgresql_where="paper_id IS NOT NULL"),
-        Index("ix_work_editions_work", "work_id"),
-        Index("ix_work_editions_language", "work_id", "language"),
-    )
+    # Note: Indexes created via raw SQL migrations in database.py with IF NOT EXISTS
+    # Do not define __table_args__ indexes here to avoid duplicate creation errors
 
 
 class MissingEdition(Base):
@@ -1261,12 +1253,8 @@ class MissingEdition(Base):
     # Relationships
     work: Mapped["Work"] = relationship("Work", back_populates="missing_editions")
 
-    __table_args__ = (
-        Index("ix_missing_editions_work", "work_id"),
-        Index("ix_missing_editions_status", "status"),
-        Index("ix_missing_editions_priority", "priority"),
-        Index("ix_missing_editions_work_lang", "work_id", "language", unique=True),
-    )
+    # Note: Indexes created via raw SQL migrations in database.py with IF NOT EXISTS
+    # Do not define __table_args__ indexes here to avoid duplicate creation errors
 
 
 class EditionAnalysisRun(Base):
@@ -1329,10 +1317,8 @@ class EditionAnalysisRun(Base):
         "EditionAnalysisLLMCall", back_populates="run", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        Index("ix_edition_analysis_runs_dossier", "dossier_id"),
-        Index("ix_edition_analysis_runs_status", "status"),
-    )
+    # Note: Indexes created via raw SQL migrations in database.py with IF NOT EXISTS
+    # Do not define __table_args__ indexes here to avoid duplicate creation errors
 
 
 class EditionAnalysisLLMCall(Base):
@@ -1394,7 +1380,5 @@ class EditionAnalysisLLMCall(Base):
     # Relationships
     run: Mapped["EditionAnalysisRun"] = relationship("EditionAnalysisRun", back_populates="llm_calls")
 
-    __table_args__ = (
-        Index("ix_edition_analysis_llm_calls_run", "run_id"),
-        Index("ix_edition_analysis_llm_calls_phase", "phase"),
-    )
+    # Note: Indexes created via raw SQL migrations in database.py with IF NOT EXISTS
+    # Do not define __table_args__ indexes here to avoid duplicate creation errors
