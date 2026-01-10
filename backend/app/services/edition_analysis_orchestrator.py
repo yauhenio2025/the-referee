@@ -13,6 +13,7 @@ This is the main entry point called by the API routes.
 Created by RECONCILER to wire together Phase 1-5 services.
 """
 import logging
+from dataclasses import asdict
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -235,43 +236,45 @@ class EditionAnalysisOrchestrator:
         agent = BibliographicAgent()
 
         # Research bibliography
-        bibliography = await agent.research_thinker(run.thinker_name)
+        bibliography = await agent.research_thinker_bibliography(run.thinker_name)
 
-        # Store LLM call logs
-        for log_entry in agent.get_llm_calls():
+        # Store LLM call logs (log_entry is LLMCallLog dataclass, not dict)
+        for i, log_entry in enumerate(agent.get_llm_calls(), start=1):
             llm_call = EditionAnalysisLLMCall(
                 run_id=run.id,
-                phase="bibliographic_research",
-                call_number=log_entry.get('call_number', 1),
-                purpose=log_entry.get('purpose', 'Bibliography research'),
-                model=log_entry.get('model', 'claude-opus-4-5-20251101'),
-                prompt=log_entry.get('prompt', ''),
-                context_json=log_entry.get('context_json'),
-                raw_response=log_entry.get('response', ''),
-                thinking_text=log_entry.get('thinking', ''),
-                thinking_tokens=log_entry.get('thinking_tokens', 0),
-                input_tokens=log_entry.get('input_tokens', 0),
-                output_tokens=log_entry.get('output_tokens', 0),
-                web_search_used=log_entry.get('web_search_used', False),
-                latency_ms=log_entry.get('latency_ms', 0),
-                status='completed',
+                phase=log_entry.phase,
+                call_number=i,
+                purpose='Bibliography research',
+                model=log_entry.model,
+                prompt=log_entry.prompt,
+                context_json=log_entry.context_json,
+                raw_response=log_entry.raw_response or '',
+                thinking_text=log_entry.thinking_text or '',
+                thinking_tokens=log_entry.thinking_tokens or 0,
+                input_tokens=log_entry.input_tokens or 0,
+                output_tokens=log_entry.output_tokens or 0,
+                web_search_used=log_entry.web_search_used,
+                latency_ms=log_entry.latency_ms or 0,
+                status=log_entry.status,
             )
             self.db.add(llm_call)
 
             # Update aggregate stats
             run.llm_calls_count += 1
-            run.total_input_tokens += log_entry.get('input_tokens', 0)
-            run.total_output_tokens += log_entry.get('output_tokens', 0)
-            run.thinking_tokens += log_entry.get('thinking_tokens', 0)
-            if log_entry.get('web_search_used', False):
+            run.total_input_tokens += log_entry.input_tokens or 0
+            run.total_output_tokens += log_entry.output_tokens or 0
+            run.thinking_tokens += log_entry.thinking_tokens or 0
+            if log_entry.web_search_used:
                 run.web_searches_count += 1
 
-        run.works_identified = len(bibliography.get('major_works', []))
+        # bibliography is ThinkerBibliography dataclass
+        run.works_identified = len(bibliography.major_works)
         run.phase_progress = 1.0
         await self.db.commit()
 
         logger.info(f"Bibliographic phase complete: {run.works_identified} major works identified")
-        return bibliography
+        # Convert ThinkerBibliography dataclass to dict for downstream phases
+        return asdict(bibliography)
 
     async def _run_linking_phase(
         self,

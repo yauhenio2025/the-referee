@@ -26,6 +26,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - `EditionInfo.detected_language` → `language`
   - `TitleCluster.cluster_id/representative_title/titles/paper_ids` → `canonical_title/papers/editions/years`
   - `DossierInventory.language_distribution/total_papers/total_editions` → `languages_detected/paper_count/edition_count`
+- **Bibliographic phase method and type mismatches** - Fixed `_run_bibliographic_phase` ([backend/app/services/edition_analysis_orchestrator.py:238-277](../backend/app/services/edition_analysis_orchestrator.py)):
+  - Method name: `research_thinker` → `research_thinker_bibliography`
+  - LLM call logs: Changed from dict-style `.get()` to dataclass attribute access
+  - Bibliography return: Convert `ThinkerBibliography` dataclass to dict with `asdict()` for downstream phases
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))
