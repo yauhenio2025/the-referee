@@ -587,9 +587,18 @@ async def get_collection(collection_id: int, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Get papers in collection (excluding soft-deleted)
+    # Include papers where either:
+    # 1. Paper.collection_id matches, OR
+    # 2. Paper is in a dossier that belongs to this collection
     papers_result = await db.execute(
         select(Paper)
-        .where(Paper.collection_id == collection_id)
+        .outerjoin(Dossier, Paper.dossier_id == Dossier.id)
+        .where(
+            or_(
+                Paper.collection_id == collection_id,
+                Dossier.collection_id == collection_id
+            )
+        )
         .where(Paper.deleted_at.is_(None))
         .order_by(Paper.created_at.desc())
     )
@@ -756,11 +765,13 @@ async def list_dossiers(
 ):
     """List all dossiers, optionally filtered by collection"""
     # Get paper counts grouped by dossier in one query (avoids N+1)
-    # Filter by collection_id when specified to only count papers in that collection
-    counts_query = select(Paper.dossier_id, func.count(Paper.id).label('count'))
-    if collection_id is not None:
-        counts_query = counts_query.where(Paper.collection_id == collection_id)
-    counts_query = counts_query.where(Paper.deleted_at.is_(None)).group_by(Paper.dossier_id)
+    # Count papers by dossier_id, excluding soft-deleted papers
+    counts_query = (
+        select(Paper.dossier_id, func.count(Paper.id).label('count'))
+        .where(Paper.dossier_id.isnot(None))
+        .where(Paper.deleted_at.is_(None))
+        .group_by(Paper.dossier_id)
+    )
     counts_result = await db.execute(counts_query)
     paper_counts = {row.dossier_id: row.count for row in counts_result}
 
