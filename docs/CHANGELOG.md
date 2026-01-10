@@ -21,6 +21,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Dossier paper counts now exclude soft-deleted papers
 - **Pydantic validation error on edition analysis endpoint** - Fixed response schema mismatches in `EditionAnalysisResultResponse` and `WorkWithEditionsResponse` ([backend/app/schemas.py](../backend/app/schemas.py)). Made `run` field Optional, added missing fields (`dossier_id`, `thinker_name`, `pending_gaps`), renamed `total_editions_found` to `total_editions`, flattened work fields in `WorkWithEditionsResponse`.
 - **DossierInventory attribute mismatch** - Fixed `_run_inventory_phase` in edition_analysis_orchestrator.py to use `paper_count` and `edition_count` instead of non-existent `total_papers` and `total_editions` ([backend/app/services/edition_analysis_orchestrator.py:180](../backend/app/services/edition_analysis_orchestrator.py))
+- **Inventory dict conversion attribute mismatches** - Fixed multiple attribute name mismatches in `_run_inventory_phase` dict conversion ([backend/app/services/edition_analysis_orchestrator.py:187-221](../backend/app/services/edition_analysis_orchestrator.py)):
+  - `PaperInfo.detected_language` → `language`
+  - `EditionInfo.detected_language` → `language`
+  - `TitleCluster.cluster_id/representative_title/titles/paper_ids` → `canonical_title/papers/editions/years`
+  - `DossierInventory.language_distribution/total_papers/total_editions` → `languages_detected/paper_count/edition_count`
 
 ### Added
 - Stable URLs for dossiers in collection view ([frontend/src/App.jsx](../frontend/src/App.jsx), [frontend/src/components/CollectionDetail.jsx](../frontend/src/components/CollectionDetail.jsx))

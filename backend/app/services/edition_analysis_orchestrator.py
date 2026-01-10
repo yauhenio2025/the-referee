@@ -191,14 +191,14 @@ class EditionAnalysisOrchestrator:
                 {
                     'paper_id': p.paper_id,
                     'title': p.title,
-                    'detected_language': p.detected_language,
+                    'language': p.language,
                     'authors': p.authors,
                     'year': p.year,
                     'editions': [
                         {
                             'edition_id': e.edition_id,
                             'title': e.title,
-                            'detected_language': e.detected_language,
+                            'language': e.language,
                         }
                         for e in p.editions
                     ] if hasattr(p, 'editions') else []
@@ -207,17 +207,17 @@ class EditionAnalysisOrchestrator:
             ],
             'title_clusters': [
                 {
-                    'cluster_id': c.cluster_id,
-                    'representative_title': c.representative_title,
-                    'titles': c.titles,
-                    'paper_ids': c.paper_ids,
+                    'canonical_title': c.canonical_title,
+                    'papers': c.papers,
+                    'editions': c.editions,
                     'languages': c.languages,
+                    'years': c.years,
                 }
                 for c in inventory.title_clusters
             ] if inventory.title_clusters else [],
-            'language_distribution': inventory.language_distribution,
-            'total_papers': inventory.total_papers,
-            'total_editions': inventory.total_editions,
+            'languages_detected': inventory.languages_detected,
+            'paper_count': inventory.paper_count,
+            'edition_count': inventory.edition_count,
         }
 
     async def _run_bibliographic_phase(self, run: EditionAnalysisRun) -> Dict[str, Any]:
