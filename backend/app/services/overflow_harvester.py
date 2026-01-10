@@ -1620,11 +1620,14 @@ async def harvest_query_partition(
     log_now(f"  Harvesting partition '{partition_key}': {expected_count} expected")
 
     # Build query string for progress reporting and logging
+    # Note: language_filter is a URL param (&lr=lang_en), not query syntax
     query_str = f"cites:{scholar_id}"
     if additional_query:
         query_str += f" {additional_query}"
     if language_filter:
-        query_str += f" lang:{language_filter}"
+        # Show as filter indicator, not query syntax (GS uses URL param for lang)
+        lang_code = language_filter.replace("lang_", "") if language_filter.startswith("lang_") else language_filter
+        query_str += f" [lr={lang_code}]"
 
     # Determine partition type for display
     partition_type = "letter" if partition_key in "abcdefghijklmnopqrstuvwxyz_" else "lang"
